@@ -80,7 +80,11 @@ export class ShippingProviderService {
     // account (BMPL-161): the OWNER membership is born with the profile, and
     // the member/org boundary rule below would otherwise be violated at birth —
     // a test account would create a REAL org and hold real work tomorrow.
-    // On update the flag is untouched (admin flips it thereafter, as before).
+    // On update the flag is untouched, and unlike the passenger sibling
+    // (admin-passenger.controller.ts:71), there is NO admin endpoint anywhere
+    // that revisits isTest for a ShippingProviderProfile once created. Create
+    // stamps it from the creating user and nothing ever repairs it after —
+    // the first save is irreversible.
     const creator = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
     const p = await this.prisma.$transaction(async (tx) => {
       const profile = await tx.shippingProviderProfile.upsert({

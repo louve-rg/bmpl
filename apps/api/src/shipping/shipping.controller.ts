@@ -351,6 +351,27 @@ export class ShippingController {
     return this.shipments.quote(dto, { isTest: me?.isTest ?? false });
   }
 
+  /**
+   * The hub picker, scoped to the signed-in caller's own side
+   * (TERM-SIM-NETWORK-INVISIBLE). `GET /shipping/hubs` is the anonymous,
+   * real-only list and stays that way; this is the one the booking form
+   * should use once signed in, so a test account can actually pick a hub
+   * that its own quote/booking can reach. `isTest` is read from the caller's
+   * own account here, exactly like `quote` above — never a query param.
+   */
+  @Get('hubs/mine')
+  async hubsForMe(@CurrentUser() u: AuthContext) {
+    const me = await this.prisma.user.findUnique({ where: { id: u.userId }, select: { isTest: true } });
+    return this.network.hubsForAccount(me?.isTest ?? false);
+  }
+
+  /** Same scoping as `hubsForMe` above, for transport modes. */
+  @Get('modes/mine')
+  async modesForMe(@CurrentUser() u: AuthContext) {
+    const me = await this.prisma.user.findUnique({ where: { id: u.userId }, select: { isTest: true } });
+    return this.network.availableModes({ isTest: me?.isTest ?? false });
+  }
+
   @StrictThrottle()
   @Post()
   create(
