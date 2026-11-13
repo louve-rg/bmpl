@@ -6,7 +6,7 @@ import { AccessNotice } from '../../../../components/AccessNotice';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { AccountActions, RoleActions } from './RoleActions';
+import { AccountActions, RoleActions, TestFlagControl } from './RoleActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +18,7 @@ interface UserDetail {
   phone: string | null;
   district: string | null;
   status: string;
+  isTest: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;
   roles: Array<{ roleCode: RoleCode; status: string; statusReason: string | null }>;
@@ -61,6 +62,10 @@ export default async function UserDetailPage({ params }: { params: { id: string 
   const canRevokeRole = myPerms.includes('roles.revoke');
   const canSuspendAccount = myPerms.includes('users.suspend');
   const canRestoreAccount = myPerms.includes('users.restore');
+  // TERM-SIM-DESIGNATE: POST /admin/users/test-flag is gated on the same
+  // users.suspend permission as account suspend/restore above -- reusing
+  // canSuspendAccount rather than inventing a second read of the same grant.
+  const canSetTestFlag = canSuspendAccount;
 
   // Fetched only when the viewer actually holds wallet.read, same fail-closed
   // shape as the permission flags above: a 403 (or the permission simply
@@ -97,6 +102,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
         <div className="flex flex-col items-end gap-2">
           <StatusBadge status={u.status} />
           <AccountActions userId={u.id} status={u.status} canSuspend={canSuspendAccount} canRestore={canRestoreAccount} />
+          <TestFlagControl userId={u.id} isTest={u.isTest} canSetTestFlag={canSetTestFlag} />
         </div>
       </header>
 

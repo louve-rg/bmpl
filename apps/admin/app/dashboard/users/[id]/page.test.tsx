@@ -42,6 +42,7 @@ const USER = {
   phone: null,
   district: 'BELIZE',
   status: 'ACTIVE',
+  isTest: false,
   emailVerifiedAt: new Date().toISOString(),
   createdAt: new Date().toISOString(),
   roles: [],
