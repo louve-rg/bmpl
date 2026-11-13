@@ -8,11 +8,13 @@ import {
   jobSeekerExperienceSchema,
   jobSeekerLanguageSchema,
   jobSeekerSkillSchema,
+  jobSeekerWorkCategoriesSchema,
   resumeConfirmSchema,
   submitApplicationSchema,
   upsertJobSeekerProfileSchema,
   type ImagePresignInput,
   type JobReportInput,
+  type JobSeekerWorkCategoriesInput,
   type SubmitApplicationInput,
   type UpsertJobSeekerProfileInput,
 } from '@bmpl/validation';
@@ -49,6 +51,11 @@ export class JobSeekerController {
   @Put('profile')
   upsert(@CurrentUser() u: AuthContext, @Body(ZodBody(upsertJobSeekerProfileSchema)) b: UpsertJobSeekerProfileInput) {
     return this.seeker.upsertProfile(this.actor(u), b);
+  }
+
+  @Put('profile/work-categories')
+  setWorkCategories(@CurrentUser() u: AuthContext, @Body(ZodBody(jobSeekerWorkCategoriesSchema)) b: JobSeekerWorkCategoriesInput) {
+    return this.seeker.setWorkCategories(u.userId, b);
   }
 
   // ---- child collections ----
