@@ -1,7 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { api } from './api';
+import { useCallback, useEffect, useState } from 'react';
+import { api, type ApiError } from './api';
+
+/**
+ * MDF-720: capped exponential backoff, then a steady slow retry forever
+ * while mounted. Chosen over giving up after N attempts because a
+ * dashboard session is long-lived -- a transient blip (a cold-compile dev
+ * server, a brief network drop) should self-heal on its own the next time
+ * the interval fires, with nobody needing to reload the page to see their
+ * own workspace appear.
+ */
+const RETRY_DELAYS_MS = [1000, 3000, 9000, 30000];
+
+export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'error';
 
 /**
  * Whether the signed-in user has an active terminal company membership —
@@ -9,31 +21,72 @@ import { api } from './api';
  * one of them (TERM-11). Mirrors useCarrierApplicationStatus exactly:
  * fired unconditionally for every signed-in user, same as
  * `useUnreadMessages` — `GET /terminal/me` answers 403 for the overwhelming
- * majority who are not terminal staff. Best-effort: a failed fetch (403 or
- * otherwise) leaves the nav exactly as it was (false), same as having no
- * membership — a missing nav entry is a smaller problem than an error
- * banner in the sidebar. Exists only so the nav (DashboardNavList) can
- * surface a workspace that is otherwise reachable no other way; the
- * terminal workspace page itself reads `/terminal/me` again on its own
- * terms and does not depend on this hook for anything but visibility.
+ * majority who are not terminal staff.
+ *
+ * MDF-720: Jim's live run (`apps/web/e2e/mdf720-terminal-membership-
+ * loading-state.local-only.spec.ts`) proved this is a LOGIC defect, not a
+ * hung-request one -- a merely slow `GET /terminal/me` (not a broken one)
+ * hid a real MANAGER's nav link for the whole delay with no spinner
+ * anywhere, then the link correctly appeared once the fetch resolved. A
+ * failed request hid it forever with no error shown anywhere, ever. The
+ * root cause was collapsing every outcome into a single boolean that only
+ * ever flips `true` on success: pending, failed and "not a member" were
+ * all the identical, silent "false" to whoever was looking at the screen.
+ *
+ * The fix returns which of FOUR distinct outcomes is current, so the nav
+ * (DashboardNavList) can render something different for each:
+ *  - `loading`: the first check is still in flight. Render a visible
+ *    loading affordance, never the same blank state a non-member sees.
+ *  - `member`: the existing forced-visible override applies, unchanged.
+ *  - `not-member`: a real 403 -- the common, definitive answer. Hide,
+ *    exactly as before; this is the one case where hiding is correct.
+ *  - `error`: anything else (network failure, timeout, a 5xx) is NEVER
+ *    evidence of non-membership. Retries on a capped backoff in the
+ *    background (self-heals a transient blip with no action needed) while
+ *    also exposing `retry()` for a visible manual "try again" affordance,
+ *    so the failure is never silent the way it used to be.
+ *
+ * Exists only so the nav can surface a workspace that is otherwise
+ * reachable no other way; the terminal workspace page itself reads
+ * `/terminal/me` again on its own terms and does not depend on this hook
+ * for anything but visibility.
  */
-export function useTerminalMembership(): boolean {
-  const [isMember, setIsMember] = useState(false);
+export function useTerminalMembership(): { status: TerminalMembershipStatus; retry: () => void } {
+  const [status, setStatus] = useState<TerminalMembershipStatus>('loading');
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .get('/terminal/me')
-      .then(() => {
-        if (!cancelled) setIsMember(true);
-      })
-      .catch(() => {
-        /* silent — best-effort, see doc comment above; 403 is the common case */
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+
+    function check() {
+      api
+        .get('/terminal/me')
+        .then(() => {
+          if (!cancelled) setStatus('member');
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          if ((e as ApiError)?.status === 403) {
+            setStatus('not-member'); // definitive: stop retrying
+            return;
+          }
+          setStatus('error');
+          const delay = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
+          attempt += 1;
+          timer = setTimeout(check, delay);
+        });
+    }
+
+    check();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [retryToken]);
 
-  return isMember;
+  const retry = useCallback(() => setRetryToken((t) => t + 1), []);
+
+  return { status, retry };
 }

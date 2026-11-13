@@ -5,6 +5,7 @@ import type { MeView } from '../../lib/types';
 import { Card, PageHeader, StatusBadge } from '../../components/ui';
 import { ForYou } from '../../components/discovery/ForYou';
 import { VerifyEmailBanner } from '../../components/VerifyEmailBanner';
+import { TerminalWorkspaceBanner } from '../../components/dashboard/TerminalWorkspaceBanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,13 @@ export default async function DashboardHome() {
 
   return (
     <div className="mx-auto max-w-4xl">
+      {/* F-NAV: the terminal company member's own workspace link, ahead of
+          even the greeting -- a Manager landing here must not have to find
+          it below the fold in a collapsed nav group first. Renders nothing
+          for anyone else (TERM-11: terminal staff hold no account role, so
+          this can't be gated any other way than its own membership check). */}
+      <TerminalWorkspaceBanner />
+
       <PageHeader eyebrow={`Signed in as ${activeLabel}`} title={`Welcome, ${me.firstName}`} />
 
       {!me.emailVerified && <VerifyEmailBanner email={me.email} />}

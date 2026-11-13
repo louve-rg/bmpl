@@ -62,10 +62,13 @@ export function DashboardNavList({
   // TERM-11: terminal company staff hold no account role code at all, so
   // "Terminal" can never earn its way into visibleRoleGroups through
   // `requires` (deliberately empty, see dashboard-nav-items.ts) — this
-  // override is the ONLY way the group ever shows. Same unconditional-fetch,
-  // best-effort shape as useCarrierApplicationStatus above; independent of
-  // it otherwise.
-  const terminalForcedVisible = useTerminalMembership();
+  // override is the ONLY way the group ever shows. Same unconditional-fetch
+  // shape as useCarrierApplicationStatus above; independent of it otherwise.
+  // MDF-720: `status` is one of four distinct outcomes (loading/member/
+  // not-member/error), not a single boolean -- see the loading/error
+  // affordances rendered below the nav groups.
+  const { status: terminalStatus, retry: retryTerminalMembership } = useTerminalMembership();
+  const terminalForcedVisible = terminalStatus === 'member';
 
   const forceVisible = useMemo(() => {
     const s = new Set<string>();
@@ -91,6 +94,14 @@ export function DashboardNavList({
   function isOpen(group: { heading?: string; items: NavItem[] }): boolean {
     if (!group.heading) return true; // BASE_NAV: never collapsible
     if (group.heading in openOverrides) return openOverrides[group.heading]!;
+    // F-NAV: a terminal company member's ONLY route to their workspace is
+    // this group -- collapsed-by-default (the same rule every other group
+    // follows) left it undiscoverable below ~18 customer items unless the
+    // visitor happened to already be on a page inside it. Membership is the
+    // override, not the current page; a manual collapse (openOverrides,
+    // checked above) still wins; opening something else back doesn't close
+    // this one, same as any other group.
+    if (group.heading === 'Terminal' && terminalForcedVisible) return true;
     return groupHasActiveItem(group.items, pathname, hrefs);
   }
 
@@ -188,6 +199,27 @@ export function DashboardNavList({
           </div>
         );
       })}
+
+      {/* MDF-720: while membership is still unresolved or failed to
+          resolve, this must never look identical to "not a member" --
+          that silent collapse is the exact defect Jim's live run proved.
+          Rendered outside the groups loop since there is no "Terminal"
+          group to attach a heading badge to until membership is actually
+          confirmed. Nothing renders once `terminalStatus` settles to
+          'member' or 'not-member'. */}
+      {terminalStatus === 'loading' && (
+        <p data-testid="terminal-membership-loading" className="px-3 py-1.5 text-xs text-[color:var(--bmpl-text-muted)]">
+          Loading terminal access…
+        </p>
+      )}
+      {terminalStatus === 'error' && (
+        <div data-testid="terminal-membership-error" className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs text-amber-800">
+          <span>Something went wrong checking your terminal access.</span>
+          <button type="button" onClick={retryTerminalMembership} className="font-semibold underline">
+            Try again
+          </button>
+        </div>
+      )}
     </nav>
   );
 }
