@@ -70,6 +70,26 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  *    ('not-member', stop retrying); anything else is 'error' and retries
  *    automatically on a capped backoff (1s/3s/9s/30s, then steady 30s) in
  *    the background in addition to the manual button.
+ *
+ * All three assert on the test-ids directly (presence of the real one, not
+ * absence of a string) -- deliberately avoided getByText-based absence
+ * checks here, since asserting a positive element exists cannot pass for
+ * the wrong reason the way "no matching text anywhere" can. Loading/error
+ * are rendered OUTSIDE the collapsible "Terminal" group (confirmed in the
+ * same diff), so only the post-resolve "link is now present" assertion
+ * needs the group expanded -- the loading/error test-ids never do.
+ *
+ * FLOOR RULE (god, from Oscar's MDF-722 catch): a test for a defect that
+ * depends on intermediate render state is not credited until PROVEN to
+ * fail against the unfixed code, not just shown to pass against the fix --
+ * a test that cannot fail certifies the bug as fixed forever. The DELAYED
+ * case here is exactly that shape (the whole point is the 4s mid-flight
+ * state). Before any of these three flip from `test.fixme` to `test`,
+ * whoever runs them must: (1) run them as real tests against #694 with
+ * ONLY `use-terminal-membership.ts`'s fix reverted (old bare-boolean hook,
+ * new DashboardNavList) and confirm they fail -- the test-ids won't exist,
+ * so they should error/timeout, not silently pass; (2) restore the fix and
+ * confirm they pass. Only step (2) alone is not enough to credit this.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
