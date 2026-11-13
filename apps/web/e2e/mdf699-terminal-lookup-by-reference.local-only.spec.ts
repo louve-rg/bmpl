@@ -17,10 +17,31 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  * unknown reference, 403 for a real shipment that touches none of the
  * caller's hubs (confirmed by reading `ShipmentService.lookupForTerminal`
  * directly, not guessed). The three tests below that were `test.fixme`
- * are now real, against that exact contract. The UI half has NOT shipped
- * (Oscar/MDF-702/MDF-710) -- the one `GAP-PROOF:` test stays, because the
- * Terminal Workspace page still has no lookup control, and it now proves
- * ONLY that remaining gap, not the API one the header used to describe.
+ * are now real, against that exact contract.
+ *
+ * UPDATE (2026-11-13, #692): the UI half (Oscar/MDF-702 step 2) has also
+ * SHIPPED -- a "Lookup" tab on the Terminal Workspace page, consuming the
+ * exact endpoint above. Stanley has cleared #692 on substance; it is only
+ * BLOCKED from `main` by an unrelated red build (MDF-709 recipient spec),
+ * which Pam is fixing, so this is written against the real diff
+ * (`apps/web/app/dashboard/terminal/page.tsx` on PR #692) rather than
+ * guessed, ready to push the moment main is green. Settled facts from
+ * that diff, not assumptions: the tab is visible to EVERY member
+ * regardless of role (lookup is hub-scoped, not role-scoped -- do not
+ * assert MANAGER-only), and the two server refusals render VERBATIM, word
+ * for word: 404 -> "No shipment with that reference.", 403 -> "This
+ * shipment is not at one of your terminal locations." The former
+ * `GAP-PROOF:` UI-absence test is replaced below with real tests driving
+ * the real tab, per the exact moment this file's own header warned about.
+ *
+ * A SECOND, SEPARATE defect Stanley found in the same #692 diff, same
+ * class as MDF-720 (one fetch failing silently removes an unrelated
+ * capability): the entire tab bar -- Lookup included -- is gated behind
+ * `{rows && (...)}`, and `rows` is `/terminal/queue`'s own state. Lookup's
+ * data source (`/terminal/shipments/:reference`) has no dependency on the
+ * queue at all, so a queue fetch failure hides a capability that never
+ * needed it. One more `GAP-PROOF:` test below proves that live, using the
+ * same `page.route` intercept technique MDF-720's spec established.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -116,24 +137,6 @@ async function waitForWorkspaceLoaded(page: Page): Promise<void> {
     timeout: 15_000,
   });
 }
-
-test('GAP-PROOF: the Terminal Workspace has no lookup-by-reference control anywhere, and the queue endpoint has no query parameter to filter by', async ({ browser }) => {
-  test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
-  const { hubA } = await findHubs(adminPage);
-  const { email } = await createTerminalStaff(adminPage, 'Today', hubA.id);
-
-  const staffPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  await staffPage.goto(`${WEB}/dashboard/terminal`);
-  await waitForWorkspaceLoaded(staffPage);
-
-  await expect(staffPage.getByRole('textbox', { name: /reference|tracking|search|lookup/i }), 'a lookup control must not exist yet -- MDF-699 is the card to add it').toHaveCount(0);
-  await expect(staffPage.getByRole('button', { name: /search|look ?up/i }), 'no lookup button exists yet either').toHaveCount(0);
-
-  console.log('[MDF699-GAP] confirmed live: nothing on the Terminal Workspace page lets a clerk look anything up by reference.');
-});
 
 /** Books HUB_TO_DOOR (hub -> a Belize City door) via the real endpoint --
  * same sanctioned route-around mdf705's release-to-courier fixture already
@@ -248,4 +251,91 @@ test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the sa
 
   const direct = await getJson(staffPage, `/terminal/shipments/${encodeURIComponent(created.body.reference)}`);
   expect(direct.status, 'a DIRECT shipment touches no hub, so it must 403 the same way a wrong-terminal shipment does').toBe(403);
+});
+
+/** Opens the real "Lookup" tab (#692) and submits a reference through the
+ * real input/button, rather than the raw API -- this is the UI half, now
+ * that there is a UI to drive. */
+async function lookupViaTab(staffPage: Page, reference: string): Promise<void> {
+  await staffPage.getByRole('tab', { name: 'Lookup' }).click();
+  await staffPage.getByLabel('Shipment reference').fill(reference);
+  await staffPage.getByRole('button', { name: /look ?up/i }).click();
+}
+
+test('A terminal staff member can look up a reference at their own hub through the real Lookup tab and sees the detail rendered', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA } = await findHubs(adminPage);
+  // OPERATOR, deliberately: #692's own contract is hub-scoped, not
+  // role-scoped -- this is NOT a MANAGER-only screen, and using OPERATOR
+  // here is the live demonstration, not just a claim in a comment.
+  const { email } = await createTerminalStaff(adminPage, 'UiOwnHub', hubA.id);
+
+  const customerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699UiOwnHub ${stamp}`);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  await staffPage.goto(`${WEB}/dashboard/terminal`);
+  await waitForWorkspaceLoaded(staffPage);
+
+  await lookupViaTab(staffPage, reference);
+  await expect(staffPage.getByText(reference, { exact: false }), 'the real shipment detail must render for an OPERATOR, not just a MANAGER').toBeVisible({ timeout: 15_000 });
+  await expect(staffPage.getByText('Leg 1', { exact: false }), 'the leg list must render -- this is the detail payload rich enough for a counter conversation the card asked for').toBeVisible();
+  await expect(staffPage.getByText('Demo', { exact: true }), 'every shipment this spec books is isTest -- the T-7 Demo badge must render, never silently omitted').toBeVisible();
+});
+
+test('The Lookup tab shows the server\'s own refusal message verbatim, never a paraphrase or a silent empty result', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA, hubB } = await findHubs(adminPage);
+  const { email } = await createTerminalStaff(adminPage, 'UiWrongHub', hubA.id);
+
+  const customerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const { reference: wrongTerminalRef } = await bookHubToDoor(customerPage, hubB.id, `Mdf699UiWrongHub ${stamp}`);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  await staffPage.goto(`${WEB}/dashboard/terminal`);
+  await waitForWorkspaceLoaded(staffPage);
+
+  await lookupViaTab(staffPage, wrongTerminalRef);
+  await expect(
+    staffPage.getByText('This shipment is not at one of your terminal locations.'),
+    'god\'s own ruling: a customer at the wrong terminal must be told their parcel is real and elsewhere, never that it does not exist',
+  ).toBeVisible({ timeout: 15_000 });
+
+  await lookupViaTab(staffPage, `BML-MDF699-UI-NOPE-${stamp}`);
+  await expect(staffPage.getByText('No shipment with that reference.'), 'the OTHER refusal -- a reference that never existed anywhere -- must be a visibly different message').toBeVisible({ timeout: 15_000 });
+});
+
+test('GAP-PROOF: the Lookup tab, which has no dependency on the queue, disappears entirely when GET /terminal/queue fails', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA } = await findHubs(adminPage);
+  const { email } = await createTerminalStaff(adminPage, 'QueueDown', hubA.id);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  await staffPage.route('**/api/terminal/queue', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+  });
+
+  await staffPage.goto(`${WEB}/dashboard/terminal`);
+  // Positive control: the workspace itself (independent of the queue)
+  // genuinely loaded -- so what follows means something, not "blank page".
+  await waitForWorkspaceLoaded(staffPage);
+  await expect(staffPage.getByText('Could not load your queue.'), 'the page must show the queue actually failed, not render nothing at all').toBeVisible({ timeout: 15_000 });
+
+  // CONFIRMED GAP: the entire tab bar, including Lookup, is gated behind
+  // the queue's own `rows` state (`{rows && (<tablist>...)}` in
+  // page.tsx) -- a capability with NO dependency on the queue vanishes
+  // because of it. Same class as MDF-720: one fetch failing silently
+  // removes an unrelated capability.
+  await expect(staffPage.getByRole('tab', { name: 'Lookup' }), 'CONFIRMED GAP: a failed queue fetch hides the Lookup tab too, even though Lookup never reads the queue').toHaveCount(0);
 });
