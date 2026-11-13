@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { shippingApi, type ShipmentView } from '../../../../lib/shipping';
 import { ShipmentJourney } from '../../../../components/shipping/ShipmentJourney';
 import { ShareTrackingLink } from '../../../../components/shipping/ShareTrackingLink';
+import { SenderCollectionCode } from '../../../../components/shipping/SenderCollectionCode';
 import { AvailabilityWindows } from '../../../../components/shipping/AvailabilityWindows';
 import { RoutingProposalConfirm } from '../../../../components/shipping/RoutingProposalConfirm';
 import { Alert, Button, LoadingRow } from '../../../../components/ui';
@@ -100,6 +101,12 @@ export default function TrackShipmentPage() {
           {shipment.recipientTrackingToken && !shipment.cancelledAt && (
             <ShareTrackingLink token={shipment.recipientTrackingToken} reference={shipment.reference} />
           )}
+
+          {/* REL-CODE-UNREACHABLE-NO-CONTACT: the only way a recipient with
+              no email or phone on file ever learns their collection code —
+              the sender reads it here and passes it on. Renders nothing
+              when there is no code (SenderCollectionCode's own guard). */}
+          <SenderCollectionCode code={shipment.collectionCode} />
 
           {!shipment.cancelledAt && <AvailabilityWindows shipment={shipment} onUpdated={setShipment} />}
 
