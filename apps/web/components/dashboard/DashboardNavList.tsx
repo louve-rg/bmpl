@@ -66,8 +66,12 @@ export function DashboardNavList({
   // shape as useCarrierApplicationStatus above; independent of it otherwise.
   // MDF-720: `status` is one of four distinct outcomes (loading/member/
   // not-member/error), not a single boolean -- see the loading/error
-  // affordances rendered below the nav groups.
-  const { status: terminalStatus, retry: retryTerminalMembership } = useTerminalMembership();
+  // affordances rendered below the nav groups. MDF-732: this reads the one
+  // check `TerminalMembershipProvider` (app/dashboard/layout.tsx) runs for
+  // the whole dashboard, shared with TerminalWorkspaceBanner and the other
+  // mounted copy of this same nav (MobileNavDrawer) -- not an independent
+  // fetch of its own.
+  const { status: terminalStatus, showLoading: showTerminalLoading, retry: retryTerminalMembership } = useTerminalMembership();
   const terminalForcedVisible = terminalStatus === 'member';
 
   const forceVisible = useMemo(() => {
@@ -206,8 +210,15 @@ export function DashboardNavList({
           Rendered outside the groups loop since there is no "Terminal"
           group to attach a heading badge to until membership is actually
           confirmed. Nothing renders once `terminalStatus` settles to
-          'member' or 'not-member'. */}
-      {terminalStatus === 'loading' && (
+          'member' or 'not-member'.
+
+          MDF-732: gated on `showTerminalLoading`, not `terminalStatus ===
+          'loading'` directly -- most customers' check resolves (almost
+          always to 403) well inside the Provider's grace window and never
+          see this at all; `terminalStatus` is still 'loading' the whole
+          time, this only decides when that becomes worth interrupting the
+          screen for. */}
+      {showTerminalLoading && (
         <p data-testid="terminal-membership-loading" className="px-3 py-1.5 text-xs text-[color:var(--bmpl-text-muted)]">
           Loading terminal access…
         </p>

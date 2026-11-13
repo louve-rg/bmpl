@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalWorkspaceBanner } from './TerminalWorkspaceBanner';
+import { TerminalMembershipProvider } from '../../lib/use-terminal-membership';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,7 +49,11 @@ async function mount() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<TerminalWorkspaceBanner />);
+    root!.render(
+      <TerminalMembershipProvider>
+        <TerminalWorkspaceBanner />
+      </TerminalMembershipProvider>,
+    );
   });
   await act(async () => {
     await Promise.resolve();

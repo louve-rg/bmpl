@@ -3,6 +3,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardNavList } from './DashboardNavList';
+import { TerminalWorkspaceBanner } from './TerminalWorkspaceBanner';
+import { TerminalMembershipProvider } from '../../lib/use-terminal-membership';
 import type { MeView } from '../../lib/types';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,7 +73,11 @@ async function mount(me: MeView) {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<DashboardNavList me={me} unread={0} />);
+    root!.render(
+      <TerminalMembershipProvider>
+        <DashboardNavList me={me} unread={0} />
+      </TerminalMembershipProvider>,
+    );
   });
   await act(async () => {
     await Promise.resolve();
@@ -221,11 +227,23 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
+      });
+
+      // MDF-732: the loading affordance is gated on `showLoading`, which
+      // only flips true once `loading` has outlasted the grace window --
+      // so a still-pending check only becomes visible once that window has
+      // elapsed, not on the very next microtask flush.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
       });
 
       expect(container.querySelector('[data-testid="terminal-membership-loading"]')).not.toBeNull();
@@ -254,7 +272,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -281,7 +303,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -314,7 +340,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -348,7 +378,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -398,7 +432,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -436,7 +474,11 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
       });
       await act(async () => {
         await Promise.resolve();
@@ -462,6 +504,13 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
 
       expect(calls).toBe(2);
       expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+
+      // MDF-732: the loading affordance only becomes visible once `loading`
+      // has outlasted the grace window -- see the first MDF-720 test above.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+
       expect(container.querySelector('[data-testid="terminal-membership-loading"]')).not.toBeNull();
       expect(container.textContent).toMatch(/Loading terminal access/);
 
@@ -473,6 +522,122 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
 
       expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
       expect(container.textContent).toMatch(/Terminal Workspace/);
+    });
+  });
+
+  /**
+   * MDF-732: one root cause, three symptoms -- GET /terminal/me ran once per
+   * mounted consumer (DashboardNavList in both Sidebar and MobileNavDrawer,
+   * plus TerminalWorkspaceBanner), so a loading affordance flashed for every
+   * customer who will never have a terminal, and every dashboard load paid
+   * for two independent fetches with two independent retry loops. Both
+   * symptoms are fixed the same way: one TerminalMembershipProvider shared
+   * by every consumer below it.
+   */
+  describe('MDF-732 — one shared check for the whole page, no loading flash for a fast resolve', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('never shows the loading affordance for a check that resolves before the grace window elapses', async () => {
+      // A 100ms-delayed 403 -- realistic network latency for the common
+      // case, genuinely pending (not a same-microtask resolve, which would
+      // prove nothing either way) but still well inside the 300ms grace
+      // window. `status` IS 'loading' for the whole 100ms; the point is
+      // that this never becomes visible.
+      apiGet.mockImplementation(
+        (path: string) =>
+          new Promise((resolve, reject) => {
+            if (path !== '/terminal/me') { resolve([]); return; }
+            setTimeout(() => reject({ status: 403 }), 100);
+          }),
+      );
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(
+          <TerminalMembershipProvider>
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+          </TerminalMembershipProvider>,
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The 403 hasn't fired yet -- `status` is genuinely 'loading' right
+      // now, not yet resolved to anything. This is the exact instant the
+      // pre-MDF-732 code would have shown the affordance to every customer;
+      // it must not appear here, before the grace window has elapsed.
+      expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
+      expect(container.textContent).not.toMatch(/Loading terminal access/);
+
+      // Advance past the 100ms delay (the 403 fires, settling to
+      // 'not-member') and then past where the grace timer would have fired
+      // had it not been superseded -- still nothing, settled is settled.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
+      expect(container.textContent).not.toMatch(/Loading terminal access/);
+    });
+
+    it('issues exactly one GET /terminal/me for the whole dashboard load, even with two consumers mounted', async () => {
+      let calls = 0;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        return Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'MANAGER', locations: [] });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(
+          <TerminalMembershipProvider>
+            {/* Mirrors app/dashboard/layout.tsx: Sidebar's DashboardNavList and
+                dashboard/page.tsx's TerminalWorkspaceBanner both sit under the
+                one Provider mounted there, not two independent fetches. */}
+            <DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />
+            <TerminalWorkspaceBanner />
+          </TerminalMembershipProvider>,
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(1);
+      expect(container.textContent).toMatch(/Terminal Workspace/); // the nav link
+      expect(container.querySelector('a[href="/dashboard/terminal"]')).not.toBeNull(); // the banner link
+    });
+
+    it('throws if rendered without the Provider -- the independent-fetch-per-consumer defect must not come back silently', async () => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      // React logs this error to the console on an uncaught render error;
+      // suppress the expected noise rather than let it fail the run.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await expect(
+          act(async () => {
+            root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+          }),
+        ).rejects.toThrow(/TerminalMembershipProvider/);
+      } finally {
+        consoleError.mockRestore();
+      }
     });
   });
 });
