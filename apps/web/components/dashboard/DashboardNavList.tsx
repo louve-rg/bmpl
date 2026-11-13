@@ -94,6 +94,14 @@ export function DashboardNavList({
   function isOpen(group: { heading?: string; items: NavItem[] }): boolean {
     if (!group.heading) return true; // BASE_NAV: never collapsible
     if (group.heading in openOverrides) return openOverrides[group.heading]!;
+    // F-NAV: a terminal company member's ONLY route to their workspace is
+    // this group -- collapsed-by-default (the same rule every other group
+    // follows) left it undiscoverable below ~18 customer items unless the
+    // visitor happened to already be on a page inside it. Membership is the
+    // override, not the current page; a manual collapse (openOverrides,
+    // checked above) still wins; opening something else back doesn't close
+    // this one, same as any other group.
+    if (group.heading === 'Terminal' && terminalForcedVisible) return true;
     return groupHasActiveItem(group.items, pathname, hrefs);
   }
 

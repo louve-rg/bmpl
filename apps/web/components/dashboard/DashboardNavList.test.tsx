@@ -144,6 +144,34 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
     expect(c.textContent).toMatch(/Terminal Workspace/);
   });
 
+  /**
+   * F-NAV: Stanley drove the real product as an invited Manager and landed
+   * on the ordinary customer dashboard with the only route to the workspace
+   * a COLLAPSED "Terminal" group below ~18 customer items, below the fold
+   * at 1280x900. `textContent` matching "Terminal Workspace" (the test
+   * above) does not prove the link is actually reachable without a click --
+   * jsdom still includes a `hidden`-classed element's text, which is
+   * exactly how this stayed uncaught. This checks the real rendered state:
+   * the group's own item container must NOT carry the `hidden` class the
+   * collapsed state applies (DashboardNavList.tsx's isOpen/render), with
+   * the mocked pathname ('/dashboard', mocked at the top of this file) NOT
+   * inside the Terminal group at all -- proving membership alone opens it,
+   * not happening to already be on one of its pages.
+   */
+  it('the Terminal group is expanded by default for a member -- not collapsed behind a click (F-NAV)', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path === '/terminal/me'
+        ? Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'OPERATOR', locations: [] })
+        : Promise.resolve([]),
+    );
+    const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+    const link = Array.from(c.querySelectorAll('a')).find((a) => a.textContent === 'Terminal Workspace');
+    expect(link).toBeDefined();
+    const itemsContainer = link!.closest('div')!;
+    expect(itemsContainer.className).not.toMatch(/hidden/);
+  });
+
   it('does not affect whether the Carrier group shows -- the two overrides are independent', async () => {
     apiGet.mockImplementation((path: string) => {
       if (path === '/terminal/me') return Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'OPERATOR', locations: [] });
