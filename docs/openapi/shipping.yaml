@@ -291,6 +291,127 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "Matching-signal attempts exhausted for this shipment's token — contact support" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/track/{token}/delivery-code/request:
+    post:
+      tags: [Shipping]
+      summary: "Email a reveal token for the delivery code (unlinked recipient, step 1 of 2; no authentication)"
+      description: >-
+        Strictly throttled. Holding the token proves possession of the
+        tracking link, never identity (Ruling 12) — so this always answers
+        the same neutral `{requested: true}`, whether or not the shipment
+        has a `destinationEmail` on file, whether the email send actually
+        succeeds, and even during the 5-minute cooldown after a prior
+        request. The token this emails is NOT the delivery code — it only
+        unlocks `POST .../delivery-code/reveal` below, expires in 15
+        minutes, and is single-use. Never sent to a client-supplied
+        address, only the shipment's own on-file `destinationEmail`
+        (`ShipmentService.requestDeliveryCodeEmail`). A shipment with no
+        email on file has no automatic path through this endpoint — a
+        known, reported boundary, not an invented SMS channel.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string }, description: "Capability token from the booking customer's `recipientTrackingToken`" }
+      responses:
+        "201":
+          description: Always this shape — never signals whether an email was actually sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requested: { type: boolean, enum: [true] }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/track/{token}/delivery-code/reveal:
+    post:
+      tags: [Shipping]
+      summary: "Exchange the emailed reveal token for the actual delivery code (step 2 of 2; no authentication)"
+      description: >-
+        Strictly throttled. No attempts counter — the reveal token carries
+        its own entropy (10 characters, the same 32-symbol alphabet as
+        `recipientToken`) and was never typed by a human choosing it, so a
+        lockout here would only let a legitimate recipient lock themselves
+        out. Single-use: cleared the instant it is spent. A wrong or
+        expired token is a plain 400, never a 404 (the shipment behind the
+        tracking token is real either way).
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revealToken]
+              properties:
+                revealToken: { type: string, minLength: 1, maxLength: 32 }
+      responses:
+        "201":
+          description: The delivery code, or null if this shipment has no active last-mile/direct leg to show one for
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  deliveryCode: { type: [string, "null"] }
+        "400": { description: "Reveal token invalid or expired — request a new one" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/track/{token}/collection-code/request:
+    post:
+      tags: [Shipping]
+      summary: "Email a reveal token for the collection code (unlinked recipient, step 1 of 2; no authentication)"
+      description: >-
+        The collection-code counterpart to `delivery-code/request` above —
+        identical shape, cooldown and non-oracle guarantees, kept on a
+        SEPARATE token/cooldown pair so a request for one code can never
+        clear or race the other (`ShipmentService.requestCollectionCodeEmail`).
+        For a shipment ending at a hub instead of a door. The emailed token
+        is explicitly worded never to be presented to a terminal clerk — it
+        only unlocks this reveal endpoint, never the counter.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: Always this shape, same non-oracle guarantee as delivery-code/request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requested: { type: boolean, enum: [true] }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/track/{token}/collection-code/reveal:
+    post:
+      tags: [Shipping]
+      summary: "Exchange the emailed reveal token for the actual collection code (step 2 of 2; no authentication)"
+      description: >-
+        Same single-use, no-attempts-counter shape as `delivery-code/reveal`
+        above. Re-checks the live collection state at reveal time, not just
+        at request time — a code already collected, cancelled, or
+        grandfathered comes back null even if the token itself is still
+        valid (`ShipmentService.revealCollectionCode`).
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revealToken]
+              properties:
+                revealToken: { type: string, minLength: 1, maxLength: 32 }
+      responses:
+        "201":
+          description: The collection code, or null once already collected/cancelled/grandfathered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  collectionCode: { type: [string, "null"] }
+        "400": { description: "Reveal token invalid or expired — request a new one" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/incoming:
     get:
       tags: [ShipmentRecipient]
@@ -334,6 +455,56 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RecipientTrackingView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming/{reference}/delivery-code:
+    get:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient's own delivery (handoff) code (BMPL-179 / CLOSE-2)
+      description: >-
+        Never reached by the public tracking token alone — `@CurrentUser()`
+        requires a real signed-in session already scoped to this account's
+        own `recipientUserId`; an unlinked recipient uses the separate
+        `POST /shipping/track/{token}/delivery-code/request`+`/reveal` pair
+        instead. Reuses the exact same reveal rule the sender's own staff
+        view applies: null once the leg is COMPLETED/CANCELLED, and null
+        for a hub-ending service (`ShipmentService.recipientDeliveryCode`).
+        Every read is audited.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The code, or null if this shipment has no active last-mile/direct leg to show one for
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  deliveryCode: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming/{reference}/collection-code:
+    get:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient's own collection code, for a shipment ending at a hub (BMPL-179 / MDF-709)
+      description: >-
+        The collection-code counterpart to `delivery-code` above, same
+        linked-session-only gate. Null once already collected, cancelled,
+        or grandfathered — live only while genuinely AWAITING_COLLECTION
+        (`ShipmentService.recipientCollectionCode`). Every read is audited.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The code, or null once no longer awaiting collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  collectionCode: { type: [string, "null"] }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /shipping/incoming/{reference}/courier-conversation:
@@ -1782,6 +1953,46 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "PIN attempts exhausted, or a correct code from someone other than the leg's assigned courier" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/release-to-courier:
+    post:
+      tags: [AdminLogistics]
+      summary: Release a LAST_MILE leg to its courier at the terminal counter (logistics.operate)
+      description: >-
+        Strictly throttled. LAST_MILE only — any other leg kind is a plain
+        400 ("Only a last-mile leg is released to a courier at a
+        terminal."). Requires a courier already assigned and DRIVER_ACCEPTED;
+        `pin` is verified against the leg's own pickup code before any write
+        (same lockout as `handoff` above). `presentedCourierUserId` defaults
+        to the leg's live assigned courier when omitted; if supplied it is
+        checked against that same assignment, never trusted blindly. A leg
+        already open an EXCEPTION answers 409, not 400 — it must be resolved
+        first (`resolve-exception` below). On success this is the terminal
+        staff's own entry into the same `startLeg` transition a courier's
+        self-service pickup uses, so custody is attributed to the courier
+        who now actually holds the parcel, never to the staff member who
+        processed the release (`ShipmentService.staffReleaseToCourier`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: "^\\d{4,8}$", description: "The courier's own pickup code" }
+                presentedCourierUserId: { type: string, description: "Defaults to the leg's live assigned courier when omitted" }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /admin/logistics/legs/{id}/exception:
     post:
       tags: [AdminLogistics]
@@ -1850,6 +2061,168 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/return-quote:
+    post:
+      tags: [AdminLogistics]
+      summary: Price a return-to-sender for an exceptional leg — read-only (logistics.operate)
+      description: >-
+        Asking the price moves nothing and charges nothing (owner Ruling 2
+        reserves the stricter logistics.manage for the action that actually
+        prepares a charge, below). Refused with `{available: false, reason:
+        'MID_CARRY', message}` for a FIRST_MILE/LINE_HAUL leg — a parcel
+        still mid-carry has not reached a delivery attempt, so reversing the
+        shipment's own origin/destination would price the WRONG movement,
+        not just an unpriced one; this is never even computed for that case
+        (`ShipmentService.previewReturn`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: A priced plan, or a refusal — both succeed (NestJS POST default; no @HttpCode override)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/QuoteAvailable"
+                  - $ref: "#/components/schemas/QuoteUnavailable"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/return-to-sender:
+    post:
+      tags: [AdminLogistics]
+      summary: Prepare a return-to-sender — charges nothing yet (logistics.manage)
+      description: >-
+        BMPL-183/343/375 (owner ruling): a return is priced as a brand-new
+        transport service with BML's normal configured pricing, never a
+        silent reversal of the original charge — but staff action alone
+        must never authorize charging the customer's wallet. This method
+        only PREPARES: it recomputes the price fresh (never trusting a
+        prior `return-quote`), writes a `ShipmentRoutingProposal` row, and
+        returns `{outcome: 'PREPARED', totalMinor}` — no Payment, no
+        escrow. Only the shipment's own paying customer, via the separate
+        customer-authenticated confirm-routing action, can actually book
+        and charge it. Answers `{outcome: 'PENDING_MANUAL', reason}`
+        instead of a price when no valid configured rate exists or the leg
+        is mid-carry (same MID_CARRY fence as `return-quote`) — a human is
+        left behind, never a guessed number. 400 if this shipment was
+        already returned, or has no customer account to charge
+        (`ShipmentService.returnToSender`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 4, maxLength: 500, description: "Why this is being returned" }
+      responses:
+        "201":
+          description: PREPARED with the fresh price, or PENDING_MANUAL with a reason — both succeed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      outcome: { type: string, enum: [PREPARED] }
+                      totalMinor: { $ref: "#/components/schemas/Money" }
+                  - type: object
+                    properties:
+                      outcome: { type: string, enum: [PENDING_MANUAL] }
+                      reason: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/reroute-quote:
+    post:
+      tags: [AdminLogistics]
+      summary: Price redirecting an exceptional leg to a new destination — read-only (logistics.operate)
+      description: >-
+        Same read-only tier and the same MID_CARRY fence as `return-quote`
+        above — a reroute redirects to a NEW destination supplied here,
+        never back to the original sender, so it needs a destination a
+        return never asks for; the origin side is always wherever the
+        parcel currently sits. `legCostsMoreThanOriginal` is informational
+        only (BMPL-343/375): every priced reroute books its own brand-new
+        full-price Payment regardless of which way this comparison falls —
+        it does not mean "no confirmation needed" (`ShipmentService.previewReroute`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination]
+              properties:
+                destination: { $ref: "#/components/schemas/EndpointInput" }
+      responses:
+        "201":
+          description: A priced plan plus legCostsMoreThanOriginal, or a refusal — both succeed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: "#/components/schemas/QuoteAvailable"
+                      - type: object
+                        properties:
+                          legCostsMoreThanOriginal: { type: boolean, description: "Informational only — never a gate on whether confirmation is required" }
+                  - $ref: "#/components/schemas/QuoteUnavailable"
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/reroute:
+    post:
+      tags: [AdminLogistics]
+      summary: Prepare a reroute to a new destination — charges nothing yet (logistics.manage)
+      description: >-
+        The reroute mirror of `return-to-sender` above — same PREPARE-only
+        rule (BMPL-375: staff action alone must never authorize a wallet
+        charge), same fresh-price recompute, same PENDING_MANUAL fence.
+        Every priced reroute books a brand-new full-price Payment for the
+        redirected segment; nothing is refunded or credited on the
+        original payment (no partial-refund primitive exists to build that
+        on). 400 if this shipment was already returned or already
+        rerouted, or has no customer account to charge. The ORIGINAL leg
+        stays EXCEPTION (the historical record), while the shipment's own
+        derived status flips to REROUTED once the customer confirms
+        (`ShipmentService.rerouteShipment`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination, note]
+              properties:
+                destination: { $ref: "#/components/schemas/EndpointInput" }
+                note: { type: string, minLength: 4, maxLength: 500, description: "Why this is being rerouted" }
+      responses:
+        "201":
+          description: PREPARED with the fresh price, or PENDING_MANUAL with a reason — both succeed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      outcome: { type: string, enum: [PREPARED] }
+                      totalMinor: { $ref: "#/components/schemas/Money" }
+                      legCostsMoreThanOriginal: { type: boolean }
+                  - type: object
+                    properties:
+                      outcome: { type: string, enum: [PENDING_MANUAL] }
+                      reason: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/shipments/{id}/collect:
     post:
       tags: [AdminLogistics]
@@ -1874,6 +2247,44 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/shipments/{id}/unlock-collection:
+    post:
+      tags: [AdminLogistics]
+      summary: Clear a locked collection-code attempt counter (logistics.operate)
+      description: >-
+        The way back out of a locked collection code (TERM-12 follow-up) —
+        clears `collectionPinAttempts` and flips verification back to
+        PENDING; the code itself is never changed, since there is no reason
+        to believe it was wrong, only that too many guesses were spent
+        finding that out. Refused with 400 if the shipment was already
+        collected or cancelled, if the collection code is not actually
+        locked (`collectionVerificationStatus !== 'FAILED'`), or if a
+        concurrent unlock already claimed it (`ShipmentService.unlockCollection`).
+      parameters: [ { $ref: "#/components/parameters/shipmentId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 4, maxLength: 500, description: "Why this is being unlocked" }
+      responses:
+        "201":
+          description: The shipment id/reference and its now-PENDING collection-verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shipmentId: { type: string }
+                  reference: { type: string }
+                  collectionVerificationStatus: { type: string, enum: [PENDING] }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }

@@ -5,7 +5,7 @@ specific to the API.
 
 NestJS 10. **This is the only application in the monorepo that talks to the
 database, and the only place authorization is enforced.** 40 modules, 57
-controllers, ~549 routes, 77 services.
+controllers, ~742 routes, 77 services.
 
 ---
 
