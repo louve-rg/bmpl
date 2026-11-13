@@ -505,6 +505,17 @@ export const shippingApi = {
   incomingDeliveryCode: (reference: string) =>
     api.get<DeliveryCodeView>(`/shipping/incoming/${encodeURIComponent(reference)}/delivery-code`),
   /**
+   * MDF-738 (Item 11), linked-recipient path: this account's own collection
+   * code for a shipment it has already claimed, awaiting pickup at a hub --
+   * the counterpart to `incomingDeliveryCode` above, for a service that ends
+   * at a hub instead of a door. Already authenticated as the genuine
+   * recipient (`recipientUserId`, checked server-side) IS the authentication
+   * here -- no request/reveal token pair, unlike the unlinked path. A
+   * reference this account never claimed answers the same 404 as `incomingOne`.
+   */
+  incomingCollectionCode: (reference: string) =>
+    api.get<CollectionCodeView>(`/shipping/incoming/${encodeURIComponent(reference)}/collection-code`),
+  /**
    * CLOSE-2, unlinked-recipient path, step 1 of 2: ask the API to email a
    * short-lived reveal code to the shipment's own on-file address. Returns
    * `{ requested: true }` IDENTICALLY whether or not an email was actually on

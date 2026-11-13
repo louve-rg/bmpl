@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { RecipientTracking } from '../../../../components/shipping/RecipientTracking';
 import { RecipientAvailabilityWindow } from '../../../../components/shipping/RecipientAvailabilityWindow';
 import { RecipientDeliveryCode } from '../../../../components/shipping/RecipientDeliveryCode';
+import { RecipientCollectionCode } from '../../../../components/shipping/RecipientCollectionCode';
 import { RecipientCourierMessage } from '../../../../components/shipping/RecipientCourierMessage';
 import { Alert, LoadingRow } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
@@ -66,6 +67,11 @@ export default function IncomingShipmentPage() {
     <div className="space-y-4">
       <RecipientTracking view={view} />
       <RecipientDeliveryCode reference={reference} />
+      {/* MDF-738 (Item 11): only while genuinely AWAITING_COLLECTION at a
+          hub -- collectionHub is present for exactly that window (same
+          signal MDF-710 uses on the anonymous tracking page), so this
+          isn't noise on every door-to-door parcel that never has one. */}
+      {view.collectionHub && <RecipientCollectionCode reference={reference} />}
       <RecipientCourierMessage reference={reference} />
       {/* Edward requirement 11: hidden once there is nothing left to
           schedule — the same spirit as the sender's own

@@ -15,6 +15,53 @@ function formatRemaining(ms: number): string {
 }
 
 /**
+ * MDF-738: the cooldown used to be in-memory `useState` only, so a reload
+ * of /track/[token] (or just closing and reopening the tab) brought the
+ * button back as if nothing had been requested, while the SERVER's own
+ * cooldown was still running -- the neutral `{ requested: true }` response
+ * then reads as a lie: "we sent it" when the server actually did nothing.
+ * Persisting per-token in localStorage is a convenience only: on any
+ * failure (private browsing, storage disabled) this degrades to exactly
+ * today's in-memory-only behaviour, never a crash. Deliberately NOT a
+ * question to the server about when it will next send -- that would hand
+ * back the exact oracle the neutral response exists to deny (whether an
+ * email is on file), trading the security property for the usability one
+ * instead of keeping both.
+ */
+function cooldownStorageKey(token: string): string {
+  return `bml-collection-code-cooldown:${token}`;
+}
+
+function readStoredCooldown(token: string): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(cooldownStorageKey(token));
+    const until = raw ? Number(raw) : NaN;
+    return Number.isFinite(until) && until > Date.now() ? until : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeCooldown(token: string, until: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(cooldownStorageKey(token), String(until));
+  } catch {
+    // Convenience only -- losing it just means no persistence, not a crash.
+  }
+}
+
+function clearStoredCooldown(token: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(cooldownStorageKey(token));
+  } catch {
+    // Nothing to do -- an expired entry is already harmless (readStoredCooldown ignores it).
+  }
+}
+
+/**
  * MDF-710: the destination the collection-ready email already promises
  * ("Visit your tracking page to see your collection code") but that, until
  * this component existed, nothing in apps/web actually built — Stanley
@@ -54,14 +101,18 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
   const [revealError, setRevealError] = useState<string | null>(null);
   const [collectionCode, setCollectionCode] = useState<string | null>(null);
 
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(() => readStoredCooldown(token));
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!cooldownUntil) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= cooldownUntil) clearStoredCooldown(token);
+    }, 1000);
     return () => clearInterval(t);
-  }, [cooldownUntil]);
+  }, [cooldownUntil, token]);
 
   const cooldownRemaining = cooldownUntil ? Math.max(0, cooldownUntil - now) : 0;
   const onCooldown = cooldownRemaining > 0;
@@ -72,7 +123,9 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
     try {
       await shippingApi.requestCollectionCodeEmail(token);
       setPhase('sent');
-      setCooldownUntil(Date.now() + COOLDOWN_MS);
+      const until = Date.now() + COOLDOWN_MS;
+      setCooldownUntil(until);
+      storeCooldown(token, until);
     } catch (e) {
       setRequestError((e as ApiError).message || 'Could not send that request. Try again in a moment.');
     } finally {

@@ -30,19 +30,29 @@ afterEach(() => {
   container = null;
   requestCollectionCodeEmail.mockReset();
   revealCollectionCode.mockReset();
+  window.localStorage.clear();
 });
 
-async function mount() {
+async function mount(token = 'TOK123TOK1') {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<UnlinkedCollectionCode token="TOK123TOK1" />);
+    root!.render(<UnlinkedCollectionCode token={token} />);
   });
   await act(async () => {
     await Promise.resolve();
   });
   return container;
+}
+
+/** Unmounts without touching storage -- the thing a page reload does NOT
+ * do (a reload starts a fresh localStorage read, which this preserves). */
+async function unmountOnly() {
+  if (root) await act(async () => root!.unmount());
+  if (container) container.remove();
+  root = null;
+  container = null;
 }
 
 function findButton(el: HTMLElement, text: string) {
@@ -153,5 +163,62 @@ describe('UnlinkedCollectionCode — reveal step', () => {
 
     expect(el.textContent).toContain('That code is invalid or has expired. Request a new one.');
     expect(el.querySelector('input')).toBeTruthy();
+  });
+});
+
+/**
+ * MDF-738, second deliverable: the resend cooldown used to be in-memory
+ * only, so a reload of /track/[token] brought the button back while the
+ * server was still inside its own cooldown -- a request made right after
+ * answers the SAME neutral "requested: true" the server always gives, so
+ * the recipient is told "we sent it" when nothing was actually sent.
+ * Simulated here as unmount-then-remount with the SAME token, since a page
+ * reload is exactly that from this component's own perspective -- its
+ * React state is gone, only whatever persisted outside it (localStorage)
+ * survives.
+ */
+describe('UnlinkedCollectionCode — the resend cooldown survives a reload (MDF-738)', () => {
+  it('a reload right after requesting still shows the cooldown, not a fresh "Email me" button', async () => {
+    requestCollectionCodeEmail.mockResolvedValue({ requested: true });
+    const first = await mount('RELOAD-TOK');
+    await clickAndFlush(findButton(first, 'Email me a collection code')!);
+    expect(requestCollectionCodeEmail).toHaveBeenCalledTimes(1);
+
+    await unmountOnly();
+    const reloaded = await mount('RELOAD-TOK');
+
+    // The button must already read the cooldown, not the fresh CTA --
+    // and nothing must have asked the server anything to know that.
+    expect(requestCollectionCodeEmail).toHaveBeenCalledTimes(1);
+    const cooldownBtn = Array.from(reloaded.querySelectorAll('button')).find((b) => /You can request another token in/.test(b.textContent ?? ''));
+    expect(cooldownBtn).toBeTruthy();
+    expect(cooldownBtn!.hasAttribute('disabled')).toBe(true);
+    expect(reloaded.textContent).not.toContain('Email me a collection code');
+  });
+
+  it('a different shipment\'s token is never affected by another token\'s cooldown', async () => {
+    requestCollectionCodeEmail.mockResolvedValue({ requested: true });
+    const first = await mount('TOKEN-A');
+    await clickAndFlush(findButton(first, 'Email me a collection code')!);
+    await unmountOnly();
+
+    const other = await mount('TOKEN-B');
+    expect(findButton(other, 'Email me a collection code')).toBeTruthy();
+    expect(other.textContent).not.toMatch(/You can request another token in/);
+  });
+
+  it('once the cooldown window has genuinely passed, a reload shows the live button again, not a stuck one', async () => {
+    requestCollectionCodeEmail.mockResolvedValue({ requested: true });
+    const first = await mount('EXPIRED-TOK');
+    await clickAndFlush(findButton(first, 'Email me a collection code')!);
+    await unmountOnly();
+
+    // Backdate the stored cooldown as if the real 5 minutes had already
+    // elapsed, rather than waiting on a timer in the test.
+    window.localStorage.setItem('bml-collection-code-cooldown:EXPIRED-TOK', String(Date.now() - 1000));
+
+    const reloaded = await mount('EXPIRED-TOK');
+    expect(findButton(reloaded, 'Email me a collection code')).toBeTruthy();
+    expect(reloaded.textContent).not.toMatch(/You can request another token in/);
   });
 });
