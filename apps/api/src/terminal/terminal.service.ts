@@ -319,7 +319,34 @@ export class TerminalService {
         where: { id: record.id, consumedAt: null, revokedAt: null },
         data: { consumedAt: new Date() },
       });
-      if (claimed.count !== 1) throw new BadRequestException('This invite link is invalid or has expired.');
+      if (claimed.count !== 1) {
+        // MDF-727 (TERM-ACCEPT-MSG): the pre-check above already covers a
+        // genuinely dead link (never existed, truly expired, or already
+        // consumed/revoked as of that read) with the deliberately
+        // non-committal message — an invite token must not become an
+        // existence oracle, which is exactly why that case stays vague.
+        // Reaching HERE means the pre-check's read saw a live, unconsumed,
+        // unrevoked invite, and this transaction's OWN conditional claim
+        // still lost — i.e. a second request for this exact token committed
+        // first, in the race window between that read and this write. The
+        // overwhelmingly common real cause is the invitee double-clicking
+        // (or double-submitting) their own valid link, not an attacker
+        // probing — so unlike the pre-check, THIS message can and must tell
+        // the truth: whichever request wins, "already accepted" is accurate,
+        // not an oracle leak, because the caller already proved they hold a
+        // token that really was live a moment ago.
+        //
+        // Re-read rather than assume: a concurrent REVOKE landing in the same
+        // narrow window would also fail this claim, and "already accepted"
+        // would be a lie in that case — so this only claims it when consumedAt
+        // is actually what changed; any other cause falls back to the same
+        // non-committal message the pre-check uses, never a new specific lie.
+        const current = await tx.terminalCompanyInvite.findUnique({ where: { id: record.id }, select: { consumedAt: true } });
+        if (current?.consumedAt != null) {
+          throw new BadRequestException('This invite has already been accepted. Please sign in instead.');
+        }
+        throw new BadRequestException('This invite link is invalid or has expired.');
+      }
 
       const user = existingUser
         ? existingUser
