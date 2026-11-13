@@ -9,14 +9,23 @@ import { join, relative, resolve, sep } from 'node:path';
  * page reaches for whichever they saw last, and the product goes back to being
  * spelled two ways — which is how it got here.
  *
- * This checks COPY, and only copy. Two things are deliberately out of scope,
- * because changing them would break something real to settle a spelling:
+ * This checks COPY, and only copy, for the "Inquire" spelling check below —
+ * it skips comments and imports via `isComment()`, because developer text is
+ * not customer-facing and rewriting it would be diff noise in files nobody is
+ * reading for the brand. One thing is ALSO out of scope for both checks:
  *
  *  - Identifiers. The real-estate module's own vocabulary is "enquiry" — the
  *    Prisma model, the API fields, the service, the route segments. Renaming
  *    those renames stored data and the public API.
- *  - Comments. Developer text is not customer-facing, and rewriting it would be
- *    diff noise in files nobody is reading for the brand.
+ *
+ * The "says BML, not BMPL" check below does NOT skip comments (MDF-719
+ * caught this the hard way: a draft code comment reading "no BMPL account"
+ * failed it). That asymmetry is deliberate, not a bug to "fix" by wiring
+ * `isComment()` into that check too — ticket ids (BMPL-112, BMPL-128…)
+ * already need their own carve-out (`ALLOWED_BMPL`) regardless of whether
+ * they appear in a comment or in prose, so exempting comments wholesale
+ * would just let "BMPL" creep back into the doc-comments nobody rereads for
+ * the brand, which is exactly how the product got spelled two ways before.
  */
 
 const REPO = resolve(__dirname, '../../..');
