@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
+import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
 
 /**
  * [LOCAL ONLY, MDF-705 follow-up] god's dispatch: write the gap-proof test
@@ -52,6 +52,24 @@ import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
  *    (confirmed as the only such region mounted on initial load --
  *    `MobileNavDrawer`'s copy renders only `{open && createPortal(...)}`,
  *    closed by default) -- the same region the link they gate lives in.
+ *
+ * 2026-11-13: PR #694 (Oscar) ships the fix -- NOT merged yet, main is red
+ * per god, so the three tests below are `test.fixme`, not `test`, with real
+ * bodies ready to flip with zero edits the instant it lands. Verified by
+ * fetching the PR diff directly (`git fetch origin pull/694/head`), not
+ * from the agent's relayed description: `useTerminalMembership()` now
+ * returns `{ status, retry }`, `status` one of `'loading' | 'member' |
+ * 'not-member' | 'error'`, rendered in `DashboardNavList.tsx` as two new
+ * elements OUTSIDE the nav groups loop, never simultaneously with each
+ * other or with the real "Terminal Workspace" link:
+ *  - `[data-testid="terminal-membership-loading"]`, text "Loading
+ *    terminal access…".
+ *  - `[data-testid="terminal-membership-error"]`, text "Something went
+ *    wrong checking your terminal access.", plus a button "Try again"
+ *    wired to the hook's `retry()`. A 403 is treated as definitive
+ *    ('not-member', stop retrying); anything else is 'error' and retries
+ *    automatically on a capped backoff (1s/3s/9s/30s, then steady 30s) in
+ *    the background in addition to the manual button.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -231,19 +249,96 @@ test('GAP-PROOF: an ERRORED GET /terminal/me hides the nav forever, with no erro
   ).toHaveCount(0);
 });
 
-/**
- * PENDING MDF-720 (Oscar). Target: `useTerminalMembership` returns three
- * distinct outcomes -- loading, error, not-a-member -- rather than
- * collapsing all three into one boolean. Do NOT guess Oscar's actual
- * selectors/copy here; once MDF-720 ships, replace this stub with real
- * assertions that:
- *  - while GET /terminal/me is pending, SOMETHING on the page is visibly
- *    different from "not a member" (a loading indicator of some kind);
- *  - on an error, SOMETHING is visibly different from "not a member" too
- *    (an error indicator of some kind), not just silence;
- *  - a genuine non-member still sees neither the link nor an error.
- * This is also the only test on this floor positioned to catch a
- * regression where the three states get silently collapsed back into one
- * -- exactly the kind of fix that quietly reverts.
- */
-test.fixme('Loading, error and not-a-member are three visibly distinct outcomes, never collapsed back into one (PENDING: MDF-720 not yet shipped)', async () => {});
+test.fixme(
+  'MDF-720 (PR #694): a DELAYED GET /terminal/me shows a visible loading affordance, never indistinguishable from "not a member"',
+  async ({ browser }) => {
+    test.setTimeout(60_000);
+    const adminPage = await (await browser.newContext()).newPage();
+    await adminLogin(adminPage);
+    const { email } = await createTerminalManager(adminPage, 'Loading');
+
+    const page = await (await browser.newContext()).newPage();
+    expect(await tryLogin(page, email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
+
+    const DELAY_MS = 4_000;
+    await page.route('**/api/terminal/me', async (route) => {
+      await new Promise((r) => setTimeout(r, DELAY_MS));
+      await route.continue();
+    });
+
+    await page.goto(`${WEB}/dashboard`);
+    await waitForDashboardLoaded(page);
+
+    await page.waitForTimeout(DELAY_MS / 2);
+    await expect(
+      navRegion(page).getByTestId('terminal-membership-loading'),
+      'mid-delay: a visible loading affordance must distinguish this from "not a member", unlike before this fix',
+    ).toBeVisible();
+    await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveText(/Loading terminal access/i);
+    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+    await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
+
+    const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
+    await expect(terminalGroup, 'Terminal nav group header never appeared after the delay resolved').toBeVisible({ timeout: 15_000 });
+    await expect(navRegion(page).getByTestId('terminal-membership-loading'), 'loading affordance must disappear once membership resolves').toHaveCount(0);
+    await terminalGroup.click();
+    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
+  },
+);
+
+test.fixme(
+  'MDF-720 (PR #694): an ERRORED GET /terminal/me shows a visible error affordance with a working manual retry, never indistinguishable from "not a member"',
+  async ({ browser }) => {
+    test.setTimeout(60_000);
+    const adminPage = await (await browser.newContext()).newPage();
+    await adminLogin(adminPage);
+    const { email } = await createTerminalManager(adminPage, 'Erroring');
+
+    const page = await (await browser.newContext()).newPage();
+    expect(await tryLogin(page, email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
+
+    let failRequests = true;
+    await page.route('**/api/terminal/me', async (route) => {
+      if (failRequests) {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Simulated MDF-720 upstream failure' }) });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto(`${WEB}/dashboard`);
+    await waitForDashboardLoaded(page);
+
+    await page.waitForTimeout(3_000);
+    const errorBox = navRegion(page).getByTestId('terminal-membership-error');
+    await expect(errorBox, 'CONFIRMED-FIXED: a visible error affordance must replace the old silent hide').toBeVisible();
+    await expect(errorBox).toContainText('Something went wrong checking your terminal access.');
+    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+
+    // Manual retry: unblock the route, click "Try again", membership resolves.
+    failRequests = false;
+    await errorBox.getByRole('button', { name: 'Try again' }).click();
+
+    const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
+    await expect(terminalGroup, 'retry must actually re-check membership, not just dismiss the error').toBeVisible({ timeout: 15_000 });
+    await expect(navRegion(page).getByTestId('terminal-membership-error'), 'error affordance must clear once retry succeeds').toHaveCount(0);
+    await terminalGroup.click();
+    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
+  },
+);
+
+test.fixme(
+  'MDF-720 (PR #694): a genuine non-member sees neither the link, the loading affordance, nor the error affordance',
+  async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    expect(await tryLogin(page, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD), 'CUSTOMER login failed').toBeTruthy();
+    await waitForDashboardLoaded(page);
+
+    // Real 403 from the real backend -- no interception. Give the hook
+    // every chance to settle before asserting the quiet, correct outcome.
+    await page.waitForTimeout(3_000);
+    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+    await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveCount(0);
+    await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
+  },
+);
