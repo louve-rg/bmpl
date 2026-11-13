@@ -62,6 +62,21 @@ main checkout is fine. **Two agents in one checkout is not.**
 
 Remove it when the work is integrated: `git worktree remove ../bmpl-driver-queue`.
 
+### A shared worktree can be on someone else's branch when you arrive
+
+A worktree is shared disk, not a lock. Another agent can leave it checked out
+on their own branch, mid-task, and the next agent to show up sees that branch's
+files, not `main`, with nothing on screen flagging it. Before trusting *any*
+file you did not just write yourself in a shared worktree — and before running
+`git checkout` in one — confirm what branch it is actually on
+(`git branch --show-current`) and read the content you care about straight
+from the object store instead of the working directory:
+`git show origin/<branch>:<path>`. That command is immune to whatever the
+worktree's files currently say, so it tells you whether anything of value sits
+on the branch you're about to switch off of, before you switch. If you find a
+shared worktree parked on a branch that is not its default, verify first, then
+switch back explicitly — don't just start editing on top of what's there.
+
 ### After pulling or rebasing `main` into an existing branch
 
 A plain `git pull` or `git rebase origin/main` brings in new source, but
