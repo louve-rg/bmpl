@@ -40,8 +40,8 @@ quoteMock.mockResolvedValue({
 const WALLET = { currency: 'BZD', availableMinor: 100000, onHoldMinor: 0, totalMinor: 100000, status: 'ACTIVE', exists: true };
 
 function defaultApiGetImpl(path: string): Promise<ShippingHub[] | string[] | typeof WALLET | null> {
-  if (path === '/shipping/hubs') return Promise.resolve([]);
-  if (path === '/shipping/modes') return Promise.resolve(['LAND']);
+  if (path === '/shipping/hubs/mine') return Promise.resolve([]);
+  if (path === '/shipping/modes/mine') return Promise.resolve(['LAND']);
   if (path === '/wallet') return Promise.resolve(WALLET);
   return Promise.resolve(null);
 }
@@ -454,7 +454,7 @@ describe('NewShipmentPage hub-destination recipient email (MDF-746)', () => {
    *  becomes a hub -- the exact shape the card describes ("Door to
    *  terminal"). Fills both, picks the hub, and settles the quote. */
   async function fillDoorToHub(): Promise<void> {
-    apiGet.mockImplementation((path: string) => (path === '/shipping/hubs' ? Promise.resolve([HUB]) : defaultApiGetImpl(path)));
+    apiGet.mockImplementation((path: string) => (path === '/shipping/hubs/mine' ? Promise.resolve([HUB]) : defaultApiGetImpl(path)));
     mount();
     await flush();
     await waitForNoPulse(container!);
