@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
+import { DevMailboxService } from '../notifications/dev-mailbox.service';
 
 export interface OutboundEmail {
   to: string;
@@ -55,7 +56,10 @@ export interface EmailDiagnostics {
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
-  constructor(@Inject(ENV) private readonly env: Env) {}
+  constructor(
+    @Inject(ENV) private readonly env: Env,
+    private readonly devMailbox: DevMailboxService,
+  ) {}
 
   /** Back-compat wrapper — existing callers keep the exact boolean they always
    *  got. New code that needs to tell a real send apart from the console
@@ -64,7 +68,37 @@ export class EmailService {
     return (await this.sendDetailed(email)).delivered;
   }
 
+  /**
+   * MDF-709 follow-up (Stanley, via the dispatcher): the dev mailbox used to
+   * be filled by whichever CALLER happened to remember to do it —
+   * `notifications.service.ts`'s `sendEmail` and `TerminalService`'s
+   * `inviteMember`/`resendInvite` each ran their own identical `if
+   * (delivered) devMailbox.record(...)` after calling this service. That
+   * is not a dev mailbox, it is three ad-hoc captures — the MDF-709 reveal
+   * email (`ShipmentService.requestDeliveryCodeEmail`/
+   * `requestCollectionCodeEmail`) went through this exact method and was
+   * never captured anywhere, because nobody had added a fourth copy of the
+   * same four lines for it. Recording here, once, for every accepted send
+   * regardless of caller, is the fix — not a workaround, the correct
+   * design. Safe by construction: `DevMailboxService.record` is already a
+   * no-op outside `NODE_ENV !== production` (its own `enabled` flag), and
+   * `DevModule` is never registered in production at all (`app.module.ts`),
+   * so this changes nothing about what a production deploy does.
+   *
+   * The three callers above had their own `devMailbox.record()` calls
+   * DELETED in the same change that added this — recording at both layers
+   * would double the dev mailbox's buffer for every email any of them
+   * sends, and a reader (Stanley's own `latestFor()`) would see duplicates.
+   */
   async sendDetailed(email: OutboundEmail): Promise<EmailSendResult> {
+    const result = await this.dispatch(email);
+    if (result.delivered) {
+      this.devMailbox.record({ to: email.to, subject: email.subject, body: email.body, createdAt: new Date().toISOString() });
+    }
+    return result;
+  }
+
+  private async dispatch(email: OutboundEmail): Promise<EmailSendResult> {
     switch (this.env.EMAIL_PROVIDER) {
       case 'resend':
         return this.sendViaResend(email);

@@ -2542,6 +2542,7 @@ export class ShipmentService {
               id: true,
               reference: true,
               customerUserId: true,
+              recipientUserId: true,
               cancelledAt: true,
               returnShipment: { select: { reference: true } },
               rerouteShipment: { select: { reference: true } },
@@ -2689,6 +2690,7 @@ export class ShipmentService {
       return {
         shipmentId: leg.shipmentId,
         customerUserId: leg.shipment.customerUserId,
+        recipientUserId: leg.shipment.recipientUserId,
         reference: leg.shipment.reference,
         status,
         restored,
@@ -2700,6 +2702,11 @@ export class ShipmentService {
     // Everything after the commit, so nothing below can announce a resolution
     // that rolled back — the same ordering completeLeg uses for its dispatch.
     await this.notifyCustomer(outcome);
+    // MDF-709: a RESUME resolution can land the shipment straight on
+    // AWAITING_COLLECTION (the exception was on what turns out to be the
+    // final hub-ending leg) — same "notifyCustomer goes to the sender only"
+    // gap transition() below has, so this call site needs the same fix.
+    await this.notifyRecipientCollectionReady(outcome);
 
     if (outcome.releasedDriverProfileId) {
       const profile = await this.prisma.driverProfile.findUnique({
@@ -3453,7 +3460,14 @@ export class ShipmentService {
       if (!leg) throw new NotFoundException('Leg not found.');
       const shipment = await tx.shipment.findUniqueOrThrow({
         where: { id: leg.shipmentId },
-        select: { id: true, reference: true, service: true, customerUserId: true, legs: { select: { sequence: true, kind: true, mode: true, status: true } } },
+        select: {
+          id: true,
+          reference: true,
+          service: true,
+          customerUserId: true,
+          recipientUserId: true,
+          legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+        },
       });
 
       if (shipment.legs.some((l) => l.status === 'CANCELLED') && leg.status === 'CANCELLED') {
@@ -3472,10 +3486,25 @@ export class ShipmentService {
         { action: outcome.action, actorId: actor.userId, newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, status }, reason: outcome.note },
         tx,
       );
-      return { shipmentId: shipment.id, customerUserId: shipment.customerUserId, reference: shipment.reference, status };
+      return {
+        shipmentId: shipment.id,
+        customerUserId: shipment.customerUserId,
+        recipientUserId: shipment.recipientUserId,
+        reference: shipment.reference,
+        status,
+      };
     });
 
     await this.notifyCustomer(result);
+    // MDF-709: notifyCustomer above reaches the SENDER only. A shipment
+    // ending at a hub (no LAST_MILE) has nobody else told it is ready —
+    // the recipient has no handoff code to be handed at a door, so
+    // AWAITING_COLLECTION is the one moment they genuinely need to be
+    // nudged to come get their own collection code (recipientCollectionCode
+    // / the request-reveal pair below). A no-op for every other status and
+    // for an unlinked recipient (no account to notify in-app at all) —
+    // see that method's own guard.
+    await this.notifyRecipientCollectionReady(result);
 
     // The journey finished, so the money can stop being held. Outside the
     // transaction above deliberately: settlement posts its own balanced
@@ -3601,6 +3630,33 @@ export class ShipmentService {
         event: 'SHIPMENT_STATUS',
         title: `Shipment ${r.reference}`,
         body: SHIPMENT_STATUS_LABELS[r.status] ?? r.status,
+        data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
+      },
+    );
+  }
+
+  /**
+   * MDF-709, piece 3: the recipient's own "come get it" nudge, fired at the
+   * exact transition `notifyCustomer` above does not reach — a shipment
+   * ending at a hub (no LAST_MILE) hands nobody a door-side handoff code,
+   * so the recipient's ONLY cue that their parcel is waiting is either this
+   * notification (if linked) or whatever they already see on the public
+   * tracking link (if unlinked — that view already shows AWAITING_COLLECTION
+   * and the collection hub; see trackPublic's own allowlist comment). This
+   * method never puts the actual code in the notification body — same
+   * discipline as never logging a PIN; the recipient still has to go
+   * through `recipientCollectionCode` or the request/reveal pair to read it.
+   */
+  private async notifyRecipientCollectionReady(r: { recipientUserId: string | null; reference: string; status: ShipmentStatus; shipmentId: string }) {
+    if (!r.recipientUserId || r.status !== 'AWAITING_COLLECTION') return;
+    await this.notifications.notifyUsers(
+      [r.recipientUserId],
+      {
+        type: 'MARKETPLACE',
+        category: 'DELIVERY',
+        event: 'SHIPMENT_STATUS',
+        title: `Shipment ${r.reference}`,
+        body: 'Your parcel has arrived and is ready for collection. Open the app to get your collection code.',
         data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
       },
     );
@@ -4264,6 +4320,49 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-709, piece 1: the exact counterpart to `recipientDeliveryCode`
+   * above, for a shipment that ends AT A HUB instead of at a door. The gap
+   * this closes: `track()`'s CUSTOMER audience reaches only `customerUserId`
+   * (the sender/booker) — a linked RECIPIENT calling it gets the same 404 a
+   * stranger would, same as every other recipient-facing read in this file
+   * (`trackAsRecipient`, `recipientDeliveryCode`, `recipientAvailabilityWindow`).
+   * So CUSTOMER audience does NOT reach the recipient today, and the fix is
+   * the same one already established for the delivery code: a dedicated,
+   * narrowly-scoped method, never a widened `track()` check.
+   *
+   * Reuses `serialize()`'s own exact CUSTOMER-audience gate for
+   * `collectionCode` (`:4639-4642` as of this card) rather than re-deriving
+   * it: null once collected, cancelled-equivalent, or grandfathered, live
+   * only while genuinely `AWAITING_COLLECTION`. Every read is audited, same
+   * standard `recipientDeliveryCode`/`revealHandoffPin` already hold
+   * themselves to.
+   */
+  async recipientCollectionCode(reference: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { reference },
+      select: {
+        id: true,
+        recipientUserId: true,
+        status: true,
+        collectedAt: true,
+        collectionPin: true,
+        collectionPinGrandfathered: true,
+      },
+    });
+    if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
+
+    const collectionCode =
+      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered ? null : s.collectionPin;
+
+    await this.audit.record({
+      action: 'SHIPMENT_COLLECTION_CODE_REVEALED',
+      actorId: userId,
+      newValue: { shipmentId: s.id, reference, revealedTo: 'RECIPIENT' },
+    });
+    return { reference, collectionCode };
+  }
+
+  /**
    * CLOSE-2, unlinked-recipient path, step 1 of 2: email a fresh, short-lived,
    * single-use reveal token to the shipment's ON-FILE `destinationEmail` —
    * never a client-supplied address, the same non-oracle discipline
@@ -4318,11 +4417,17 @@ export class ShipmentService {
       // apart from the Nest logger whether this actually reached Resend. The
       // outcome is recorded below in the SAME audit row rather than a new
       // action or a retry: a failed send is still exactly one send attempt.
-      const sendResult = await this.email.sendDetailed({
-        to: s.destinationEmail,
-        subject: `Your delivery code for shipment ${s.reference}`,
-        body: `Use this code to confirm it's you when your driver arrives: ${revealToken}\n\nThis code expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
-      });
+      const subject = `Your delivery code for shipment ${s.reference}`;
+      // MDF-709 adjacent tightening (optional, Stanley flagged this one as
+      // harmless but equally loose): this token is NOT the delivery code
+      // either — same "enter it on the tracking page to reveal the real
+      // code" shape as the collection-code email above.
+      const body = `Enter this code on your shipment's tracking page to see your delivery code: ${revealToken}\n\nThis is NOT the code to give your driver — it only unlocks your tracking page so you can see your own delivery code there. It expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`;
+      // MDF-709 follow-up: the dev mailbox capture lives inside
+      // EmailService.sendDetailed itself now, for every caller — this is
+      // the flow whose absence from it was the actual root cause of the
+      // 404 Stanley found (nothing had ever recorded this send anywhere).
+      const sendResult = await this.email.sendDetailed({ to: s.destinationEmail, subject, body });
       await this.audit.record({
         action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED',
         newValue: {
@@ -4394,6 +4499,123 @@ export class ShipmentService {
   private generateDeliveryCodeRevealToken(): string {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 — same alphabet recipientToken uses
     return Array.from({ length: 10 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
+  }
+
+  /**
+   * MDF-709, piece 2, step 1 of 2: the collection-code counterpart to
+   * `requestDeliveryCodeEmail` above — same shipment-level token columns
+   * (`collectionCodeRevealToken`/`...TokenExpiresAt`/`...RequestedAt`,
+   * kept SEPARATE from the delivery-code ones rather than reused, so a
+   * request for one code can never clear or race the other), same
+   * `recipientToken`-keyed lookup, same cooldown, same neutral response
+   * whether or not an email was actually on file. Reuses
+   * `generateDeliveryCodeRevealToken` — its entropy/alphabet has nothing
+   * delivery-specific about it, and a second copy of the same ten-line
+   * generator would be the duplicate functionality root CLAUDE.md §12 rules
+   * out, not a genuinely different concern.
+   */
+  async requestCollectionCodeEmail(token: string): Promise<{ requested: true }> {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      select: { id: true, reference: true, destinationEmail: true, collectionCodeRevealRequestedAt: true },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+
+    const cooldownUntil = s.collectionCodeRevealRequestedAt
+      ? new Date(s.collectionCodeRevealRequestedAt.getTime() + DELIVERY_CODE_REVEAL_COOLDOWN_MINUTES * 60_000)
+      : null;
+    if (cooldownUntil && cooldownUntil > new Date()) return { requested: true };
+
+    if (s.destinationEmail) {
+      const revealToken = this.generateDeliveryCodeRevealToken();
+      const expiresAt = new Date(Date.now() + DELIVERY_CODE_REVEAL_TTL_MINUTES * 60_000);
+      await this.prisma.shipment.update({
+        where: { id: s.id },
+        data: {
+          collectionCodeRevealToken: revealToken,
+          collectionCodeRevealTokenExpiresAt: expiresAt,
+          collectionCodeRevealRequestedAt: new Date(),
+        },
+      });
+      const subject = `Your collection code for shipment ${s.reference}`;
+      // MDF-709 follow-up (urgent): this token is NOT the collection code
+      // — it only unlocks the tracking page so the real code can be
+      // shown there. The old wording ("use this code at the counter")
+      // told the recipient to hand the TOKEN to a terminal clerk, who
+      // would enter it as the collection code, get refused, and burn one
+      // of DELIVERY_PIN_MAX_ATTEMPTS — with no terminal-side unlock at
+      // all (that's admin-only). Five obedient attempts following our
+      // own email would permanently lock a shipment nobody at the
+      // counter could clear. Never say "counter" or imply this token is
+      // presentable to staff.
+      const body = `Enter this code on your shipment's tracking page to see your collection code: ${revealToken}\n\nThis is NOT your collection code — never give it to a terminal clerk. It only unlocks your tracking page so you can see your own collection code there. It expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`;
+      // Same centralized dev-mailbox capture (EmailService.sendDetailed) as
+      // requestDeliveryCodeEmail above — this flow had never been recorded
+      // anywhere before, which is exactly how the counter/clerk wording
+      // defect shipped with no test able to catch it.
+      const sendResult = await this.email.sendDetailed({ to: s.destinationEmail, subject, body });
+      await this.audit.record({
+        action: 'SHIPMENT_COLLECTION_CODE_EMAIL_REQUESTED',
+        newValue: {
+          shipmentId: s.id,
+          reference: s.reference,
+          delivered: sendResult.delivered,
+          outcome: sendResult.outcome,
+        },
+      });
+    } else {
+      await this.prisma.shipment.update({ where: { id: s.id }, data: { collectionCodeRevealRequestedAt: new Date() } });
+    }
+    return { requested: true };
+  }
+
+  /**
+   * MDF-709, piece 2, step 2 of 2: exchange the emailed reveal token for the
+   * actual collection code. Same single-use, time-boxed, no-attempts-
+   * counter shape as `revealDeliveryCode` above, for the identical
+   * reasoning (the token carries its own entropy; a lockout here would only
+   * let a legitimate recipient lock themselves out). Re-checks the SAME
+   * status/collected/grandfathered gate `recipientCollectionCode` and
+   * `serialize()`'s own CUSTOMER audience use — a code requested while
+   * AWAITING_COLLECTION but revealed after someone else already collected
+   * it (or staff cancelled it) must come back null, not the stale value.
+   */
+  async revealCollectionCode(token: string, revealToken: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        collectedAt: true,
+        collectionPin: true,
+        collectionPinGrandfathered: true,
+        collectionCodeRevealToken: true,
+        collectionCodeRevealTokenExpiresAt: true,
+      },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+    const valid =
+      s.collectionCodeRevealToken != null &&
+      s.collectionCodeRevealToken === revealToken &&
+      s.collectionCodeRevealTokenExpiresAt != null &&
+      s.collectionCodeRevealTokenExpiresAt > new Date();
+    if (!valid) throw new BadRequestException('That code is invalid or has expired. Request a new one.');
+
+    await this.prisma.shipment.update({
+      where: { id: s.id },
+      data: { collectionCodeRevealToken: null, collectionCodeRevealTokenExpiresAt: null },
+    });
+
+    const collectionCode =
+      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered ? null : s.collectionPin;
+
+    await this.audit.record({
+      action: 'SHIPMENT_COLLECTION_CODE_REVEALED',
+      actorId: null,
+      newValue: { shipmentId: s.id, reference: s.reference, revealedTo: 'RECIPIENT_UNLINKED' },
+    });
+    return { reference: s.reference, collectionCode };
   }
 
   /* ------------------------------------------------------------- reading */
