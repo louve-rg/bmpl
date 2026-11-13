@@ -17,11 +17,21 @@ import { Button, ButtonLink } from '../../../components/ui';
  * issued on success (deliberate -- the invitee signs in afterward through
  * the ordinary /login path), so success here means "tell them plainly, then
  * hand them to sign-in," not an automatic redirect.
+ *
+ * TERM-INVITE-COPY: the invited role is unknowable before accepting -- there
+ * is no public preview-by-token route, by design, matching every other
+ * token-gated route in this system (holding a link proves possession, never
+ * identity, and a preview route would let a guessed/leaked token enumerate
+ * company membership details before anyone had proven anything). So the
+ * page-level subtitle below stays role-neutral; only the success message,
+ * once `memberRole` comes back from a genuine accept, says "manager" or
+ * "operator" specifically.
  */
 function AcceptInviteForm() {
   const token = useSearchParams().get('token') ?? '';
   const [error, setError] = useState<string | null>(null);
   const [createdAccount, setCreatedAccount] = useState(false);
+  const [memberRole, setMemberRole] = useState<'MANAGER' | 'OPERATOR' | null>(null);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -31,13 +41,21 @@ function AcceptInviteForm() {
     setLoading(true);
     const form = new FormData(e.currentTarget);
     try {
-      const result = await api.post<{ accepted: true; createdAccount: boolean }>('/terminal/invites/accept', {
-        token,
-        password: form.get('password'),
-        firstName: form.get('firstName'),
-        lastName: form.get('lastName'),
-      });
+      const result = await api.post<{ accepted: true; createdAccount: boolean; memberRole?: 'MANAGER' | 'OPERATOR' }>(
+        '/terminal/invites/accept',
+        {
+          token,
+          password: form.get('password'),
+          firstName: form.get('firstName'),
+          lastName: form.get('lastName'),
+        },
+      );
       setCreatedAccount(result.createdAccount);
+      // Optional: web and api deploy independently, same pattern as every
+      // other additive field in this codebase (e.g. ShipmentEtaSummary).
+      // Absence just means the generic wording below is used instead of the
+      // role-specific one -- never a crash, never a wrong claim.
+      setMemberRole(result.memberRole ?? null);
       setDone(true);
     } catch (err) {
       const apiErr = err as ApiError;
@@ -60,13 +78,19 @@ function AcceptInviteForm() {
   }
 
   if (done) {
+    // TERM-INVITE-COPY: role-correct, not role-blind -- an OPERATOR told
+    // they were added "as a manager" would expect the Staff tab the server
+    // then 403s them for. `memberRole` absent (an older API during a split
+    // deploy) falls back to the pre-existing generic wording, never a crash
+    // and never a wrong claim either way.
+    const roleSuffix = memberRole === 'MANAGER' ? ' as a manager' : memberRole === 'OPERATOR' ? ' as an operator' : '';
     return (
       <div className="space-y-4">
         <FormSuccess
           message={
             createdAccount
-              ? 'Your account has been created and you have been added to the team. Sign in to continue.'
-              : 'You already had a BML account, so it has been added to the team as-is. Sign in with your existing password, not the one you just entered — it was not used.'
+              ? `Your account has been created and you have been added to the team${roleSuffix}. Sign in to continue.`
+              : `You already had a BML account, so it has been added to the team${roleSuffix}. Sign in with your existing password, not the one you just entered — it was not used.`
           }
         />
         <ButtonLink href="/login" size="lg" className="w-full">
@@ -113,7 +137,7 @@ function AcceptInviteForm() {
 
 export default function AcceptInvitePage() {
   return (
-    <AuthShell title="Join your team on BML" subtitle="You were invited to manage a terminal company on BML.">
+    <AuthShell title="Join your team on BML" subtitle="You were invited to join a terminal company's team on BML.">
       <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
         <AcceptInviteForm />
       </Suspense>
