@@ -53,12 +53,15 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  *    `MobileNavDrawer`'s copy renders only `{open && createPortal(...)}`,
  *    closed by default) -- the same region the link they gate lives in.
  *
- * 2026-11-13: PR #694 (Oscar) ships the fix -- NOT merged yet, main is red
- * per god, so the three tests below are `test.fixme`, not `test`, with real
- * bodies ready to flip with zero edits the instant it lands. Verified by
- * fetching the PR diff directly (`git fetch origin pull/694/head`), not
- * from the agent's relayed description: `useTerminalMembership()` now
- * returns `{ status, retry }`, `status` one of `'loading' | 'member' |
+ * 2026-11-13: PR #694 (Oscar) ships the fix. Main itself is green
+ * (god corrected an earlier stale read of mine) -- the only real reason
+ * the three tests below are `test.fixme`, not `test`, is that #694 is not
+ * merged: a test asserting a contract that doesn't exist on main yet must
+ * not be a live test, independent of main's CI color. Real bodies, ready
+ * to flip with zero edits the instant it merges. Verified by fetching the
+ * PR diff directly (`git fetch origin pull/694/head`), not from the
+ * agent's relayed description: `useTerminalMembership()` now returns
+ * `{ status, retry }`, `status` one of `'loading' | 'member' |
  * 'not-member' | 'error'`, rendered in `DashboardNavList.tsx` as two new
  * elements OUTSIDE the nav groups loop, never simultaneously with each
  * other or with the real "Terminal Workspace" link:
@@ -70,6 +73,25 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  *    ('not-member', stop retrying); anything else is 'error' and retries
  *    automatically on a capped backoff (1s/3s/9s/30s, then steady 30s) in
  *    the background in addition to the manual button.
+ *
+ * 2026-11-13, re-diffed after Oscar pushed F-NAV (`10f178db`) onto the same
+ * branch: TWO more changes, both re-checked against the real diff, not
+ * assumed. (1) `isOpen()` now auto-opens the "Terminal" group whenever
+ * `terminalForcedVisible` is true (a confirmed member) -- so the manual
+ * group-click the DELAYED/ERRORED GAP-PROOF tests above needed against
+ * TODAY's main (where the group is never auto-opened) would now TOGGLE AN
+ * ALREADY-OPEN GROUP CLOSED against #694, failing for the wrong reason.
+ * The three fixme bodies below wait for the group header, then assert the
+ * link directly -- no click. (2) A new `TerminalWorkspaceBanner` (outside
+ * `<nav>`, on `/dashboard` itself) renders a second link whose accessible
+ * name also contains "Terminal Workspace" as a substring once `status ===
+ * 'member'` -- Playwright's default name match is substring, so an
+ * unscoped `getByRole('link', {name: 'Terminal Workspace'})` would match
+ * both links and raise a strict-mode violation. Already a non-issue here:
+ * every link assertion below was already scoped to `navRegion(page)`
+ * for the dev-overlay reason above, and the banner renders outside the
+ * nav -- scoping for one reason happened to close the other gap too, but
+ * that's confirmed from the diff, not assumed from the first fix's intent.
  *
  * All three assert on the test-ids directly (presence of the real one, not
  * absence of a string) -- deliberately avoided getByText-based absence
@@ -298,10 +320,11 @@ test.fixme(
     await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
     await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
 
+    // F-NAV auto-opens "Terminal" for a confirmed member -- do not click
+    // the header here, that would toggle an already-open group closed.
     const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
     await expect(terminalGroup, 'Terminal nav group header never appeared after the delay resolved').toBeVisible({ timeout: 15_000 });
     await expect(navRegion(page).getByTestId('terminal-membership-loading'), 'loading affordance must disappear once membership resolves').toHaveCount(0);
-    await terminalGroup.click();
     await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
   },
 );
@@ -339,10 +362,11 @@ test.fixme(
     failRequests = false;
     await errorBox.getByRole('button', { name: 'Try again' }).click();
 
+    // F-NAV auto-opens "Terminal" for a confirmed member -- do not click
+    // the header here, that would toggle an already-open group closed.
     const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
     await expect(terminalGroup, 'retry must actually re-check membership, not just dismiss the error').toBeVisible({ timeout: 15_000 });
     await expect(navRegion(page).getByTestId('terminal-membership-error'), 'error affordance must clear once retry succeeds').toHaveCount(0);
-    await terminalGroup.click();
     await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
   },
 );
