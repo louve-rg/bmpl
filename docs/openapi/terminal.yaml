@@ -19,23 +19,31 @@ info:
     declares `@HttpCode`, so NestJS's own default for `@Post()` applies
     uniformly.
 
-    UPDATED 2026-11-13 (TERM-OPENAPI-SURFACE) against `main@bc4cf932` for
-    five endpoints merged the same night the previous baseline was written,
-    none of which existed yet when this file was first drafted: `GET
-    /terminal/staff` (MDF-702/#690, MANAGER-only — see its own description),
+    UPDATED 2026-11-13 (TERM-OPENAPI-DRIFT, main@921ed0c7) for five routes
+    that went live without a spec update, each confirmed directly against
+    the controller and by `git log -S` on its own introducing commit, not
+    taken on a dispatcher's attribution: `GET /terminal/staff` (MDF-698,
+    #683 — enforces the MANAGER/OPERATOR role split; #690 only added the
+    apps/web tab that consumes it, two frontend files, no endpoint),
     `GET /terminal/inbound` / `/outbound` / `/custody` (MDF-700/TERM-INBOUND,
-    #698), and `GET /terminal/shipments/{reference}` (MDF-699/TERM-LOOKUP,
-    #692). Also added: `isTest` on `MyWorkspace` and `TerminalQueueItem`
-    (both newly selected/exposed the same night, MDF-700/MDF-707's labelling
-    gap), and a response schema plus the four distinct messages
-    `POST /terminal/invites/accept` can return 400 with — previously a bare
-    description with no schema at all. Checked first, per the dispatching
-    instruction: CI's "Repo drift checks" job (`.github/workflows/ci.yml:700`)
-    runs four checkers (notification event catalog, permission catalog,
-    lookup inventory citations, notification category count) — none of them
-    read this file or any OpenAPI spec, so its passing on every merge tonight
-    said nothing about whether this contract matched the new handlers. It
-    did not; this update is that correction.
+    #698 — a different #698 number than MDF-698's own card number, by
+    coincidence of this repo's issue tracker; the PR is the shipping one,
+    "terminal inbound/outbound/custody manifests"), and
+    `GET /terminal/shipments/{reference}` (MDF-699, #686 — #692 only added
+    the apps/web Lookup tab that consumes it). Also added: `isTest` on
+    `MyWorkspace` and `TerminalQueueItem` (both newly selected/exposed the
+    same window, MDF-700/MDF-707's labelling gap), and a response schema
+    plus the four distinct messages `POST /terminal/invites/accept` can
+    return 400 with — previously a bare description with no schema at all.
+    Checked first, per the dispatching instruction: CI's "Repo drift checks"
+    job (`.github/workflows/ci.yml:700-746`) runs four checkers
+    (notification event catalog, permission catalog, lookup inventory
+    citations, notification category count) — none of them read this file
+    or any OpenAPI spec; `docs/openapi/*.yaml` is hand-maintained, no
+    SwaggerModule, nothing generates it. CI said nothing about whether this
+    contract matched the new handlers; it did not. TERM-OPENAPI-GUARD (Jim)
+    is adding a route-presence check to close this; this PR is what makes
+    that check pass.
 
     A `TerminalCompanyProfile` is NOT a `LogisticsHub` (documented in
     `shipping.yaml`): a hub is the physical terminal; a terminal company is
