@@ -155,4 +155,86 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
     expect(c.textContent).toMatch(/Terminal/);
     expect(c.textContent).not.toMatch(/Carrier/);
   });
+
+  /**
+   * MDF-720: a real Terminal Manager on a slow connection or during a brief
+   * API blip used to see exactly what a genuine non-member sees -- no nav
+   * entry, ever, because any error (a definitive 403 or a transient
+   * network/timeout/5xx alike) collapsed into the same permanent "hidden"
+   * state with no retry. These tests use fake timers to drive
+   * useTerminalMembership's retry loop without a real delay.
+   */
+  describe('MDF-720 — a transient fetch error must not be indistinguishable from true non-membership', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('retries after a non-403 failure (network error, timeout, 5xx) and shows the nav once a retry succeeds', async () => {
+      let calls = 0;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('network error'));
+        return Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'MANAGER', locations: [] });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // First attempt failed -- same visible state as a non-member right
+      // now, which is expected and fine (loading is indistinguishable from
+      // not-yet-a-member by design). The defect is never recovering.
+      expect(container.textContent).not.toMatch(/Terminal/);
+      expect(calls).toBe(1);
+
+      // Advance past the first backoff delay (1000ms) and flush the retry.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      expect(calls).toBe(2);
+      expect(container.textContent).toMatch(/Terminal Workspace/);
+    });
+
+    it('never retries after a real 403 -- that is the definitive, correct "not a member" signal', async () => {
+      let calls = 0;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        return Promise.reject({ status: 403 });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+
+      // No retry ever fired for a confirmed non-member.
+      expect(calls).toBe(1);
+      expect(container.textContent).not.toMatch(/Terminal/);
+    });
+  });
 });
