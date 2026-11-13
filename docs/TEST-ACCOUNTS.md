@@ -160,23 +160,58 @@ from the previous pass or from a comment.
 
 ## Manually created accounts — real flows, not seed fixtures (local stack only)
 
-**These are not reproducible.** Each one was created by hand, tonight, by a
-specific agent for a specific reason, through the real signup/invite page
-rather than a seed script — the opposite of the reproducible-fixture rule
-at the top of this document. Recorded here because the owner's standing
-instruction is to reuse an existing test account wherever practical, and
-that is impossible if the only record of one is a single agent's own
-memory file. **No password, token or invitation token appears below, for
-any entry — not even a redacted placeholder that hints at a format.**
-Sourced from `hive/agents/stanley-mwe4jkri/memory.md` and `tasks.json`
-only; the two `*.local` credential files on this host were not opened for
-this document and are not the source of anything here.
+**These are not reproducible — and tonight proved exactly how not-reproducible,
+not just in theory.** Each one is created by hand, through the real
+signup/invite page rather than a seed script, which is the opposite of the
+reproducible-fixture rule at the top of this document. **2026-11-13: an
+untracked embedded-Postgres data directory inside a git worktree was
+destroyed by a `git stash -u` (MDF-737) and the stack was wiped and rebuilt
+from zero.** Every seed-made account in the tables above — `uat-customer@`,
+`uat-driver@`, the SUPER_ADMIN, all of it — came back automatically the
+moment `seed.ts` and `seed-uat-logistics.ts` ran again. Every hand-made
+terminal-company row did not: `TerminalCompanyProfile`, `TerminalCompanyMember`
+and `TerminalCompanyInvite` were all counted at **zero** after the rebuild
+(Dwight, counted directly, not inferred from the seed scripts' own
+comments), and the entire MANAGER/OPERATOR/sender trio below had to be
+re-created by hand, by Stanley, before any terminal row in the acceptance
+matrix could be exercised again. **That is the practical meaning of "not a
+reproducible fixture": a seed survives a rebuild, a hand-made account does
+not, and this is the proof, not a hypothetical.** The accounts below are
+the *current, post-rebuild* set.
+
+Recorded here because the owner's standing instruction is to reuse an
+existing test account wherever practical, and that is impossible if the
+only record of one is a single agent's own memory or acceptance-matrix
+file. **No password, token or invitation token appears below, for any
+entry — not even a redacted placeholder that hints at a format.** Sourced
+from `hive/agents/stanley-mwe4jkri/acceptance-matrix.md` (Updates 34, 41–42)
+and `tasks.json` only; the two `*.local` credential files on this host
+were not opened for this document and are not the source of anything here.
 
 | Account | Role | Purpose | Stack | Created by / when | Safe to reuse for |
 | --- | --- | --- | --- | --- | --- |
-| `stanley-manager-1794527832794@example.bz` | Terminal **MANAGER** | Terminal Workspace MANAGER-vs-OPERATOR permission checks (MDF-698) | **Local stack only** — terminal company "Stanley QA Terminal Co 1794527832794" (`isTest`, hub codes `UATBC`/`UATBP`) | Stanley (`stanley-mwe4jkri`), via the real invite-and-accept flow, 2026-11-12 | Any Terminal Workspace check that needs an active MANAGER on an `isTest` terminal company. Do not assume it exists on a fresh database. |
-| `stanley-operator-1794527832794@example.bz` | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same terminal company, local stack only | Stanley, same flow and date | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. |
-| `stanley-sender-1794527832794@example.bz` | **CUSTOMER** | Sender account to book parcels against for Terminal Workspace testing | Local stack only | Stanley, registered through the real signup page, 2026-11-13 | Booking a parcel as a sender. Funded with **BZ$50.00** by a single admin-console test-credit grant (`WalletOperations` → `/api/admin/wallet/test-credit`, permission `wallet.credit_test`) — performed by Dwight (`bmpl-qa-mtmcz0m1`), **acting as the seeded SUPER_ADMIN**, because no scoped QA-admin account exists yet (open question on MDF-696/MDF-708). Any finding about what this role *should* be able to do, versus what was actually observed under the SUPER_ADMIN account, should say which of the two it is — the effective permissions of a future dedicated QA-admin role are not yet established. |
+| Terminal company "MDF697 Stanley Co 1794535105877" — **MANAGER** member (email not recorded in any source available to this document; see note below) | Terminal **MANAGER** | Terminal Workspace MANAGER-vs-OPERATOR permission checks (MDF-698) — the replacement for the pre-wipe "Stanley QA Terminal Co 1794527832794" company, which no longer exists | **Local stack only** — `isTest`, holds active membership at **both** `UATBC` and `UATBP` | Re-created by Dwight through the real admin-console company-and-invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 (post-rebuild) | Any Terminal Workspace check that needs an active MANAGER on an `isTest` terminal company holding both hubs. **Cannot** be used for a terminal-scope-enforcement test — see the single-hub account below for why. Do not assume it exists on a fresh database. |
+| Same company — **OPERATOR** member (email not recorded; see note below) | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same company, same both-hub membership, local stack only | Dwight invited, Stanley accepted, same flow and date | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. **Cannot** be used for a terminal-scope-enforcement test, for the same reason as the MANAGER. |
+| A third, separate terminal-staff member — **OPERATOR** role, membership at **`UATBC` (Belize City) only** (`locationCount: 1`, email not recorded; see note below) | Terminal **OPERATOR**, single-hub | **The only account on this stack that can test terminal scope enforcement.** The two accounts above hold memberships at *both* hubs, so neither one can produce a genuine "acting outside my hub" case — there is no hub either of them is outside of. This account exists specifically to fill that gap. | **Local stack only** — `isTest`, `UATBC` only, confirmed by `GET /api/terminal/me` listing only Belize City for this account | Invited by Dwight through the real admin-console invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 | Any terminal scope-enforcement check. Confirmed so far (Stanley, acceptance-matrix Updates 41–42): read-scope PASS — `GET /api/terminal/queue` as this account excludes a parcel at the other hub; write-scope PASS — `POST /api/terminal/legs/<id>/handoff` against a leg at `UATBP` returned 403 "You do not hold this terminal location." **Do not widen this account's memberships for convenience** — a second hub would destroy the one thing it is for. |
+
+**Email addresses above are intentionally blank, not omitted by mistake.**
+Neither Stanley's acceptance-matrix entries nor any task-tracker note
+available to this document records the actual email for the rebuilt
+MANAGER, OPERATOR or single-hub OPERATOR accounts — only the company name,
+hub scope and the behavior each account was used to observe. This document
+does not invent one. Whoever next uses these accounts should get the
+address from Stanley or Dwight directly and may wish to add it here.
+
+**The sender role no longer has — or needs — a hand-made account.** The
+pre-wipe sender, `stanley-sender-1794527832794@example.bz`, was destroyed in
+the same wipe along with the terminal company and was **not** re-created.
+In its place, Stanley set his own password on the already-seeded
+`uat-customer@bzemarketplace.com` (via the real forgot-password/reset flow)
+and is using that account as the sender for Terminal Workspace booking —
+see the CUSTOMER row in the web-app fixtures table above for the account
+itself. This is a strictly better outcome than the account it replaced:
+`uat-customer@` is a reproducible seed fixture, so it survives the next
+rebuild without anyone re-registering it by hand.
 
 **Explicitly out of scope — never use for QA, under any circumstance:**
 `edwardbroaster@bzemarketplace.com` (Edward Broaster) is a **real client**,
