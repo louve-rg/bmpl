@@ -253,12 +253,103 @@ landed on `main` whose sha `/api/health` is not yet reporting** — not "if the
 deployment record says `in_progress`." Check `/api/health` before any merge to
 `main`, not the deployment record.
 
+### Three pipelines, not one — Vercel's own mechanism, and the measured gap
+
+§2a above documents Railway's trigger. It is one of **three independent
+pipelines** that all react to the same `main` push — Railway (this API
+service) and two separate Vercel projects, `bmpl-web` and `bmpl-admin` —
+**with no sequencing between any of them.** Each decides for itself whether
+to build, and the two platforms decide it in structurally different ways:
+
+- **Railway**: a static path list (§2a's `watchPatterns`) — a glob match,
+  nothing more. It has no idea whether a matched file is application code
+  or prose. **Evidence**: `8a6019cb` (#720) changed exactly
+  `apps/api/CLAUDE.md` (2 lines) and `docs/openapi/shipping.yaml` (411
+  lines) — zero application code — and still triggered a full Railway
+  rebuild+redeploy, because `apps/api/CLAUDE.md` matches `apps/api/**`. A
+  documentation-only edit under `apps/api/` costs the same ~11–16 minute
+  cycle as a real code change.
+- **Vercel** (`apps/web/vercel.json`, `apps/admin/vercel.json`): each
+  project's own `ignoreCommand` runs `turbo query affected
+  --base="$VERCEL_GIT_PREVIOUS_SHA" --packages @bmpl/web` (or
+  `@bmpl/admin`) and skips the build on a non-zero exit — a real
+  dependency-graph query, not a path list. `git.deploymentEnabled`
+  restricts both projects to the `main` branch only.
+
+**Two different waste classes here, and they take two different fixes — do
+not conflate them.** The `apps/api/CLAUDE.md` case above is a **markdown-only
+commit matching a watched path that was never meant to gate on prose.**
+That one is fixable without touching application behavior: `railway.json`'s
+`watchPatterns` are gitignore-style and support negation (Railway's own
+docs: *"negations will only work if you include files in a preceding
+rule"*), so appending `!apps/api/CLAUDE.md` (and the same for
+`apps/api/DEPLOYMENT.md` and `packages/database/CLAUDE.md` — the only other
+markdown files under any currently-watched directory) stops those three
+files alone from triggering a build, with no other path affected. **A
+lockfile change for a dev-only dependency is a separate, harder case and
+this fix does not touch it.** `4a7ecb93` (#730, an embedded-Redis
+`devDependency`) touched `package.json` and `pnpm-lock.yaml` — both
+genuinely changed, so `pnpm-lock.yaml`'s watch entry correctly matches, and
+no negation on *that* commit's content would be honest: the lockfile is
+exactly the file this repo's own watch list treats as "the exact dependency
+tree `pnpm install --frozen-lockfile` resolves" (§2a above), and a
+`devDependency`-only bump still rewrites it. Distinguishing "this dev-only
+package changed" from "a package `apps/api` actually ships changed" from
+the lockfile diff alone is a real, unsolved problem, not a one-line
+negation — recorded here as open, not folded into the markdown fix above.
+
+**A GitHub deployment record existing is not proof a build ran — read its
+`state`/`description`, never just its presence.** Two confirmed shapes,
+read directly from the Deployments API:
+
+- `f682b1d3` (#714) touches only `apps/web` (3 files — confirmed by `git
+  show --stat`, zero `apps/admin`/`apps/api` lines). It produced a real
+  `bmpl-web` build (`state: success`) AND a separate `bmpl-admin` record
+  for the same commit — `state: inactive`, `description: "Skipped - Not
+  affected"` (deployment id 7769163494, created 15:30:34Z). The unaffected
+  project still gets a record; it just says plainly that it skipped.
+- `118d136b` (#723) touches neither app's source nor anything either
+  depends on (`docs/test-accounts.md` only). It produced **zero**
+  deployment records for `bmpl-web` or `bmpl-admin` — not a skipped one,
+  none at all — confirmed across a 100-row page of deployment history
+  spanning well before and after its push time, so this is not the paging
+  trap described above. **What exactly decides "skip-with-a-record" versus
+  "no record at all" is not established by this evidence** — left open
+  rather than guessed at, the same standard this section already holds
+  itself to elsewhere.
+
+**The consequence for merge order — measured, not "usually faster."**
+Vercel has no migration step; Railway's `preDeployCommand` runs `prisma
+migrate deploy` before the Docker image takes traffic.
+
+- Railway build duration (`in_progress` → `success`), now **eight** clean
+  measurements: `817bf5c` 11m18s, `90dadc5` 15m33s, `fbd8e7f` 14m20s,
+  `04a0f8e` 16m07s, `1fec2bb` 14m12s, `503732c8` 16m23s (2026-11-13
+  03:45:43Z→04:02:06Z), `88d59ac7` 16m21s (15:30:58Z→15:47:19Z), `43df841e`
+  13m14s (16:15:50Z→16:29:04Z). Range stays 11–16 minutes.
+- The gap this produces — web/admin's own success timestamp versus the
+  API-touching commit's Railway success, for the same merge window —
+  measured **twice** on 2026-11-13, not once: **15m12s** (`88d59ac7`: web
+  success 15:32:07Z, Railway success 15:47:19Z) and **12m02s** (`43df841e`:
+  the window's last web success, `39baaf19`/#729, at 16:17:02Z, Railway
+  success 16:29:04Z). Two independent measurements, same order of
+  magnitude — a rule with evidence behind it now, not a single anecdote.
+
+**A single merge that adds both an API route and the web code calling it
+can therefore put the caller live 12–15 minutes before the route exists —
+every time, by the ordinary, correct operation of both pipelines, never a
+failure on either side.** §2b's sequencing rule exists because of exactly
+this gap.
+
 ### 2b. Deployment sequencing — changes that span API and web
 
-The API (Railway, Docker build) deploys in minutes; the web app (Vercel) deploys in
-about a minute. A change that spans both therefore has a window in which the new web
-build is live against the old API. If the web build calls an endpoint the API has not
-shipped yet, users get `Cannot POST /api/...` — a hard 404, not a graceful failure.
+The API (Railway, Docker build) measures 11–16 minutes end to end (see
+above); the web app (Vercel) has no migration step and is typically live
+within a minute or two of its own success record. A change that spans both
+therefore has a measured 12–15 minute window (see above) in which the new
+web build is live against the old API. If the web build calls an endpoint
+the API has not shipped yet, users get `Cannot POST /api/...` — a hard 404,
+not a graceful failure.
 
 Rules, in order:
 
