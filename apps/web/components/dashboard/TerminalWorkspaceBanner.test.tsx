@@ -21,6 +21,13 @@ vi.mock('../../lib/api', () => ({
   api: { get: (...args: unknown[]) => apiGet(...args) },
 }));
 
+// TERM-NAV-401: useTerminalMembership now calls useRouter() (to redirect to
+// sign-in on a dead session) -- this test mounts outside any real app
+// router, so it needs the same mock DashboardNavList.test.tsx already uses.
+// Stable reference across renders, same reasoning as that file's comment.
+const router = { push: vi.fn() };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
