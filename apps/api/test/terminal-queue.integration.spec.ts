@@ -413,3 +413,61 @@ describe('TERM-8: the queue itself is per-caller, not per-hub-id-you-ask-for', (
     expect((await get(cookies, 'terminal/queue')).status).toBe(403);
   });
 });
+
+/**
+ * TERM-QUEUE-TRUNCATION: the body stays the flat array `apps/web`'s shipped
+ * queue tab already reads (unchanged below — a normal-sized queue returns
+ * exactly the same shape and the same rows it always did). The truth about
+ * completeness rides the `X-BMPL-Queue-Has-More` response header instead, so
+ * these two tests prove the header both tells the truth when nothing was cut
+ * (`false`) and flips to `true` the moment one category alone exceeds its own
+ * cap — here, DEPART's `take: 100` — without needing any OTHER category to
+ * overflow too.
+ */
+describe('TERM-QUEUE-TRUNCATION: X-BMPL-Queue-Has-More tells the truth about completeness', () => {
+  it('reports false when nothing in the queue was cut', async () => {
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.originHubId]);
+    await bookedReadyToDepart(await fundedSender(), net);
+
+    const res = await get(staff.cookies, 'terminal/queue');
+    expect(res.status).toBe(200);
+    expect(res.headers['x-bmpl-queue-has-more']).toBe('false');
+  });
+
+  it('reports true, and still caps the body at 100 DEPART rows, once 101 legs are waiting at one hub', async () => {
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.originHubId]);
+    const tag = uniq();
+
+    // Inserted directly, not via the booking API — 101 real door-to-door
+    // bookings would make this test itself the slow thing on the floor.
+    // Every field relevant to terminalQueue's DEPART predicate (kind,
+    // originHubId, departedAt, status) is real; everything else is the
+    // minimum Shipment/ShipmentLeg actually require.
+    const shipments = Array.from({ length: 101 }, (_, i) => ({
+      id: `ovf_s_${tag}_${i}`,
+      reference: `OVF-${tag}-${i}`,
+      service: 'DOOR_TO_DOOR' as const,
+    }));
+    await ctx.prisma.shipment.createMany({ data: shipments });
+    await ctx.prisma.shipmentLeg.createMany({
+      data: shipments.map((s, i) => ({
+        id: `ovf_l_${tag}_${i}`,
+        shipmentId: s.id,
+        sequence: 1,
+        kind: 'LINE_HAUL' as const,
+        mode: 'SEA' as const,
+        status: 'READY' as const,
+        originHubId: net.originHubId,
+        destinationHubId: net.destinationHubId,
+      })),
+    });
+
+    const res = await get(staff.cookies, 'terminal/queue');
+    expect(res.status).toBe(200);
+    expect(res.headers['x-bmpl-queue-has-more']).toBe('true');
+    const departRows = res.body.filter((i: { action: string; legId: string }) => i.action === 'DEPART' && i.legId.startsWith(`ovf_l_${tag}_`));
+    expect(departRows.length).toBe(100);
+  });
+});

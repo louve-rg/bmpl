@@ -3691,7 +3691,7 @@ export class ShipmentService {
     if (!r.destinationEmail || !r.recipientToken) return;
     const link = `${this.env.NEXT_PUBLIC_SITE_URL}/track/${r.recipientToken}`;
     const subject = `Shipment ${r.reference} is ready for collection`;
-    const body = `Your parcel (shipment ${r.reference}) has arrived and is ready for collection. Visit your tracking page to see your collection code: ${link}\n\nThis email does not contain your collection code — it only links to the tracking page where you can see it.`;
+    const body = `Your parcel (shipment ${r.reference}) has arrived and is ready for collection. Visit your tracking page to get your collection code: ${link}\n\nThis email does not contain your collection code — it only links to the tracking page where you can see it.`;
     const sendResult = await this.email.sendDetailed({ to: r.destinationEmail, subject, body });
     await this.audit.record({
       action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT',
@@ -5371,30 +5371,52 @@ export class ShipmentService {
    * demo-data labelling this endpoint was missing — selected from each
    * query's own `shipment`, nothing new derived).
    *
-   * NOT fixed here, reported instead: the five `take: 100`/`take: 200`
-   * limits below are a pre-existing silent-truncation defect (a busy
-   * terminal can lose rows off the end with nothing on screen saying so).
-   * MDF-700's three NEW endpoints below (`terminalInbound`/
-   * `terminalOutbound`/`terminalCustody`) are built with an explicit
-   * `hasMore` from day one so they do not repeat it, but reshaping THIS
-   * method's response from a flat array to a paginated `{items, hasMore}`
-   * would be a breaking change for `apps/web`'s already-shipped Terminal
-   * Workspace queue tab, which reads it as an array today — out of scope
-   * for this card without coordinating that frontend change.
+   * TERM-QUEUE-TRUNCATION: the five `take` limits below are a pre-existing
+   * silent-truncation defect (a busy terminal can lose rows off the end
+   * with nothing on screen saying so) — reported, then carded with this
+   * name. MDF-700's three NEW endpoints (`terminalInbound`/
+   * `terminalOutbound`/`terminalCustody`) answered it with an explicit
+   * `hasMore` from day one; reshaping THIS method's response from a flat
+   * array to a paginated `{items, hasMore}` would still be a breaking
+   * change for `apps/web`'s already-shipped Terminal Workspace queue tab,
+   * which reads it as an array today, so this method still returns `items`
+   * as that exact same flat array. The completeness signal instead rides
+   * the `hasMore` return field the CONTROLLER reads and republishes as the
+   * `X-Queue-Has-More` response header (see `TerminalController.queue`) —
+   * the body shape every existing caller already depends on never changes,
+   * so there is nothing to coordinate or half-land; a caller that wants the
+   * truth reads the header, one that doesn't is unaffected either way.
+   *
+   * Each category requests one row past its own cap (`take: limit + 1`) and
+   * slices back down to `limit` before building `items` — so `items` is
+   * byte-for-byte what this method always returned, and the overflow check
+   * costs one extra row per category rather than a second COUNT query.
+   * `collecting`'s cap applies to the SUPERSET query (any leg touching one
+   * of my hubs), one step before `collectAtMyHubs` re-derives the true
+   * final-leg owner below — so an overflow there is reported as "maybe
+   * more", even though the per-hub-filtered count could end up smaller:
+   * the rows lost to the cap might all have belonged to some other hub, but
+   * since this method cannot tell which, it never claims completeness it
+   * cannot back up.
    */
   async terminalQueue(hubIds: string[]) {
-    if (hubIds.length === 0) return [];
-    const [departing, arriving, handoff, release, collecting] = await Promise.all([
+    if (hubIds.length === 0) return { items: [], hasMore: false };
+    const DEPART_TAKE = 100;
+    const ARRIVE_TAKE = 100;
+    const HANDOFF_TAKE = 100;
+    const RELEASE_TAKE = 100;
+    const COLLECT_TAKE = 200;
+    const [departingRaw, arrivingRaw, handoffRaw, releaseRaw, collectingRaw] = await Promise.all([
       this.prisma.shipmentLeg.findMany({
         where: { kind: 'LINE_HAUL', originHubId: { in: hubIds }, departedAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
         orderBy: { createdAt: 'asc' },
-        take: 100,
+        take: DEPART_TAKE + 1,
         include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, destinationHub: { select: { name: true } } },
       }),
       this.prisma.shipmentLeg.findMany({
         where: { kind: 'LINE_HAUL', destinationHubId: { in: hubIds }, status: 'IN_PROGRESS', arrivedAt: null },
         orderBy: { departedAt: 'asc' },
-        take: 100,
+        take: ARRIVE_TAKE + 1,
         include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, originHub: { select: { name: true } } },
       }),
       this.prisma.shipmentLeg.findMany({
@@ -5412,7 +5434,7 @@ export class ShipmentService {
           OR: [{ kind: 'FIRST_MILE' }, { kind: 'LINE_HAUL', arrivedAt: { not: null } }],
         },
         orderBy: [{ arrivedAt: { sort: 'desc', nulls: 'last' } }, { sequence: 'asc' }],
-        take: 100,
+        take: HANDOFF_TAKE + 1,
         include: {
           shipment: { select: { reference: true, description: true, pieces: true, isTest: true } },
           originHub: { select: { name: true } },
@@ -5422,7 +5444,7 @@ export class ShipmentService {
       this.prisma.shipmentLeg.findMany({
         where: { kind: 'LAST_MILE', originHubId: { in: hubIds }, courierStatus: 'DRIVER_ACCEPTED' },
         orderBy: { createdAt: 'asc' },
-        take: 100,
+        take: RELEASE_TAKE + 1,
         include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, assignedDriver: { select: { displayName: true } } },
       }),
       // `destinationHubId` lives on the LEG, not the shipment. The `some`
@@ -5433,14 +5455,25 @@ export class ShipmentService {
       this.prisma.shipment.findMany({
         where: { status: 'AWAITING_COLLECTION', collectedAt: null, legs: { some: { destinationHubId: { in: hubIds } } } },
         select: { id: true, reference: true, description: true, pieces: true, isTest: true, legs: { select: { destinationHubId: true, sequence: true } } },
-        take: 200,
+        take: COLLECT_TAKE + 1,
       }),
     ]);
+    const departingOverflow = departingRaw.length > DEPART_TAKE;
+    const arrivingOverflow = arrivingRaw.length > ARRIVE_TAKE;
+    const handoffOverflow = handoffRaw.length > HANDOFF_TAKE;
+    const releaseOverflow = releaseRaw.length > RELEASE_TAKE;
+    const collectingOverflow = collectingRaw.length > COLLECT_TAKE;
+    const departing = departingOverflow ? departingRaw.slice(0, DEPART_TAKE) : departingRaw;
+    const arriving = arrivingOverflow ? arrivingRaw.slice(0, ARRIVE_TAKE) : arrivingRaw;
+    const handoff = handoffOverflow ? handoffRaw.slice(0, HANDOFF_TAKE) : handoffRaw;
+    const release = releaseOverflow ? releaseRaw.slice(0, RELEASE_TAKE) : releaseRaw;
+    const collecting = collectingOverflow ? collectingRaw.slice(0, COLLECT_TAKE) : collectingRaw;
+    const hasMore = departingOverflow || arrivingOverflow || handoffOverflow || releaseOverflow || collectingOverflow;
     const collectAtMyHubs = collecting.filter((s) => {
       const finalLeg = [...s.legs].sort((a, b) => b.sequence - a.sequence)[0];
       return finalLeg?.destinationHubId != null && hubIds.includes(finalLeg.destinationHubId);
     });
-    return [
+    const items = [
       ...departing.map((l) => ({
         action: 'DEPART' as const,
         legId: l.id,
@@ -5488,6 +5521,7 @@ export class ShipmentService {
         isTest: s.isTest,
       })),
     ];
+    return { items, hasMore };
   }
 
   /** Shared with terminalInbound/terminalOutbound/terminalCustody below. */
