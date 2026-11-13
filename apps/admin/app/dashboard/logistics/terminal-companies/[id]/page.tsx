@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { adminCrumbs } from '../../../../../lib/admin-nav';
@@ -110,6 +110,16 @@ export default function TerminalCompanyDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
+  // MDF-722: once the page has shown a company, a later refresh (onChanged,
+  // fired by every card after a mutation -- including a resend whose own
+  // send-outcome alert just got set in the SAME tick) must not unmount the
+  // body back to the loading spinner, the 404 state or a bare error screen.
+  // Doing so wiped a just-set card-local alert (InvitesCard's resend
+  // outcome, MembersCard's invite outcome) before the administrator ever
+  // saw it. `hasLoadedRef` gates the full-page states to first paint only;
+  // after that, the cards stay mounted (so their local state survives) and
+  // a refresh problem becomes a banner, not a takeover.
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     api
@@ -119,15 +129,21 @@ export default function TerminalCompanyDetailPage() {
   }, []);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     try {
-      setCompany(await api.get<CompanyDetail>(`/admin/terminal/companies/${id}`));
+      const next = await api.get<CompanyDetail>(`/admin/terminal/companies/${id}`);
+      setCompany(next);
       setErr(null);
       setNotFound(false);
     } catch (e) {
       const ex = e as ApiError;
-      if (ex.status === 404) {
+      if (ex.status === 404 && !hasLoadedRef.current) {
         setNotFound(true);
+      } else if (ex.status === 404) {
+        // The company disappeared on a later refresh, after we already had
+        // one to show -- rare, but "not found" here must not blank a screen
+        // the administrator was already looking at.
+        setErr('This terminal company could not be found on refresh. It may have just been removed.');
       } else {
         // Includes a 403 — the server's own permission message is shown
         // verbatim, same convention as the carrier console, and is never
@@ -136,6 +152,7 @@ export default function TerminalCompanyDetailPage() {
       }
     } finally {
       setLoading(false);
+      hasLoadedRef.current = true;
     }
   }, [id]);
 
@@ -143,30 +160,30 @@ export default function TerminalCompanyDetailPage() {
     void load();
   }, [load]);
 
-  if (loading) {
-    return (
-      <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
-      </div>
-    );
-  }
-
-  if (err) {
-    return (
-      <div>
-        <PageHeader breadcrumbs={adminCrumbs(['Logistics', '/dashboard/logistics'], ['Terminal companies', '/dashboard/logistics/terminal-companies'], 'Terminal company')} title="Terminal company" />
-        <Alert tone="warning" className="mt-4">{err}</Alert>
-      </div>
-    );
-  }
-
-  if (notFound || !company) {
-    return (
-      <div>
-        <PageHeader breadcrumbs={adminCrumbs(['Logistics', '/dashboard/logistics'], ['Terminal companies', '/dashboard/logistics/terminal-companies'], 'Terminal company')} title="Terminal company" />
-        <div className="mt-6">
-          <EmptyState title="Terminal company not found" description="This company may have been removed, or the id is wrong." />
+  if (!company) {
+    if (loading) {
+      return (
+        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
         </div>
+      );
+    }
+
+    if (notFound) {
+      return (
+        <div>
+          <PageHeader breadcrumbs={adminCrumbs(['Logistics', '/dashboard/logistics'], ['Terminal companies', '/dashboard/logistics/terminal-companies'], 'Terminal company')} title="Terminal company" />
+          <div className="mt-6">
+            <EmptyState title="Terminal company not found" description="This company may have been removed, or the id is wrong." />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <PageHeader breadcrumbs={adminCrumbs(['Logistics', '/dashboard/logistics'], ['Terminal companies', '/dashboard/logistics/terminal-companies'], 'Terminal company')} title="Terminal company" />
+        <Alert tone="warning" className="mt-4">{err ?? 'Could not load this terminal company.'}</Alert>
       </div>
     );
   }
@@ -180,6 +197,11 @@ export default function TerminalCompanyDetailPage() {
         title={company.businessName}
         description={company.contactEmail}
       />
+
+      {/* A refresh problem, once we already have a company to show, is a
+          banner -- never a takeover of the cards below (and whatever a card
+          just told the administrator). */}
+      {err && <Alert tone="warning">{err}</Alert>}
 
       <ProfileCard company={company} canManage={canManage} onChanged={load} />
       <LocationsCard company={company} canManage={canManage} onChanged={load} />
