@@ -126,6 +126,23 @@ describe('MDF-699 (TERM-LOOKUP): GET /terminal/shipments/:reference', () => {
     expect(findPinLeak(res.body, firstMile.handoffPin!)).toBeNull();
   });
 
+  it('TERM-SEARCH-CASE: finds the same shipment regardless of how the clerk cases or spaces the reference', async () => {
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.originHubId]);
+    const shipment = await bookDoorToDoor(await fundedSender(), net);
+
+    const lower = await get(staff.cookies, `terminal/shipments/${shipment.reference.toLowerCase()}`);
+    expect(lower.status).toBe(200);
+    expect(lower.body.shipmentId).toBe(shipment.id);
+    // The reference as returned is always the canonical stored form, not an
+    // echo of however the clerk typed it in.
+    expect(lower.body.reference).toBe(shipment.reference);
+
+    const padded = await get(staff.cookies, `terminal/shipments/${encodeURIComponent(`  ${shipment.reference}  `)}`);
+    expect(padded.status).toBe(200);
+    expect(padded.body.shipmentId).toBe(shipment.id);
+  });
+
   it('a staff member granted only the destination hub can also find it (either end counts)', async () => {
     const net = await makeNetwork();
     const staff = await makeTerminalStaff([net.destinationHubId]);
