@@ -222,6 +222,14 @@ export default function TerminalWorkspacePage() {
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
+  // TERM-QUEUE-OVERFLOW-UI: MDF-739 made the API tell the truth about
+  // truncation via the X-BMPL-Queue-Has-More response header rather than
+  // changing the body shape (so it could merge without a matching frontend
+  // change in the same window) -- this is that frontend change landing.
+  // Read, never fabricated: absent or any value other than the literal
+  // string "true" reads as false, so a header that failed to arrive shows
+  // no banner rather than a false one.
+  const [queueHasMore, setQueueHasMore] = useState(false);
 
   const [staff, setStaff] = useState<StaffRoster | null>(null);
   const [staffErr, setStaffErr] = useState<string | null>(null);
@@ -264,7 +272,9 @@ export default function TerminalWorkspacePage() {
     setQueueLoading(true);
     setQueueErr(null);
     try {
-      setRows(await api.get<QueueRow[]>('/terminal/queue'));
+      const { data, headers } = await api.getWithHeaders<QueueRow[]>('/terminal/queue');
+      setRows(data);
+      setQueueHasMore(headers.get('X-BMPL-Queue-Has-More') === 'true');
     } catch (e) {
       setQueueErr(errMessage(e, 'Could not load your queue.'));
     } finally {
@@ -540,6 +550,18 @@ export default function TerminalWorkspacePage() {
       />
 
       {queueErr && <Alert tone="error">{queueErr}</Alert>}
+
+      {/* TERM-QUEUE-OVERFLOW-UI: each category's own cap can truncate the
+          list below without the clerk ever being told -- the header this
+          reads exists so that stays honest. No new control is invented
+          here; Lookup (below) already finds one specific shipment by its
+          reference, which is the one action a clerk can already take on an
+          item this page isn't showing. */}
+      {rows && queueHasMore && (
+        <Alert tone="neutral">
+          There are more parcels waiting than the list below shows. Use Lookup to find a specific one by its reference or tracking number.
+        </Alert>
+      )}
 
       {queueLoading && !rows && <LoadingRow label="Loading your queue…" />}
 

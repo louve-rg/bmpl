@@ -140,8 +140,8 @@ const LOOKUP_RESULT = {
   ],
 };
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
 }
 
 type StubOpts = {
@@ -157,6 +157,11 @@ type StubOpts = {
   // queueRows/queueRowsAfter, to prove the Lookup tab doesn't go down with it.
   queueStatus?: number;
   queueErrorBody?: unknown;
+  // TERM-QUEUE-OVERFLOW-UI: the real X-BMPL-Queue-Has-More response header
+  // value, as a boolean. Absent/false is the default -- most queues fit
+  // within every category's cap, so a test that doesn't care about this
+  // should see no overflow banner by default.
+  queueHasMore?: boolean;
   actionStatus?: number;
   actionBody?: unknown;
   staffStatus?: number;
@@ -189,7 +194,7 @@ function stubFetch(opts: StubOpts = {}) {
           return jsonResponse(opts.queueStatus, opts.queueErrorBody ?? { message: 'Could not load your queue.' });
         }
         const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
-        return jsonResponse(200, rows);
+        return jsonResponse(200, rows, { 'X-BMPL-Queue-Has-More': String(opts.queueHasMore ?? false) });
       }
       if (method === 'POST') {
         calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -281,6 +286,20 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     await mount();
 
     expect(container!.textContent).toContain('Nothing waiting at your locations');
+  });
+
+  it('tells the clerk more parcels are waiting than shown, when X-BMPL-Queue-Has-More says so (TERM-QUEUE-OVERFLOW-UI)', async () => {
+    stubFetch({ queueRows: [DEPART_ROW], queueHasMore: true });
+    await mount();
+
+    expect(container!.textContent).toContain('There are more parcels waiting than the list below shows');
+  });
+
+  it('shows no overflow banner when the header says there is nothing more (TERM-QUEUE-OVERFLOW-UI)', async () => {
+    stubFetch({ queueRows: [DEPART_ROW], queueHasMore: false });
+    await mount();
+
+    expect(container!.textContent).not.toContain('There are more parcels waiting');
   });
 
   it('marks a leg departed with a single click and an empty body', async () => {

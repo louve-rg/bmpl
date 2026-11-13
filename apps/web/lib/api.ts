@@ -44,7 +44,7 @@ async function csrfToken(): Promise<string | undefined> {
   return token;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+async function requestWithResponse(path: string, init: RequestInit = {}, retry = true): Promise<{ data: unknown; res: Response }> {
   const method = (init.method ?? 'GET').toUpperCase();
   const csrfHeader: Record<string, string> = {};
   if (MUTATING.has(method)) {
@@ -69,7 +69,7 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       method: 'POST',
       credentials: 'include',
     });
-    if (refreshed.ok) return request<T>(path, init, false);
+    if (refreshed.ok) return requestWithResponse(path, init, false);
   }
 
   const text = await res.text();
@@ -94,7 +94,23 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
     };
     throw err;
   }
+  return { data, res };
+}
+
+async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const { data } = await requestWithResponse(path, init, retry);
   return data as T;
+}
+
+/**
+ * Like `api.get`, but also hands back the raw response headers -- for the
+ * rare caller that needs something riding a header rather than the body
+ * (TERM-QUEUE-OVERFLOW-UI: the terminal queue's completeness signal is a
+ * header precisely so the response body never had to change shape).
+ */
+async function getWithHeaders<T>(path: string): Promise<{ data: T; headers: Headers }> {
+  const { data, res } = await requestWithResponse(path, { method: 'GET' });
+  return { data: data as T, headers: res.headers };
 }
 
 /**
@@ -151,6 +167,7 @@ export function errorMessage(e: unknown, fallback: string): string {
 
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: 'GET' }),
+  getWithHeaders: <T>(path: string) => getWithHeaders<T>(path),
   upload: <T>(path: string, body: Blob) => uploadBinary<T>(path, body),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
