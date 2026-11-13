@@ -180,7 +180,10 @@ export function PageHeader({
   eyebrow,
   actions,
 }: {
-  title: string;
+  /** A plain string in every caller but one -- widened to ReactNode so a
+   * caller can compose a title with an inline badge (e.g. a "Demo" marker)
+   * without PageHeader inventing a separate slot for it. */
+  title: ReactNode;
   description?: string;
   eyebrow?: string;
   actions?: ReactNode;
@@ -189,7 +192,7 @@ export function PageHeader({
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
-        <h1 className="bmpl-page-title mt-1 break-words">{title}</h1>
+        <h1 className="bmpl-page-title mt-1 flex flex-wrap items-center gap-2 break-words">{title}</h1>
         {description && <p className="mt-1.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}

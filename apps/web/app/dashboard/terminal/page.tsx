@@ -90,6 +90,13 @@ interface Workspace {
   companyId: string;
   companyName: string;
   memberRole: string;
+  /**
+   * T-7/MDF-736: `myWorkspace` (terminal.service.ts:647) has shipped this
+   * since #698 -- the gap was never the API, it was that this interface
+   * (and therefore every TypeScript access to `workspace`) dropped the
+   * field on arrival before anything here could read it.
+   */
+  isTest: boolean;
   locations: Array<{ locationId: string; hub: HubRef }>;
 }
 
@@ -147,9 +154,16 @@ interface LookupResult {
   legs: LookupLeg[];
 }
 
+/**
+ * T-7/MDF-736: `terminalQueue` (shipment.service.ts:5385) stamps `isTest` on
+ * every one of its five row shapes -- added here, on each variant, rather
+ * than once on a shared base, so every QueueRowCard access is still exact
+ * about which action it's rendering; TypeScript would not have caught a
+ * typo'd field name on a looser shared type the way it does on these.
+ */
 type QueueRow =
-  | { action: 'DEPART'; legId: string; hubId: string; reference: string; parcel: string; to: string }
-  | { action: 'ARRIVE'; legId: string; hubId: string; reference: string; parcel: string; from: string }
+  | { action: 'DEPART'; legId: string; hubId: string; reference: string; parcel: string; to: string; isTest: boolean }
+  | { action: 'ARRIVE'; legId: string; hubId: string; reference: string; parcel: string; from: string; isTest: boolean }
   | {
       action: 'HANDOFF';
       legId: string;
@@ -159,9 +173,10 @@ type QueueRow =
       from: string;
       broughtBy: string;
       arrived: boolean;
+      isTest: boolean;
     }
-  | { action: 'RELEASE_TO_COURIER'; legId: string; hubId: string; reference: string; parcel: string; courier: string | null }
-  | { action: 'COLLECT'; shipmentId: string; hubId: string; reference: string; parcel: string };
+  | { action: 'RELEASE_TO_COURIER'; legId: string; hubId: string; reference: string; parcel: string; courier: string | null; isTest: boolean }
+  | { action: 'COLLECT'; shipmentId: string; hubId: string; reference: string; parcel: string; isTest: boolean };
 
 const SECTION_ORDER: Array<{ action: QueueRow['action']; title: string }> = [
   { action: 'DEPART', title: 'Ready to depart' },
@@ -498,7 +513,14 @@ export default function TerminalWorkspacePage() {
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <PageHeader
-        title={workspace!.companyName}
+        title={
+          <>
+            {workspace!.companyName}
+            {/* T-7/MDF-736: text, not color or icon alone -- same rule the
+                Lookup tab's own Demo badge below follows. */}
+            {workspace!.isTest && <Badge tone="neutral">Demo</Badge>}
+          </>
+        }
         description={`Signed in as ${workspace!.memberRole.toLowerCase()} · ${workspace!.locations.length} location${workspace!.locations.length === 1 ? '' : 's'}${
           rows ? ` · ${totalCount} item${totalCount === 1 ? '' : 's'} waiting on you` : ''
         }`}
@@ -676,6 +698,10 @@ function QueueRowCard({
           </Badge>
         )}
         {row.action === 'HANDOFF' && row.arrived && <Badge tone="success">Arrived</Badge>}
+        {/* T-7/MDF-736: same text-only Demo badge as the workspace header and
+            the Lookup tab's own result -- one visual language for the one
+            fact, not a second marker invented for the queue. */}
+        {row.isTest && <Badge tone="neutral">Demo</Badge>}
       </div>
 
       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
@@ -823,7 +849,16 @@ function StaffRosterPanel({
       <div>
         <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Members ({staff.members.length})</h2>
         {staff.members.length === 0 ? (
-          <EmptyState title="No staff yet" description="Invite a manager or operator from the admin console to see them here." />
+          <EmptyState
+            title="No staff yet"
+            // MDF-740: the previous copy told a terminal Manager to do
+            // something only a BML administrator can do -- a Manager has
+            // no admin-console access at all. Name the route that actually
+            // exists rather than one this screen cannot open; do not
+            // promise an invite control here, since whether a Manager
+            // should get one is still an open owner question.
+            description="A BML administrator adds terminal staff from the admin console. Ask them to invite your managers and operators."
+          />
         ) : (
           <div className="space-y-3">
             {staff.members.map((m) => (
