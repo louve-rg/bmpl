@@ -1523,4 +1523,55 @@ describe('an admin-created simulation network', () => {
     expect(modes.status).toBe(200);
     expect(modes.body).not.toContain('SEA');
   });
+
+  it('shows a test customer their own simulation terminals through the signed-in picker (TERM-SIM-NETWORK-INVISIBLE)', async () => {
+    const t1 = await post(admin, 'admin/logistics/hubs', {
+      code: `TM${(seq += 1)}`, name: 'Test Mine Terminal (simulation)', type: 'BMPL_HUB',
+      district: 'COROZAL', city: 'Corozal Town', modes: ['LAND', 'SEA'],
+      courierFeeMinor: 1000, isTest: true,
+    });
+    const t2 = await post(admin, 'admin/logistics/hubs', {
+      code: `TM${(seq += 1)}`, name: 'Test Mine Pier (simulation)', type: 'SEA_TERMINAL',
+      district: 'ORANGE_WALK', city: 'Orange Walk Town', modes: ['SEA'],
+      courierFeeMinor: 1000, isTest: true,
+    });
+    expect(t1.status).toBe(201);
+    expect(t2.status).toBe(201);
+    expect(
+      (
+        await post(admin, 'admin/logistics/routes', {
+          originHubId: t1.body.id, destinationHubId: t2.body.id, mode: 'SEA',
+          durationMinutes: 90, priceMinor: 2500, carrierName: 'Test Ferry Mine (simulation)', isTest: true,
+        })
+      ).status,
+    ).toBe(201);
+
+    const s = uniq();
+    const t = await registerCustomer(`simmine_${s}@example.com`);
+    expect((await post(admin, 'admin/users/test-flag', { userId: t.userId, isTest: true, reason: 'Network console test.' })).status).toBe(201);
+
+    // The signed-in test customer sees their own simulation hubs and SEA mode…
+    const myHubs = await get(t.cookies, 'shipping/hubs/mine');
+    expect(myHubs.status).toBe(200);
+    const myIds = myHubs.body.map((h: { id: string }) => h.id);
+    expect(myIds).toContain(t1.body.id);
+    expect(myIds).toContain(t2.body.id);
+    expect(myIds).not.toContain(hub.PLA);
+    const myModes = await get(t.cookies, 'shipping/modes/mine');
+    expect(myModes.status).toBe(200);
+    expect(myModes.body).toContain('SEA');
+
+    // …while a real customer's own picker is unchanged from the anonymous one:
+    // real hubs only, no simulation row, and the anonymous surfaces are untouched.
+    const realHubs = await get(customer, 'shipping/hubs/mine');
+    expect(realHubs.status).toBe(200);
+    const realIds = realHubs.body.map((h: { id: string }) => h.id);
+    expect(realIds).toContain(hub.PLA);
+    expect(realIds).not.toContain(t1.body.id);
+    expect(realIds).not.toContain(t2.body.id);
+    const realModes = await get(customer, 'shipping/modes/mine');
+    expect(realModes.body).not.toContain('SEA');
+    const publicHubsStill = await request(ctx.server).get('/api/shipping/hubs');
+    expect(publicHubsStill.body.map((h: { id: string }) => h.id)).not.toContain(t1.body.id);
+  });
 });

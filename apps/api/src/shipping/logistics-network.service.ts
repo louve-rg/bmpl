@@ -127,19 +127,9 @@ export class LogisticsNetworkService {
 
   /* --------------------------------------------------------------- hubs */
 
-  /**
-   * The terminals a customer can pick, with nothing operational in the payload.
-   *
-   * REAL side only, matching how availableModes and the planner already decide
-   * (isTest defaults false on every public surface): this endpoint is @Public
-   * and carries no caller identity, and a rehearsal terminal must never be
-   * offered to a real customer as a place to send a parcel. A designated test
-   * account exercises the simulation network through quote/booking, which
-   * derive the side from the USER — not through this anonymous picker.
-   */
-  async publicHubs() {
+  private async hubsForSide(isTest: boolean) {
     const hubs = await this.prisma.logisticsHub.findMany({
-      where: { isActive: true, isTest: false },
+      where: { isActive: true, isTest },
       orderBy: [{ district: 'asc' }, { name: 'asc' }],
     });
     return hubs.map((h) => ({
@@ -155,6 +145,32 @@ export class LogisticsNetworkService {
       modes: h.modes,
       instructions: h.instructions,
     }));
+  }
+
+  /**
+   * The terminals a customer can pick, with nothing operational in the payload.
+   *
+   * REAL side only, matching how availableModes and the planner already decide
+   * (isTest defaults false on every public surface): this endpoint is @Public
+   * and carries no caller identity, and a rehearsal terminal must never be
+   * offered to a real customer as a place to send a parcel. A test account
+   * does not use this picker — see `hubsForAccount` below.
+   */
+  async publicHubs() {
+    return this.hubsForSide(false);
+  }
+
+  /**
+   * The same picker, scoped to the signed-in caller's own side (TERM-SIM-
+   * NETWORK-INVISIBLE). `publicHubs` above is real-only by design because it
+   * carries no caller identity; quote and booking already derive isTest from
+   * the account, but until this existed the picker that feeds them never
+   * showed a test hub, so a test customer could choose one in the API that
+   * their own account could never actually reach. `isTest` here is always the
+   * caller's own, read server-side — never a request parameter.
+   */
+  async hubsForAccount(isTest: boolean) {
+    return this.hubsForSide(isTest);
   }
 
   /**

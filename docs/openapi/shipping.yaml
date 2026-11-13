@@ -174,6 +174,43 @@ paths:
                   - $ref: "#/components/schemas/QuoteUnavailable"
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping/hubs/mine:
+    get:
+      tags: [Shipping]
+      summary: Active terminals the signed-in caller can pick, on their own network side
+      description: >-
+        CUSTOMER role (TERM-SIM-NETWORK-INVISIBLE). `GET /shipping/hubs` is
+        anonymous and real-only by design; a test account's quote and booking
+        already derive `isTest` from the account
+        (`LogisticsNetworkService.hubsForAccount`), but until this endpoint
+        existed nothing let a test account see a test hub to pick one in the
+        first place. `isTest` is read from the caller's own account
+        server-side — never a query param.
+      responses:
+        "200":
+          description: Active hubs on the caller's own side, ordered by district then name
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PublicHub" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping/modes/mine:
+    get:
+      tags: [Shipping]
+      summary: Transport modes available to the signed-in caller, on their own network side
+      description: >-
+        CUSTOMER role. Same scoping as `GET /shipping/hubs/mine`
+        (`LogisticsNetworkService.availableModes`).
+      responses:
+        "200":
+          description: Subset of LAND, AIR, SEA, in that order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string, enum: [LAND, AIR, SEA] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /shipping:
     post:
       tags: [Shipping]
