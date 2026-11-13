@@ -299,6 +299,11 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     { controller: 'TerminalController', route: 'GET /terminal/me', roles: 'ANY', throttled: false },
     { controller: 'TerminalController', route: 'GET /terminal/staff', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalController', route: 'GET /terminal/queue', roles: 'ANY', throttled: false },
+    // MDF-700: three parameterless reads, same shape as /queue above —
+    // nothing in the path to probe, so no @StrictThrottle() here either.
+    { controller: 'TerminalController', route: 'GET /terminal/inbound', roles: 'ANY', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/outbound', roles: 'ANY', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/custody', roles: 'ANY', throttled: false },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },

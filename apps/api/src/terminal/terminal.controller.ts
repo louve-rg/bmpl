@@ -186,6 +186,38 @@ export class TerminalController {
     const hubIds = await this.terminal.myActiveHubIds(u.userId);
     return this.shipments.terminalQueue(hubIds);
   }
+
+  /**
+   * MDF-700 (TERM-INBOUND): the manifest the actionable `queue` above
+   * cannot show — a LINE_HAUL leg scheduled or in motion toward one of MY
+   * hubs, not yet arrived. Same hub-scoping discipline as `queue`:
+   * `myActiveHubIds` re-read at call time, never cached, and
+   * `ShipmentService.terminalInbound` never sees a hub id this method did
+   * not hand it.
+   */
+  @Get('inbound')
+  async inbound(@CurrentUser() u: AuthContext) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.terminalInbound(hubIds);
+  }
+
+  /** MDF-700 (TERM-INBOUND): the outbound counterpart to `inbound` above. */
+  @Get('outbound')
+  async outbound(@CurrentUser() u: AuthContext) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.terminalOutbound(hubIds);
+  }
+
+  /**
+   * MDF-700 (TERM-INBOUND): what this terminal physically holds right now,
+   * derived from `CustodyEvent` rows — see `ShipmentService.terminalCustody`
+   * for the two-step derivation.
+   */
+  @Get('custody')
+  async custody(@CurrentUser() u: AuthContext) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.terminalCustody(hubIds);
+  }
 }
 
 /**

@@ -606,6 +606,12 @@ export class TerminalService {
     return {
       companyId: member.terminalCompany.id,
       companyName: member.terminalCompany.businessName,
+      // MDF-700/T-7: selected above (:601) but previously dropped here —
+      // the one piece of demo-data labelling this endpoint was missing.
+      // Server-side enforcement already requires isTest to match at
+      // hub-placement and invite time (terminal.service.ts:155, :315); this
+      // is exposure only, not a new rule.
+      isTest: member.terminalCompany.isTest,
       memberRole: member.memberRole,
       // Re-checked here, not just at grant time: a location deactivated after
       // the grant was made must stop appearing immediately, with no separate

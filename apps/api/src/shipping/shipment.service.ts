@@ -5329,6 +5329,21 @@ export class ShipmentService {
    * `staffReleaseToCourier`, `recordCollection`), so a leg can appear here
    * if and only if the matching action would actually succeed — never a
    * preview of a write that would then refuse.
+   *
+   * MDF-700/T-7: every item now carries `isTest` (the one piece of
+   * demo-data labelling this endpoint was missing — selected from each
+   * query's own `shipment`, nothing new derived).
+   *
+   * NOT fixed here, reported instead: the five `take: 100`/`take: 200`
+   * limits below are a pre-existing silent-truncation defect (a busy
+   * terminal can lose rows off the end with nothing on screen saying so).
+   * MDF-700's three NEW endpoints below (`terminalInbound`/
+   * `terminalOutbound`/`terminalCustody`) are built with an explicit
+   * `hasMore` from day one so they do not repeat it, but reshaping THIS
+   * method's response from a flat array to a paginated `{items, hasMore}`
+   * would be a breaking change for `apps/web`'s already-shipped Terminal
+   * Workspace queue tab, which reads it as an array today — out of scope
+   * for this card without coordinating that frontend change.
    */
   async terminalQueue(hubIds: string[]) {
     if (hubIds.length === 0) return [];
@@ -5337,13 +5352,13 @@ export class ShipmentService {
         where: { kind: 'LINE_HAUL', originHubId: { in: hubIds }, departedAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
         orderBy: { createdAt: 'asc' },
         take: 100,
-        include: { shipment: { select: { reference: true, description: true, pieces: true } }, destinationHub: { select: { name: true } } },
+        include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, destinationHub: { select: { name: true } } },
       }),
       this.prisma.shipmentLeg.findMany({
         where: { kind: 'LINE_HAUL', destinationHubId: { in: hubIds }, status: 'IN_PROGRESS', arrivedAt: null },
         orderBy: { departedAt: 'asc' },
         take: 100,
-        include: { shipment: { select: { reference: true, description: true, pieces: true } }, originHub: { select: { name: true } } },
+        include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, originHub: { select: { name: true } } },
       }),
       this.prisma.shipmentLeg.findMany({
         // FIRST_MILE has no separate arrive step — a courier walking in IS the
@@ -5362,7 +5377,7 @@ export class ShipmentService {
         orderBy: [{ arrivedAt: { sort: 'desc', nulls: 'last' } }, { sequence: 'asc' }],
         take: 100,
         include: {
-          shipment: { select: { reference: true, description: true, pieces: true } },
+          shipment: { select: { reference: true, description: true, pieces: true, isTest: true } },
           originHub: { select: { name: true } },
           assignedDriver: { select: { displayName: true } },
         },
@@ -5371,7 +5386,7 @@ export class ShipmentService {
         where: { kind: 'LAST_MILE', originHubId: { in: hubIds }, courierStatus: 'DRIVER_ACCEPTED' },
         orderBy: { createdAt: 'asc' },
         take: 100,
-        include: { shipment: { select: { reference: true, description: true, pieces: true } }, assignedDriver: { select: { displayName: true } } },
+        include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, assignedDriver: { select: { displayName: true } } },
       }),
       // `destinationHubId` lives on the LEG, not the shipment. The `some`
       // clause here is a cheap SUPERSET filter only (any leg touching one of
@@ -5380,12 +5395,10 @@ export class ShipmentService {
       // one's destinationHubId, which `some`/`every` cannot express directly.
       this.prisma.shipment.findMany({
         where: { status: 'AWAITING_COLLECTION', collectedAt: null, legs: { some: { destinationHubId: { in: hubIds } } } },
-        select: { id: true, reference: true, description: true, pieces: true, legs: { select: { destinationHubId: true, sequence: true } } },
+        select: { id: true, reference: true, description: true, pieces: true, isTest: true, legs: { select: { destinationHubId: true, sequence: true } } },
         take: 200,
       }),
     ]);
-    const parcelLabel = (s: { description: string | null; pieces: number }) =>
-      s.description || `${s.pieces} ${s.pieces === 1 ? 'parcel' : 'parcels'}`;
     const collectAtMyHubs = collecting.filter((s) => {
       const finalLeg = [...s.legs].sort((a, b) => b.sequence - a.sequence)[0];
       return finalLeg?.destinationHubId != null && hubIds.includes(finalLeg.destinationHubId);
@@ -5396,43 +5409,224 @@ export class ShipmentService {
         legId: l.id,
         hubId: l.originHubId!,
         reference: l.shipment.reference,
-        parcel: parcelLabel(l.shipment),
+        parcel: this.parcelLabel(l.shipment),
         to: l.destinationHub?.name ?? 'Unknown',
+        isTest: l.shipment.isTest,
       })),
       ...arriving.map((l) => ({
         action: 'ARRIVE' as const,
         legId: l.id,
         hubId: l.destinationHubId!,
         reference: l.shipment.reference,
-        parcel: parcelLabel(l.shipment),
+        parcel: this.parcelLabel(l.shipment),
         from: l.originHub?.name ?? 'Unknown',
+        isTest: l.shipment.isTest,
       })),
       ...handoff.map((l) => ({
         action: 'HANDOFF' as const,
         legId: l.id,
         hubId: l.destinationHubId!,
         reference: l.shipment.reference,
-        parcel: parcelLabel(l.shipment),
+        parcel: this.parcelLabel(l.shipment),
         from: l.originHub?.name ?? 'Door collection',
         broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
         arrived: l.arrivedAt != null || l.courierStatus === 'ARRIVING',
+        isTest: l.shipment.isTest,
       })),
       ...release.map((l) => ({
         action: 'RELEASE_TO_COURIER' as const,
         legId: l.id,
         hubId: l.originHubId!,
         reference: l.shipment.reference,
-        parcel: parcelLabel(l.shipment),
+        parcel: this.parcelLabel(l.shipment),
         courier: l.assignedDriver?.displayName ?? null,
+        isTest: l.shipment.isTest,
       })),
       ...collectAtMyHubs.map((s) => ({
         action: 'COLLECT' as const,
         shipmentId: s.id,
         hubId: [...s.legs].sort((a, b) => b.sequence - a.sequence)[0]!.destinationHubId!,
         reference: s.reference,
-        parcel: parcelLabel(s),
+        parcel: this.parcelLabel(s),
+        isTest: s.isTest,
       })),
     ];
+  }
+
+  /** Shared with terminalInbound/terminalOutbound/terminalCustody below. */
+  private parcelLabel(s: { description: string | null; pieces: number }): string {
+    return s.description || `${s.pieces} ${s.pieces === 1 ? 'parcel' : 'parcels'}`;
+  }
+
+  /**
+   * MDF-700 (TERM-INBOUND), piece 1: the manifest `terminalQueue` cannot show
+   * — its own `arriving` query only surfaces a LINE_HAUL leg once it is
+   * IN_PROGRESS (departed, confirm-on-arrival actionable NOW). A leg that is
+   * still READY (scheduled, not yet departed its origin) is invisible
+   * anywhere today, which is the owner's exact complaint: "a parcel not
+   * awaiting your action is invisible." This widens the SAME predicate
+   * `arriving` already uses (LINE_HAUL, destinationHubId in hubIds,
+   * arrivedAt: null) by one status value, READY, rather than inventing a
+   * new shape — "scheduled or in motion, not yet arrived".
+   *
+   * Scoped to LINE_HAUL only, not every leg kind: FIRST_MILE/LAST_MILE have
+   * no `arrivedAt`/`departedAt` concept at all (driver-worked legs track
+   * progress via `pickedUpAt`/courierStatus instead — see terminalQueue's own
+   * `handoff` query, which already treats a READY FIRST_MILE leg as
+   * actionable the moment it exists, because there is no separate "it is on
+   * its way but not here yet" state for a courier leg the way there is for a
+   * carrier-operated LINE_HAUL run).
+   *
+   * MDF-700 overflow rule: `take: limit + 1`, sliced to `limit`, with
+   * `hasMore` carrying the truncation explicitly — terminalQueue's own
+   * silent 100-row `take` is a pre-existing defect, not a shape to repeat
+   * here.
+   */
+  async terminalInbound(hubIds: string[], limit = 200) {
+    if (hubIds.length === 0) return { items: [], hasMore: false };
+    const rows = await this.prisma.shipmentLeg.findMany({
+      where: { kind: 'LINE_HAUL', destinationHubId: { in: hubIds }, arrivedAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
+      orderBy: { scheduledArrivalAt: { sort: 'asc', nulls: 'last' } },
+      take: limit + 1,
+      include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, originHub: { select: { name: true } } },
+    });
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit).map((l) => ({
+      legId: l.id,
+      hubId: l.destinationHubId!,
+      reference: l.shipment.reference,
+      parcel: this.parcelLabel(l.shipment),
+      from: l.originHub?.name ?? 'Unknown',
+      scheduledArrivalAt: l.scheduledArrivalAt,
+      departed: l.departedAt != null,
+      isTest: l.shipment.isTest,
+    }));
+    return { items, hasMore };
+  }
+
+  /**
+   * MDF-700 (TERM-INBOUND), piece 2: the outbound counterpart, same "widen
+   * the existing actionable query by one status/field rather than invent a
+   * new predicate" approach, combining two leg kinds the way `terminalQueue`
+   * already returns multiple kinds in one flat list:
+   *
+   *  - LINE_HAUL, originHubId in hubIds, not yet departed — exactly
+   *    `terminalQueue`'s own `departing` query, unchanged scope (it already
+   *    includes READY, so there is no silent gap here the way inbound had).
+   *  - LAST_MILE, originHubId in hubIds, not yet physically taken by a
+   *    courier. "Not yet released" is `pickedUpAt: null` rather than a
+   *    courierStatus value — `pickedUpAt` is the one unambiguous moment a
+   *    driver actually has the parcel in hand, regardless of which
+   *    pre-pickup DeliveryStatus (PENDING_ASSIGNMENT, ASSIGNED,
+   *    DRIVER_ACCEPTED) the leg is currently in, so this is deliberately
+   *    BROADER than `terminalQueue`'s own `release` query (DRIVER_ACCEPTED
+   *    only, the actionable-now case) — an outbound parcel still waiting
+   *    for a driver to be assigned at all is exactly the kind of row that
+   *    was invisible before this card.
+   */
+  async terminalOutbound(hubIds: string[], limit = 200) {
+    if (hubIds.length === 0) return { items: [], hasMore: false };
+    const [departing, releasing] = await Promise.all([
+      this.prisma.shipmentLeg.findMany({
+        where: { kind: 'LINE_HAUL', originHubId: { in: hubIds }, departedAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
+        orderBy: { scheduledDepartureAt: { sort: 'asc', nulls: 'last' } },
+        take: limit + 1,
+        include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, destinationHub: { select: { name: true } } },
+      }),
+      this.prisma.shipmentLeg.findMany({
+        where: { kind: 'LAST_MILE', originHubId: { in: hubIds }, pickedUpAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
+        orderBy: { createdAt: 'asc' },
+        take: limit + 1,
+        include: { shipment: { select: { reference: true, description: true, pieces: true, isTest: true } }, assignedDriver: { select: { displayName: true } } },
+      }),
+    ]);
+    const hasMore = departing.length > limit || releasing.length > limit;
+    const items = [
+      ...departing.slice(0, limit).map((l) => ({
+        kind: 'LINE_HAUL' as const,
+        legId: l.id,
+        hubId: l.originHubId!,
+        reference: l.shipment.reference,
+        parcel: this.parcelLabel(l.shipment),
+        to: l.destinationHub?.name ?? 'Unknown',
+        scheduledDepartureAt: l.scheduledDepartureAt,
+        isTest: l.shipment.isTest,
+      })),
+      ...releasing.slice(0, limit).map((l) => ({
+        kind: 'LAST_MILE' as const,
+        legId: l.id,
+        hubId: l.originHubId!,
+        reference: l.shipment.reference,
+        parcel: this.parcelLabel(l.shipment),
+        courier: l.assignedDriver?.displayName ?? null,
+        isTest: l.shipment.isTest,
+      })),
+    ];
+    return { items, hasMore };
+  }
+
+  /**
+   * MDF-700 (TERM-INBOUND), piece 3: "what this terminal physically holds
+   * right now" — inventory row 10, answered from `CustodyEvent` rows
+   * `appendCustody` already writes, not inferred from leg/shipment status
+   * (the same discipline `isDelivered`'s own class comment names: custody
+   * is the fact, status is derived from it, never the other way round).
+   *
+   * Two-step, same SUPERSET-then-re-derive shape `terminalQueue`'s own
+   * `collectAtMyHubs` already uses for an analogous problem (a cheap filter
+   * Prisma CAN express, followed by the exact rule in application code that
+   * it cannot):
+   *
+   *  1. Find shipments with ANY custody event at one of my hubs — a cheap
+   *     candidate set, deliberately wider than the true answer.
+   *  2. For exactly those candidates, read each shipment's OWN latest
+   *     custody event (by `occurredAt`, unconstrained by holder/hub this
+   *     time) via `distinct: ['shipmentId']` + a matching `orderBy` —
+   *     Prisma's documented way to get "the first row per group under this
+   *     ordering," i.e. "the latest event," per shipment.
+   *  3. Keep only the shipments whose TRUE latest event is still
+   *     `toHolder: HUB` at a hub in `hubIds` — a parcel that passed through
+   *     one of my hubs and has since moved on (to a driver, to another hub,
+   *     to the recipient) correctly drops off, because step 1's match on
+   *     it is no longer its latest event.
+   *
+   * Skipping step 1 and scanning every shipment's latest event globally
+   * would answer the same question but at the cost of a system-wide table
+   * scan for every terminal read; step 1 exists purely to bound step 2 to
+   * shipments that could possibly still be mine.
+   */
+  async terminalCustody(hubIds: string[], limit = 200) {
+    if (hubIds.length === 0) return { items: [], hasMore: false };
+    const candidates = await this.prisma.custodyEvent.findMany({
+      where: { toHolder: 'HUB', hubId: { in: hubIds } },
+      select: { shipmentId: true },
+      distinct: ['shipmentId'],
+    });
+    if (candidates.length === 0) return { items: [], hasMore: false };
+    const candidateIds = candidates.map((c) => c.shipmentId);
+    const latest = await this.prisma.custodyEvent.findMany({
+      where: { shipmentId: { in: candidateIds } },
+      orderBy: [{ shipmentId: 'asc' }, { occurredAt: 'desc' }],
+      distinct: ['shipmentId'],
+      select: {
+        shipmentId: true,
+        toHolder: true,
+        hubId: true,
+        occurredAt: true,
+        shipment: { select: { reference: true, description: true, pieces: true, isTest: true } },
+      },
+    });
+    const held = latest.filter((e) => e.toHolder === 'HUB' && e.hubId != null && hubIds.includes(e.hubId));
+    const hasMore = held.length > limit;
+    const items = held.slice(0, limit).map((e) => ({
+      shipmentId: e.shipmentId,
+      hubId: e.hubId!,
+      reference: e.shipment.reference,
+      parcel: this.parcelLabel(e.shipment),
+      heldSince: e.occurredAt,
+      isTest: e.shipment.isTest,
+    }));
+    return { items, hasMore };
   }
 
   /**
