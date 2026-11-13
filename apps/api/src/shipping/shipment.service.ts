@@ -5502,6 +5502,28 @@ export class ShipmentService {
         broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
         arrived: l.arrivedAt != null || l.courierStatus === 'ARRIVING',
         isTest: l.shipment.isTest,
+        // MDF-747: `broughtBy` above is for DISPLAY only — it falls back to
+        // the literal 'Carrier' and is indistinguishable, client-side, from
+        // a real carrier named "Carrier". `courier` mirrors
+        // RELEASE_TO_COURIER's own field below (same name, same shape:
+        // the assigned driver's display name, or genuinely null) so a
+        // client can tell whether `completeLeg`'s guard at ~line 2135
+        // would actually refuse this leg's handoff with "No courier is
+        // assigned to this leg; there is no code to present."
+        //
+        // That guard only fires for a NON-LINE_HAUL kind — a LINE_HAUL leg
+        // is carrier-operated, never has an assignedDriverProfileId by
+        // design, and is exempt from the guard entirely (completeLeg sets
+        // presentedCourierUserId = undefined for it and proceeds on the
+        // code alone). So `courier: null` on a LINE_HAUL row is normal and
+        // must NOT be read the same way as `courier: null` on a FIRST_MILE
+        // row. `kind` is included for exactly that reason: the correct
+        // client-side rule is "offer the Hand off form unless kind ===
+        // 'FIRST_MILE' and courier === null" — never "unless courier ===
+        // null" alone, which would also hide every legitimate LINE_HAUL
+        // handoff.
+        kind: l.kind,
+        courier: l.assignedDriver?.displayName ?? null,
       })),
       ...release.map((l) => ({
         action: 'RELEASE_TO_COURIER' as const,

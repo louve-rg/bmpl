@@ -291,7 +291,43 @@ describe('TERM-8: arrival confirmation — distinct from handoff, previously adm
     expect(after.body.some((i: { action: string; legId: string }) => i.action === 'ARRIVE' && i.legId === lineHaul.id)).toBe(false);
     // Arrival moved it straight into the HANDOFF queue instead — the next
     // custody step this card's part 1 confirmed is NOT the same event.
-    expect(after.body.some((i: { action: string; legId: string }) => i.action === 'HANDOFF' && i.legId === lineHaul.id)).toBe(true);
+    const handoffRow = after.body.find((i: { action: string; legId: string }) => i.action === 'HANDOFF' && i.legId === lineHaul.id);
+    expect(handoffRow).toBeDefined();
+    // MDF-747: a LINE_HAUL leg is carrier-operated and never has a BML
+    // courier assigned, by design — `courier: null` here is the NORMAL
+    // case, not a reason to hide the Hand off form. `kind` is what tells
+    // a client the difference between this and a FIRST_MILE row that
+    // genuinely has no one to hand off to yet (next test).
+    expect(handoffRow.kind).toBe('LINE_HAUL');
+    expect(handoffRow.courier).toBeNull();
+  });
+
+  it('MDF-747: a FIRST_MILE row with no courier assigned reports courier: null, not a display fallback — and kind distinguishes it from a LINE_HAUL row', async () => {
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.originHubId]);
+    const s = await bookDoorToDoor(await fundedSender(), net);
+    const firstMile = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const queue = await get(staff.cookies, 'terminal/queue');
+    const item = queue.body.find((i: { action: string; legId: string }) => i.action === 'HANDOFF' && i.legId === firstMile.id);
+    expect(item).toBeDefined();
+    expect(item.kind).toBe('FIRST_MILE');
+    expect(item.courier).toBeNull();
+    // `broughtBy` still falls back to the literal "Carrier" for display —
+    // this is exactly the string a real carrier named "Carrier" would also
+    // produce, which is why `courier`/`kind` exist as the actual signal.
+    expect(item.broughtBy).toBe('Carrier');
+
+    // completeLeg's own guard (shipment.service.ts ~2135-2138) agrees: a
+    // staff submission naming the assigned courier is refused outright for
+    // this exact leg, because none is assigned.
+    const refused = await post(staff.cookies, `terminal/legs/${firstMile.id}/handoff`, {
+      pin: await pinOf(firstMile.id),
+      receivedByName: 'Counter staff',
+      presentedByAssignedCourier: true,
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toMatch(/no courier is assigned/i);
   });
 
   it('refuses an operator holding only the origin location for this leg', async () => {

@@ -807,9 +807,10 @@ components:
         parcel: { type: string, description: The shipment's own description, or a piece-count fallback. }
         to: { type: string, description: DEPART only — destination hub name. }
         from: { type: string, description: ARRIVE/HANDOFF only — origin hub name, or "Door collection" for a FIRST_MILE leg with no originating hub. }
-        broughtBy: { type: string, description: HANDOFF only — the assigned driver's display name, or the carrier name, or "Carrier". }
+        broughtBy: { type: string, description: HANDOFF only, display text — the assigned driver's display name, the carrier name, or the literal "Carrier", indistinguishable from a real carrier of that name. Use `courier`/`kind` below to decide whether the Hand off form should be offered, never this field. }
         arrived: { type: boolean, description: HANDOFF only. }
-        courier: { type: string, nullable: true, description: RELEASE_TO_COURIER only — the assigned driver's display name. }
+        kind: { type: string, enum: [FIRST_MILE, LINE_HAUL], description: "HANDOFF only (MDF-747). A LINE_HAUL leg is carrier-operated and never has an assigned courier by design — completeLeg's \"No courier is assigned to this leg\" refusal exempts it entirely. Offer the Hand off form unless kind is FIRST_MILE and courier (below) is null; never gate on courier alone." }
+        courier: { type: string, nullable: true, description: "RELEASE_TO_COURIER and HANDOFF (MDF-747) — the assigned driver's display name, or genuinely null when none is assigned. On HANDOFF, null is expected and NOT a block for a LINE_HAUL row — see `kind` above." }
         isTest: { type: boolean, description: The underlying shipment's own isTest (MDF-700/MDF-707 — every item carries it as of the same card that added inbound/outbound/custody below). }
     TerminalStaffRoster:
       type: object
