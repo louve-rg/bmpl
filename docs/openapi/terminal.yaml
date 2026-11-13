@@ -14,19 +14,28 @@ info:
     `terminal.service.ts`, and `ShipmentService` where terminal delegates to
     it) — nothing is described that was not read.
 
-    19 paths, 21 operations (two paths carry two HTTP methods each). Every
+    24 paths, 26 operations (two paths carry two HTTP methods each). Every
     POST on this surface returns 201, not 200 — none of the five controllers
     declares `@HttpCode`, so NestJS's own default for `@Post()` applies
-    uniformly; this file had wrongly documented ten of them as 200 and is now
-    corrected to match, verified controller-by-controller
-    (`apps/api/src/terminal/*.controller.ts`, no `@HttpCode` anywhere in the
-    module).
+    uniformly.
 
-    THIS IS A BASELINE for what is live today (MDF-706, deliverable 2). It
-    does not yet cover MDF-698 (TERM-ROLE), MDF-699 (TERM-LOOKUP), MDF-700
-    (TERM-INBOUND) or MDF-701 (TERM-HISTORY) — those four endpoints are still
-    `doing`; this file is updated as each contract is confirmed merged, not
-    from a description of planned work.
+    UPDATED 2026-11-13 (TERM-OPENAPI-SURFACE) against `main@bc4cf932` for
+    five endpoints merged the same night the previous baseline was written,
+    none of which existed yet when this file was first drafted: `GET
+    /terminal/staff` (MDF-702/#690, MANAGER-only — see its own description),
+    `GET /terminal/inbound` / `/outbound` / `/custody` (MDF-700/TERM-INBOUND,
+    #698), and `GET /terminal/shipments/{reference}` (MDF-699/TERM-LOOKUP,
+    #692). Also added: `isTest` on `MyWorkspace` and `TerminalQueueItem`
+    (both newly selected/exposed the same night, MDF-700/MDF-707's labelling
+    gap), and a response schema plus the four distinct messages
+    `POST /terminal/invites/accept` can return 400 with — previously a bare
+    description with no schema at all. Checked first, per the dispatching
+    instruction: CI's "Repo drift checks" job (`.github/workflows/ci.yml:700`)
+    runs four checkers (notification event catalog, permission catalog,
+    lookup inventory citations, notification category count) — none of them
+    read this file or any OpenAPI spec, so its passing on every merge tonight
+    said nothing about whether this contract matched the new handlers. It
+    did not; this update is that correction.
 
     A `TerminalCompanyProfile` is NOT a `LogisticsHub` (documented in
     `shipping.yaml`): a hub is the physical terminal; a terminal company is
@@ -311,6 +320,28 @@ paths:
               schema: { $ref: "#/components/schemas/MyWorkspace" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/staff:
+    get:
+      tags: [TerminalStaff]
+      summary: My company's roster and pending invites — MANAGER role only
+      description: >-
+        Server-enforced, not merely hidden in the UI: `TerminalService.assertActiveMemberRole`
+        rejects any caller whose own ACTIVE membership is not `MANAGER` with
+        "This action requires the terminal manager role." (403) — an
+        OPERATOR calling this directly gets that 403, not an empty or
+        filtered list. A caller with no active membership at all gets "No
+        active terminal company membership." (403) instead, same as every
+        other route on this controller. Reuses the exact member/invite shape
+        `GET /admin/terminal/companies/{id}` already returns, scoped to the
+        caller's own company rather than taken by id.
+      responses:
+        "200":
+          description: This MANAGER's own company roster
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalStaffRoster" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /terminal/queue:
     get:
       tags: [TerminalStaff]
@@ -328,6 +359,61 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/TerminalQueueItem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/inbound:
+    get:
+      tags: [TerminalStaff]
+      summary: LINE_HAUL legs scheduled or in motion toward one of my hubs, not yet arrived
+      description: >-
+        What `queue` above cannot show: a leg still `READY` (scheduled, not
+        yet departed its origin) as well as one already `IN_PROGRESS`.
+        Explicit pagination from day one (`{items, hasMore}`, default
+        `limit=200`) — unlike `queue`'s own silent `take:100`/`take:200`
+        truncation, `hasMore` always states whether rows were cut.
+      responses:
+        "200":
+          description: Up to `limit` rows, oldest-scheduled first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPagedInbound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/outbound:
+    get:
+      tags: [TerminalStaff]
+      summary: LINE_HAUL legs not yet departed, and LAST_MILE legs not yet physically taken by a courier, from one of my hubs
+      description: >-
+        Deliberately broader than `queue`'s own `release` entry: that one
+        only lists a LAST_MILE leg once a driver has ACCEPTED it
+        (actionable now); this lists one the moment it exists, waiting for
+        any driver to be assigned at all. `kind` discriminates the two leg
+        kinds in one list. Same `{items, hasMore}` pagination as `inbound`.
+      responses:
+        "200":
+          description: Up to `limit` rows combining both leg kinds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPagedOutbound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/custody:
+    get:
+      tags: [TerminalStaff]
+      summary: What one of my hubs physically holds right now
+      description: >-
+        Derived from `CustodyEvent` rows, not leg/shipment status — a
+        shipment appears only while its own TRUE latest custody event is
+        still `toHolder: HUB` at one of my hubs; once it moves on (to a
+        driver, another hub, or the recipient) it drops off on the next
+        read, with no separate cleanup step. Same `{items, hasMore}`
+        pagination as `inbound`/`outbound`.
+      responses:
+        "200":
+          description: Up to `limit` rows, most recently held first is not guaranteed — see `heldSince` on each item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPagedCustody" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -452,6 +538,32 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/shipments/{reference}:
+    get:
+      tags: [TerminalStaff]
+      summary: Look up a shipment by its customer-facing reference (what a customer actually hands a counter clerk)
+      description: >-
+        Two distinct refusals, never a quiet empty 200: no shipment with
+        this reference anywhere -> 404; a real shipment that never touches
+        one of my hubs (any leg's origin OR destination, not only the
+        final/collection leg) -> 403 "This shipment is not at one of your
+        terminal locations." Stanley accepted (MDF-716) that this makes the
+        route an existence oracle for a reference the caller does not hold
+        — bounded by `@StrictThrottle()`, not removed. Response is a
+        hand-built allowlist, not the full shipment graph: no PIN/code/
+        token, no money, no linked account's email/phone/address — only the
+        shipment's own typed sender/recipient name snapshot.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: The customer-facing shipment reference, not its internal id. }
+      responses:
+        "200":
+          description: The shipment, staff-visible fields only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalLookupResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ---- Public invite acceptance ----
   /terminal/invites/accept:
@@ -463,7 +575,11 @@ paths:
         `password`/`firstName`/`lastName` are required only when the invited
         email has no existing BML account — a runtime lookup the schema
         cannot express, enforced by the service with a clear message rather
-        than a zod refinement guessing at database state.
+        than a zod refinement guessing at database state. The response body
+        and all 400 messages below are shown to the end user verbatim by
+        `apps/web/app/terminal/accept-invite/page.tsx` (it passes the API's
+        own message straight through, never its own copy) — their exact
+        wording is part of the contract, not an implementation detail.
       security: []
       requestBody:
         required: true
@@ -471,9 +587,36 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/AcceptTerminalInviteInput" }
       responses:
-        "201": { description: Membership created or reactivated; locations granted atomically }
-        "400": { $ref: "#/components/responses/ValidationError" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "201":
+          description: Membership created or reactivated; locations granted atomically
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptTerminalInviteResult" }
+        "400":
+          description: >-
+            Four distinct causes, all returned as `{ message: string }`: (1)
+            "This invite link is invalid or has expired." — never existed,
+            truly expired, already revoked, already consumed as of the
+            pre-check read, OR a race-loss whose cause was not the specific
+            case in (2) (deliberately non-committal in every one of these
+            sub-cases — an invite token must never become an existence
+            oracle); (2) "This invite has already been accepted. Please
+            sign in instead." — the transaction's own conditional claim
+            lost a race specifically because `consumedAt` was what changed
+            (MDF-727/TERM-ACCEPT-MSG, the one case that can safely tell the
+            truth, since the caller already proved they held a token that
+            really was live a moment ago); (3) "This account is on the
+            wrong side of the simulation boundary for this terminal
+            company." — the invited email already has a BML account whose
+            own `isTest` does not match the inviting company's; (4) "A
+            password, first name and last name are required to create your
+            account." — the email has no existing account and at least one
+            of the three fields is missing.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { message: { type: string } }
 
 components:
   securitySchemes:
@@ -635,6 +778,7 @@ components:
       properties:
         companyId: { type: string }
         companyName: { type: string }
+        isTest: { type: boolean, description: "The company's own isTest, exposed here since MDF-700/MDF-707 (previously selected but silently dropped before serializing)." }
         memberRole: { type: string, enum: [MANAGER, OPERATOR] }
         locations:
           type: array
@@ -658,3 +802,89 @@ components:
         broughtBy: { type: string, description: HANDOFF only — the assigned driver's display name, or the carrier name, or "Carrier". }
         arrived: { type: boolean, description: HANDOFF only. }
         courier: { type: string, nullable: true, description: RELEASE_TO_COURIER only — the assigned driver's display name. }
+        isTest: { type: boolean, description: The underlying shipment's own isTest (MDF-700/MDF-707 — every item carries it as of the same card that added inbound/outbound/custody below). }
+    TerminalStaffRoster:
+      type: object
+      description: Exactly the roster shape `TerminalCompanyDetail` already carries, scoped to the caller's own company.
+      properties:
+        members: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyMember" } }
+        pendingInvites: { type: array, items: { $ref: "#/components/schemas/TerminalInvite" } }
+    TerminalPagedInbound:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TerminalInboundItem" } }
+        hasMore: { type: boolean, description: "true if more rows exist past `limit` (default 200) — never silently truncated." }
+    TerminalInboundItem:
+      type: object
+      properties:
+        legId: { type: string }
+        hubId: { type: string }
+        reference: { type: string }
+        parcel: { type: string }
+        from: { type: string, description: Origin hub name, or "Unknown". }
+        scheduledArrivalAt: { type: string, format: date-time, nullable: true }
+        departed: { type: boolean, description: Whether this LINE_HAUL leg has already departed its origin. }
+        isTest: { type: boolean }
+    TerminalPagedOutbound:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TerminalOutboundItem" } }
+        hasMore: { type: boolean }
+    TerminalOutboundItem:
+      type: object
+      description: Discriminated by `kind`. `to`/`scheduledDepartureAt` on LINE_HAUL only; `courier` on LAST_MILE only.
+      properties:
+        kind: { type: string, enum: [LINE_HAUL, LAST_MILE] }
+        legId: { type: string }
+        hubId: { type: string }
+        reference: { type: string }
+        parcel: { type: string }
+        to: { type: string, description: LINE_HAUL only — destination hub name. }
+        scheduledDepartureAt: { type: string, format: date-time, nullable: true, description: LINE_HAUL only. }
+        courier: { type: string, nullable: true, description: LAST_MILE only — the assigned driver's display name, or null if unassigned. }
+        isTest: { type: boolean }
+    TerminalPagedCustody:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TerminalCustodyItem" } }
+        hasMore: { type: boolean }
+    TerminalCustodyItem:
+      type: object
+      properties:
+        shipmentId: { type: string }
+        hubId: { type: string }
+        reference: { type: string }
+        parcel: { type: string }
+        heldSince: { type: string, format: date-time, description: When the custody event that currently places this shipment at this hub occurred. }
+        isTest: { type: boolean }
+    TerminalLookupResult:
+      type: object
+      description: A hand-built allowlist — never the full shipment graph admin's own ops staff see. No PIN/code/token, no money, no linked account's email/phone/address.
+      properties:
+        shipmentId: { type: string }
+        reference: { type: string }
+        status: { type: string }
+        description: { type: string, nullable: true }
+        pieces: { type: integer }
+        isTest: { type: boolean }
+        senderName: { type: string, nullable: true, description: The shipment's own typed origin-name snapshot, never the linked account's own name/contact. }
+        recipientName: { type: string, nullable: true, description: The shipment's own typed destination-name snapshot. }
+        legs:
+          type: array
+          items:
+            type: object
+            properties:
+              sequence: { type: integer }
+              kind: { type: string }
+              status: { type: string }
+              originHub: { type: object, nullable: true }
+              destinationHub: { type: object, nullable: true }
+              departedAt: { type: string, format: date-time, nullable: true }
+              arrivedAt: { type: string, format: date-time, nullable: true }
+              completedAt: { type: string, format: date-time, nullable: true }
+    AcceptTerminalInviteResult:
+      type: object
+      properties:
+        accepted: { type: boolean, enum: [true] }
+        createdAccount: { type: boolean, description: "true if this call created a brand-new account; false if it attached the membership to an existing BML account by email." }
+        memberRole: { type: string, enum: [MANAGER, OPERATOR], description: "Added MDF-727/TERM-INVITE-COPY (#703) so the web client's success copy can say \"as a manager\"/\"as an operator\" rather than a role-blind claim. apps/web treats its absence as optional and falls back to generic wording — an older API omitting this field is not an error." }
