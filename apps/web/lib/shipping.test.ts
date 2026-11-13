@@ -52,6 +52,7 @@ const shipment = (over: Partial<ShipmentView> = {}): ShipmentView => ({
   endsAtHub: false,
   quotedTotalMinor: 16700,
   quotedMinutes: 95,
+  collectionCode: null,
   explanation: 'Collection, then flight, then delivery',
   description: null,
   pieces: 1,

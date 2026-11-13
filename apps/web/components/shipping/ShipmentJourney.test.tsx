@@ -52,6 +52,7 @@ function shipment(over: Partial<ShipmentView> = {}): ShipmentView {
     endsAtHub: false,
     quotedTotalMinor: 5000,
     quotedMinutes: 60,
+    collectionCode: null,
     explanation: null,
     description: null,
     pieces: 1,

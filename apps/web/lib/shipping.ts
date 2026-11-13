@@ -206,6 +206,16 @@ export interface ShipmentView {
   currentLegSequence: number | null;
   legs: ShipmentLegView[];
   custody: CustodyEntry[];
+  /**
+   * REL-CODE-UNREACHABLE-NO-CONTACT: the API (`shipment.service.ts`'s
+   * `serialize()`) has always included this for the CUSTOMER audience —
+   * live while AWAITING_COLLECTION and uncollected, null otherwise — this
+   * type simply never declared the field, so nothing in apps/web could
+   * render it. A sender who leaves the recipient's email/phone blank had no
+   * way to learn the code at all, since the recipient-facing reveal flows
+   * (`UnlinkedCollectionCode`) need a channel BML doesn't have in that case.
+   */
+  collectionCode: string | null;
   /** Optional: web and api deploy independently (BMPL-349/350) — a real
    *  window on every merge where this field hasn't started arriving yet.
    *  Absence degrades the same as an empty array: no window set. */
