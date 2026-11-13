@@ -359,6 +359,12 @@ export const revealDeliveryCodeSchema = z.object({
 });
 export type RevealDeliveryCodeInput = z.infer<typeof revealDeliveryCodeSchema>;
 
+/** MDF-709: the collection-code counterpart, same shape, separate token. */
+export const revealCollectionCodeSchema = z.object({
+  revealToken: z.string().trim().min(1).max(32),
+});
+export type RevealCollectionCodeInput = z.infer<typeof revealCollectionCodeSchema>;
+
 /* ------------------------------------------------------- operating a leg */
 
 /** Confirming a line-haul departed. */

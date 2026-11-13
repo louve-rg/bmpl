@@ -88,6 +88,29 @@ const STAFF_ROSTER = {
   ],
 };
 
+const LOOKUP_RESULT = {
+  shipmentId: 'ship_9',
+  reference: 'BML-9',
+  status: 'IN_TRANSIT',
+  description: 'Spare parts',
+  pieces: 2,
+  isTest: false,
+  senderName: 'Juan Perez',
+  recipientName: 'Maria Lopez',
+  legs: [
+    {
+      sequence: 1,
+      kind: 'LINE_HAUL',
+      status: 'COMPLETED',
+      originHub: { id: 'hub_a', name: 'Belize City Hub' },
+      destinationHub: { id: 'hub_b', name: 'San Pedro Hub' },
+      departedAt: '2026-11-01T10:00:00.000Z',
+      arrivedAt: '2026-11-01T14:00:00.000Z',
+      completedAt: '2026-11-01T14:05:00.000Z',
+    },
+  ],
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -101,10 +124,16 @@ type StubOpts = {
   // again (the shape every test before MDF-702 step 1 relied on); only the
   // completing-an-action-on-a-filtered-tab test needs this to differ.
   queueRowsAfter?: unknown[];
+  // MDF-721: force /terminal/queue itself to fail, independent of
+  // queueRows/queueRowsAfter, to prove the Lookup tab doesn't go down with it.
+  queueStatus?: number;
+  queueErrorBody?: unknown;
   actionStatus?: number;
   actionBody?: unknown;
   staffStatus?: number;
   staffBody?: unknown;
+  lookupStatus?: number;
+  lookupBody?: unknown;
 };
 
 function stubFetch(opts: StubOpts = {}) {
@@ -121,8 +150,15 @@ function stubFetch(opts: StubOpts = {}) {
       if (url.includes('/api/terminal/staff')) {
         return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
       }
+      if (url.includes('/api/terminal/shipments/') && method === 'GET') {
+        calls.push({ url, method, body: null });
+        return jsonResponse(opts.lookupStatus ?? 200, opts.lookupBody ?? {});
+      }
       if (url.includes('/api/terminal/queue')) {
         queueCallCount += 1;
+        if (opts.queueStatus && opts.queueStatus !== 200) {
+          return jsonResponse(opts.queueStatus, opts.queueErrorBody ?? { message: 'Could not load your queue.' });
+        }
         const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
         return jsonResponse(200, rows);
       }
@@ -550,6 +586,170 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('This action requires the terminal manager role.');
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+    });
+  });
+
+  // MDF-702 step 2 / T-7: the Lookup tab, GET /terminal/shipments/:reference,
+  // and the Demo badge this endpoint's isTest field makes possible.
+  describe('MDF-702 step 2 — the Lookup tab, and T-7\'s Demo badge', () => {
+    it('shows a prompt rather than a result before any search has run', async () => {
+      stubFetch({ queueRows: [] });
+      await mount();
+      await clickTab('Lookup');
+
+      expect(container!.textContent).toContain('Look up a parcel');
+    });
+
+    it('refuses an empty search without calling the API', async () => {
+      const calls = stubFetch({ queueRows: [] });
+      await mount();
+      await clickTab('Lookup');
+      await clickButton('Look up');
+
+      expect(calls.find((c) => c.url.includes('/terminal/shipments/'))).toBeUndefined();
+      expect(container!.textContent).toContain('Enter a reference to look up.');
+    });
+
+    it('looks up a reference and renders the result -- status, description, pieces, sender, recipient and each leg', async () => {
+      const calls = stubFetch({ queueRows: [], lookupBody: LOOKUP_RESULT });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(calls.find((c) => c.url.includes('/terminal/shipments/BML-9'))).toBeDefined();
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).toContain('Spare parts');
+      expect(container!.textContent).toContain('2 pieces');
+      expect(container!.textContent).toContain('Juan Perez');
+      expect(container!.textContent).toContain('Maria Lopez');
+      expect(container!.textContent).toContain('Belize City Hub');
+      expect(container!.textContent).toContain('San Pedro Hub');
+    });
+
+    it('renders a Demo badge when the result is isTest, and no badge at all when it is not', async () => {
+      stubFetch({ queueRows: [], lookupBody: { ...LOOKUP_RESULT, isTest: true } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('Demo');
+    });
+
+    it('renders no Demo badge for a real (non-test) shipment', async () => {
+      stubFetch({ queueRows: [], lookupBody: LOOKUP_RESULT });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).not.toContain('Demo');
+    });
+
+    it('surfaces the server\'s real 404 message for a reference that does not exist, distinct from the 403 case', async () => {
+      stubFetch({ queueRows: [], lookupStatus: 404, lookupBody: { message: 'No shipment with that reference.' } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-404');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('No shipment with that reference.');
+    });
+
+    it('surfaces the server\'s real 403 message for a shipment outside the caller\'s hubs', async () => {
+      stubFetch({ queueRows: [], lookupStatus: 403, lookupBody: { message: 'This shipment is not at one of your terminal locations.' } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('This shipment is not at one of your terminal locations.');
+    });
+
+    it('is visible to an OPERATOR, not just a MANAGER -- lookup is hub-scoped, not role-scoped', async () => {
+      stubFetch({ workspaceBody: WORKSPACE, queueRows: [] });
+      await mount();
+
+      expect(() => findTab('Lookup')).not.toThrow();
+    });
+
+    /**
+     * MDF-721: Jim's gap-proof on #685 intercepted /api/terminal/queue to a
+     * 500 and found the Lookup tab gone -- not errored, gone, with no way
+     * back to it -- because the whole tab bar sat behind `rows && (...)`,
+     * and `rows` never gets set when the queue fetch fails. Lookup has no
+     * dependency on the queue at all; a tab's visibility must not be a
+     * function of an unrelated fetch's state.
+     */
+    it('stays visible and reachable even when /terminal/queue fails -- a tab is not a function of an unrelated fetch', async () => {
+      const calls = stubFetch({ queueStatus: 500, lookupBody: LOOKUP_RESULT });
+      await mount();
+
+      // Positive control: the page genuinely attempted and failed, rather
+      // than never asking or rendering blank.
+      expect(calls).toBeDefined();
+      expect(container!.textContent).toContain('Could not load your queue.');
+
+      expect(() => findTab('Lookup')).not.toThrow();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).toContain('Spare parts');
+    });
+
+    it('does not let an older, slower search response overwrite a newer one', async () => {
+      let resolveFirst: ((res: Response) => void) | undefined;
+      let secondCallStarted = false;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, WORKSPACE);
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, []);
+          if (url.includes('/api/terminal/shipments/BML-OLD')) {
+            return new Promise<Response>((resolve) => {
+              resolveFirst = resolve;
+            });
+          }
+          if (url.includes('/api/terminal/shipments/BML-NEW')) {
+            secondCallStarted = true;
+            return jsonResponse(200, { ...LOOKUP_RESULT, reference: 'BML-NEW', description: 'Newer search' });
+          }
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+      await clickTab('Lookup');
+
+      const input = container!.querySelector('#lookup-reference') as HTMLInputElement;
+      setValue(input, 'BML-OLD');
+      await clickButton('Look up');
+      expect(secondCallStarted).toBe(false); // still in flight, unresolved
+
+      // The "Look up" button disables itself while a search is in flight --
+      // the real-world race is a user retyping and hitting Enter again
+      // before the first request resolves, which the Enter handler allows
+      // unconditionally (it isn't gated by `loading`).
+      setValue(input, 'BML-NEW');
+      await act(async () => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(container!.textContent).toContain('Newer search');
+
+      // The stale first response now resolves, after the newer one already rendered.
+      await act(async () => {
+        resolveFirst!(jsonResponse(200, { ...LOOKUP_RESULT, reference: 'BML-OLD', description: 'Older search' }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // Must still show the newer result -- the stale one must not win.
+      expect(container!.textContent).toContain('Newer search');
+      expect(container!.textContent).not.toContain('Older search');
     });
   });
 });

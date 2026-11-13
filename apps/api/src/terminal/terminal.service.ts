@@ -12,7 +12,6 @@ import type { TerminalCompanyMemberRole, TerminalCompanyProfile } from '@bmpl/da
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
-import { DevMailboxService } from '../notifications/dev-mailbox.service';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
 
@@ -49,7 +48,6 @@ export class TerminalService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly email: EmailService,
-    private readonly devMailbox: DevMailboxService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -228,10 +226,10 @@ export class TerminalService {
     // invitee has no `userId` yet (that interface's own shape requires one,
     // correctly, for its other callers), and this really is "send a
     // transactional email to an address," not a notification for an
-    // existing account. Recording into the dev mailbox ourselves keeps this
-    // flow observable in dev/test exactly the way every other token-email
-    // flow already is (auth.integration.spec.ts's own `/dev/emails/latest`
-    // convention), without borrowing a type that doesn't fit.
+    // existing account. The dev mailbox capture lives inside
+    // `EmailService.sendDetailed` itself now (MDF-709 follow-up) — this
+    // flow stays observable in dev/test the same way it always was, just
+    // without a fourth copy of the same capture logic.
     //
     // W8/INVITE-SILENT-FAIL: `sendDetailed`, not `send`. The boolean form
     // discarded the reason a send failed, so a provider error and a real
@@ -241,9 +239,6 @@ export class TerminalService {
     // before the send (a failed provider must not cost us the invitation),
     // so the outcome travels back in the response instead.
     const delivery = await this.email.sendDetailed({ to: dto.email, subject: tpl.title, body: tpl.body });
-    if (delivery.delivered) {
-      this.devMailbox.record({ to: dto.email, subject: tpl.title, body: tpl.body, createdAt: new Date().toISOString() });
-    }
     return { ...this.serializeInvite(invite), delivery };
   }
 
@@ -281,9 +276,6 @@ export class TerminalService {
     const link = `${this.env.NEXT_PUBLIC_SITE_URL}/terminal/accept-invite?token=${raw}`;
     const tpl = templates.terminalInvite(link, company.businessName);
     const delivery = await this.email.sendDetailed({ to: invite.email, subject: tpl.title, body: tpl.body });
-    if (delivery.delivered) {
-      this.devMailbox.record({ to: invite.email, subject: tpl.title, body: tpl.body, createdAt: new Date().toISOString() });
-    }
     return { ...this.serializeInvite(updated), delivery };
   }
 

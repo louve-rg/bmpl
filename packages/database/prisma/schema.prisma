@@ -363,6 +363,25 @@ enum AuditAction {
   /// same unlinked path's second step) — this fires on the request alone,
   /// whether or not an email was actually on file to send it to.
   SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED
+  /// MDF-709: a recipient (linked or, below, an unlinked token-holder) read
+  /// the terminal COLLECTION code — distinct from SHIPMENT_HANDOFF_PIN_REVEALED,
+  /// which only ever covers a leg's own handoffPin/pickupPin. A shipment
+  /// ending at a hub has no handoff code at all, so this is a genuinely
+  /// separate secret with its own action, not a reuse with a tag.
+  SHIPMENT_COLLECTION_CODE_REVEALED
+  /// MDF-709: an unlinked recipient asked for the collection-code reveal
+  /// email — same "fires on the request alone" shape as
+  /// SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED just above, for the separate
+  /// collection-code token pair.
+  SHIPMENT_COLLECTION_CODE_EMAIL_REQUESTED
+  /// MDF-719: an UNLINKED recipient (no BMPL account, `recipientUserId` null)
+  /// was emailed, at their on-file `destinationEmail`, that their parcel
+  /// reached AWAITING_COLLECTION. Distinct from the two actions above, which
+  /// both fire on a recipient's OWN request — this one is system-initiated,
+  /// the proactive counterpart `notifyRecipientCollectionReady` already
+  /// sends in-app to a LINKED recipient. The email never carries the code;
+  /// it points at the tracking page, same shape as the reveal flow.
+  SHIPMENT_COLLECTION_READY_EMAIL_SENT
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
   SHIPMENT_LEG_DISPATCH_EXHAUSTED
@@ -5217,6 +5236,17 @@ model Shipment {
   /// a null check on collectionPin — is the single, explicit signal that a
   /// shipment is exempt.
   collectionPinGrandfathered    Boolean            @default(false)
+
+  /// MDF-709, piece 2: the unlinked recipient's two-step reveal for the
+  /// collection code, exact mirror of deliveryCodeRevealToken/
+  /// ...TokenExpiresAt/...RequestedAt above — kept as its OWN separate set
+  /// of columns rather than reused, so requesting one code can never clear
+  /// or race the other's in-flight token. ShipmentService.
+  /// requestCollectionCodeEmail/revealCollectionCode own the full
+  /// read/write contract.
+  collectionCodeRevealToken String? @unique
+  collectionCodeRevealTokenExpiresAt DateTime?
+  collectionCodeRevealRequestedAt DateTime?
 
   /// BMPL-345: the estimated arrival instant the customer was last told about,
   /// OR — if none has ever been material enough to tell them — the first

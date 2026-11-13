@@ -16,6 +16,8 @@
  * terminal-queue.integration.spec.ts and shipping-handoff-reversal.
  * integration.spec.ts, and this file does not re-test them.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
@@ -84,6 +86,62 @@ async function makeCompanyWithLocation(prefix: string) {
   return { hub, company, loc };
 }
 
+/** MDF-716: a real two-hub network + a funded sender, same shape
+ *  terminal-queue.integration.spec.ts already established, needed here
+ *  only for the one test that proves a MANAGER can actually perform a
+ *  WRITE action (not just the two reads the superset test above covers). */
+async function makeNetwork() {
+  const tag = uniq().slice(-9);
+  const originCity = `RN ${tag}`;
+  const destinationCity = `RD ${tag}`;
+  const origin = await post(admin, 'admin/logistics/hubs', {
+    code: `${tag}O`, name: `Origin ${tag}`, type: 'WATER_TAXI_TERMINAL', district: 'BELIZE', city: originCity, modes: ['LAND', 'SEA'], courierFeeMinor: 1500,
+  });
+  const destination = await post(admin, 'admin/logistics/hubs', {
+    code: `${tag}D`, name: `Destination ${tag}`, type: 'WATER_TAXI_TERMINAL', district: 'BELIZE', city: destinationCity, modes: ['LAND', 'SEA'], courierFeeMinor: 1000,
+  });
+  expect(origin.status).toBe(201);
+  expect(destination.status).toBe(201);
+  const route = await post(admin, 'admin/logistics/routes', {
+    originHubId: origin.body.id, destinationHubId: destination.body.id, mode: 'SEA', durationMinutes: 90, priceMinor: 3000, carrierName: 'UAT Water Taxi',
+  });
+  expect(route.status).toBe(201);
+  return { originHubId: origin.body.id as string, destinationHubId: destination.body.id as string, originCity, destinationCity };
+}
+
+async function fundedSender() {
+  const email = `sender_${uniq()}@example.com`;
+  const reg = await request(ctx.server).post('/api/auth/register').send({ email, password: 'CustomerPass123', firstName: 'C', lastName: 'U', acceptedTerms: true });
+  expect(reg.status).toBe(201);
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+  await post(admin, 'admin/wallet/test-credit', { userId: user.id, amountMinor: 100_000, reason: 'MDF-716 test fixture.' });
+  return cookiesOf(reg);
+}
+
+async function bookDoorToHub(cookies: string[], net: { originCity: string; destinationHubId: string }) {
+  const r = await post(cookies, 'shipping', {
+    service: 'DOOR_TO_HUB',
+    origin: { district: 'BELIZE', city: net.originCity, address: '10 Barrier Reef Drive', name: 'Sender', phone: '501-2223333' },
+    destination: { hubId: net.destinationHubId, name: 'Recipient', phone: '501-4445555' },
+    preferredMode: 'SEA',
+    description: 'One box',
+    payWithWallet: true,
+  });
+  expect(r.status).toBe(201);
+  return r.body;
+}
+
+const legsOf = (shipmentId: string) => ctx.prisma.shipmentLeg.findMany({ where: { shipmentId }, orderBy: { sequence: 'asc' } });
+async function pinOf(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } })).handoffPin!;
+}
+async function completeFirstMileAsAdmin(legId: string) {
+  expect((await post(admin, `admin/logistics/legs/${legId}/start`, {})).status).toBe(201);
+  const r = await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Counter staff' });
+  expect(r.status).toBe(201);
+  return r.body;
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -133,12 +191,19 @@ describe('MDF-698 (TERM-ROLE): GET /terminal/staff is MANAGER-only', () => {
 
     const res = await get(operator.cookies, 'terminal/staff');
     expect(res.status).toBe(403);
+    // MDF-716 (Stanley): a bare 403 does not distinguish "no membership at
+    // all" from "a real member, wrong role" — assertActiveMemberRole's two
+    // ForbiddenExceptions already use different text; assert it, so a
+    // regression that collapsed them back to one message would be caught
+    // here rather than only noticed by someone reading an error in the UI.
+    expect(res.body.message).toBe('This action requires the terminal manager role.');
   });
 
-  it('a plain customer with no terminal membership gets 403, not a crash', async () => {
+  it('a plain customer with no terminal membership gets 403, not a crash — a DIFFERENT message than the wrong-role case above', async () => {
     const cookies = await registerCustomer(`plain_${uniq()}@example.com`);
     const res = await get(cookies, 'terminal/staff');
     expect(res.status).toBe(403);
+    expect(res.body.message).toBe('No active terminal company membership.');
   });
 
   it('a MANAGER sees only their own company\'s staff, never another company\'s', async () => {
@@ -167,5 +232,133 @@ describe('MDF-698 (TERM-ROLE): MANAGER is a strict superset of OPERATOR', () => 
 
     const queue = await get(manager.cookies, 'terminal/queue');
     expect(queue.status).toBe(200);
+  });
+
+  /**
+   * MDF-716 (Stanley): the test above is a regression guard, not proof —
+   * it would have passed before this card existed, and it never exercises
+   * a WRITE action as MANAGER at all. This one drives a real shipment to
+   * AWAITING_COLLECTION and has the MANAGER themself call `collect`,
+   * proving the superset claim actually extends to the five physical
+   * actions, not only the two reads already covered.
+   */
+  it('a MANAGER can perform a real write action (collect), not only read /me and /queue', async () => {
+    const net = await makeNetwork();
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: `Write Co ${uniq()}`, contactEmail: `writeco_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: net.destinationHubId })).body;
+    const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const booked = await bookDoorToHub(await fundedSender(), net);
+    const rows = await legsOf(booked.id);
+    await completeFirstMileAsAdmin(rows.find((l) => l.kind === 'FIRST_MILE')!.id);
+    const lineHaul = (await legsOf(booked.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`);
+    await post(admin, `admin/logistics/legs/${lineHaul.id}/handoff`, { pin: await pinOf(lineHaul.id), receivedByName: 'Counter staff' });
+
+    const code = (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id }, select: { collectionPin: true } })).collectionPin;
+    const collected = await post(manager.cookies, `terminal/shipments/${booked.id}/collect`, { collectedByName: 'Maria Cruz', code });
+    expect(collected.status).toBe(201);
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id } })).status).toBe('DELIVERED');
+  });
+});
+
+/**
+ * MDF-716, the structural fix Stanley asked for: `assertActiveMemberRole`
+ * is OPT-IN per endpoint — a new MANAGER-only route is protected only if
+ * its author remembers to call it, so it FAILS OPEN. A hand-maintained
+ * list of "which routes need which role" can drift the exact same way;
+ * the fix is to make the list's staleness a test failure, not a silent
+ * gap, by deriving the EXPECTED count from the live source file rather
+ * than trusting a human to keep both in sync.
+ *
+ * Chosen over a declarative decorator/guard (the other option raised):
+ * cheaper, ships today, and does not touch `assertStaffLocationAccess` or
+ * any of the eight already-working routes it gates — a guard would need a
+ * retrofitted decorator on every one of them to avoid becoming a second
+ * fail-open surface itself (silence would have to mean "refuse", which
+ * breaks today's intentionally role-blind routes unless every single one
+ * is annotated first). This is the tripwire: add a 10th route to any of
+ * the three terminal-staff controllers without extending ROLE_MATRIX below,
+ * and this test fails — forcing an explicit, reviewed role decision rather
+ * than a silent default.
+ */
+describe('MDF-716: every terminal-staff route is accounted for here — a new one must extend this table', () => {
+  // The current, exhaustive set. One entry per @Get/@Post/@Delete/@Patch on
+  // TerminalController, TerminalLegsController and TerminalShipmentsController
+  // — deliberately NOT AdminTerminalController (a different axis entirely:
+  // terminals.manage/terminals.read) and NOT TerminalInviteController
+  // (@Public(), no session, so "role" does not apply).
+  //
+  // `throttled`: Stanley's follow-up finding on this same card — a route
+  // whose path carries a specific resource id/reference (so a caller can
+  // probe many values of it) needs @StrictThrottle() to bound that; a
+  // parameterless route (me/staff/queue — nothing to probe) does not need
+  // the same bound, so it is correctly `false` here, not an oversight.
+  const ROLE_MATRIX = [
+    { controller: 'TerminalController', route: 'GET /terminal/me', roles: 'ANY', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/staff', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/queue', roles: 'ANY', throttled: false },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/arrive', roles: 'ANY', throttled: true },
+    { controller: 'TerminalShipmentsController', route: 'POST /terminal/shipments/:id/collect', roles: 'ANY', throttled: true },
+    { controller: 'TerminalShipmentsController', route: 'GET /terminal/shipments/:reference', roles: 'ANY', throttled: true },
+  ] as const;
+
+  /** One scan, reused by both assertions below: every @Get/@Post/@Delete/
+   *  @Patch on the three terminal-staff classes, in source order, each
+   *  tagged with whether a @StrictThrottle() appears in the ~80 characters
+   *  immediately before it — long enough to span the decorator's own line
+   *  plus a blank line, short enough that an unrelated sibling route's
+   *  throttle can never be mistaken for this one's. */
+  function scanTerminalStaffRoutes(src: string) {
+    const classNames = ['TerminalController', 'TerminalLegsController', 'TerminalShipmentsController'];
+    const routes: { method: string; throttled: boolean }[] = [];
+    for (const name of classNames) {
+      const marker = `export class ${name}`;
+      const start = src.indexOf(marker);
+      expect(start, `could not find ${marker} in terminal.controller.ts — did it get renamed?`).toBeGreaterThan(-1);
+      const nextClassStart = src.indexOf('\n@Controller(', start + marker.length);
+      const block = src.slice(start, nextClassStart === -1 ? src.length : nextClassStart);
+      const re = /@(Get|Post|Delete|Patch)\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(block)) !== null) {
+        const windowStart = Math.max(0, m.index - 80);
+        const preceding = block.slice(windowStart, m.index);
+        routes.push({ method: m[1]!, throttled: preceding.includes('@StrictThrottle()') });
+      }
+    }
+    return routes;
+  }
+
+  it('terminal.controller.ts declares exactly as many routes on these three classes as ROLE_MATRIX lists', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
+    const routes = scanTerminalStaffRoutes(src);
+
+    expect(
+      routes.length,
+      `terminal.controller.ts now declares ${routes.length} routes across TerminalController/TerminalLegsController/` +
+        `TerminalShipmentsController, but ROLE_MATRIX above only accounts for ${ROLE_MATRIX.length}. A route was ` +
+        `added or removed — extend (or trim) ROLE_MATRIX with an explicit ANY/MANAGER decision for it before ` +
+        `trusting this test again.`,
+    ).toBe(ROLE_MATRIX.length);
+  });
+
+  it('every route ROLE_MATRIX marks throttled actually carries @StrictThrottle(), in source order', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
+    const routes = scanTerminalStaffRoutes(src);
+
+    expect(routes.length, 'route count drifted from ROLE_MATRIX — see the test above for the real failure').toBe(ROLE_MATRIX.length);
+    routes.forEach((r, i) => {
+      const expected = ROLE_MATRIX[i]!;
+      expect(
+        r.throttled,
+        `${expected.route} (${expected.controller}) is declared throttled=${expected.throttled} in ROLE_MATRIX, ` +
+          `but its actual @StrictThrottle() presence in the source is ${r.throttled} — MDF-716's own finding ` +
+          `(the lookup route shipped without one) is exactly this class of drift.`,
+      ).toBe(expected.throttled);
+    });
   });
 });

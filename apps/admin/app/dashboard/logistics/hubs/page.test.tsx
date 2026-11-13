@@ -53,16 +53,29 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function stubFetch(adminPermissions: string[]) {
+  const posts: Array<{ url: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/admin/logistics/hubs/hub_1/hours')) return jsonResponse(200, HUB_HOURS);
+      if (url.includes('/api/admin/logistics/hubs') && init?.method === 'POST') {
+        posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(200, { ...HUB, id: 'hub_new' });
+      }
       if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, [HUB]);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
+  return posts;
+}
+
+const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+
+function setValue(el: HTMLInputElement, value: string) {
+  nativeInputValueSetter.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 async function mount() {
@@ -180,5 +193,73 @@ describe('HubHoursEditor — the toggle-revealed panel, where most of BMPL-265 a
     expect(texts).toContain('Unconfigure');
     expect(texts).toContain('Add hours');
     expect(document.body.querySelector('select')).not.toBeNull();
+  });
+});
+
+/**
+ * MDF-715: a simulation terminal company can only ever attach a hub whose own
+ * isTest matches it, and until this checkbox existed there was no way to
+ * create one through the console — the create form had no isTest key at all.
+ */
+describe('HubsPage — create form isTest checkbox (MDF-715)', () => {
+  async function fillRequiredFields() {
+    setValue(document.body.querySelector<HTMLInputElement>('#hub-code')!, 'SPX');
+    setValue(document.body.querySelector<HTMLInputElement>('#hub-name')!, 'San Pedro Extra Airstrip');
+    setValue(document.body.querySelector<HTMLInputElement>('#hub-city')!, 'San Pedro');
+  }
+
+  it('defaults to unchecked and sends isTest: false when left alone', async () => {
+    const posts = stubFetch(['logistics.manage']);
+    await mount();
+
+    const checkbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkbox?.checked).toBe(false);
+
+    await act(async () => {
+      await fillRequiredFields();
+    });
+    const createButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Add terminal')!;
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const createPost = posts.find((p) => p.url.includes('/api/admin/logistics/hubs') && !p.url.includes('hub_'));
+    expect(createPost?.body).toMatchObject({ code: 'SPX', name: 'San Pedro Extra Airstrip', city: 'San Pedro', isTest: false });
+  });
+
+  it('sends isTest: true when the simulation checkbox is checked, and resets it after a successful create', async () => {
+    const posts = stubFetch(['logistics.manage']);
+    await mount();
+
+    await act(async () => {
+      await fillRequiredFields();
+    });
+    const checkbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => {
+      checkbox.click();
+    });
+    expect(checkbox.checked).toBe(true);
+
+    const createButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Add terminal')!;
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const createPost = posts.find((p) => p.url.includes('/api/admin/logistics/hubs') && !p.url.includes('hub_'));
+    expect(createPost?.body).toMatchObject({ isTest: true });
+
+    // The form resets after a successful create — the next hub typed is real
+    // again by default, never silently inheriting the last one's flag.
+    const resetCheckbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(resetCheckbox.checked).toBe(false);
+  });
+
+  it('labels the checkbox to match the terminal-company console convention', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+
+    expect(document.body.textContent).toContain('Simulation hub (isTest)');
   });
 });
