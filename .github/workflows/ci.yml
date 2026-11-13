@@ -697,6 +697,48 @@ jobs:
           echo "One or both contrast checks failed -- see contrast-report-web/contrast-report-admin artifacts." >&2
           exit 1
 
+      # TERM-NAV-CI-STEP (MDF-744): the four-state useTerminalMembership
+      # contract (MDF-720) had THREE real E2E specs and NOTHING watching
+      # them in CI -- they were .local-only (Ruling 15/#644; confirmed
+      # before proposing this that playwright.config.ts's own testIgnore
+      # keeps that exclusion exactly as-is, so this does not touch it).
+      # Every external dependency these three specs have was ALREADY
+      # running in THIS job for the two Playwright steps above: the
+      # job-scoped ephemeral Postgres+Redis, the real API on :4000,
+      # seed.ts's SUPER_ADMIN and seed-uat-logistics.ts's UATBC hub (which
+      # `createTerminalManager` in the spec itself depends on) and UAT
+      # customer account. apps/web/next.config.mjs's own `/api/:path*`
+      # rewrite reaches that same API directly -- no apps/admin dependency
+      # hides in the admin-console calls the spec makes. So this is one
+      # more sequential step reusing the SAME already-proven server
+      # handoff (global-setup.ts) the visual and contrast steps above
+      # already use twice in this one job, not a new services block and
+      # not a new job.
+      #
+      # continue-on-error: true, same BMPL-217 policy as every other
+      # browser-test step in this job -- a flaky browser suite blocking
+      # every PR on unrelated grounds is a cost this floor already paid
+      # once. THIS IS DELIBERATELY TEMPORARY, not the end state: after TEN
+      # CONSECUTIVE PRs on which this step runs and passes, it flips to a
+      # real gate (remove continue-on-error, same as the four
+      # repo-drift-checks scripts below once each was already green) --
+      # see hive/agents/jim-mv09alb5/memory.md for the running count. A
+      # flake inside those ten is itself information about the contract,
+      # not noise to wait out: report what flaked rather than silently
+      # resetting the counter.
+      - name: Terminal membership nav specs (MDF-720, MDF-744 -- informational until 10 consecutive passes, then gates)
+        id: term-nav
+        continue-on-error: true
+        run: pnpm --filter @bmpl/web test:e2e:local-only e2e/mdf720-terminal-membership-loading-state.local-only.spec.ts
+
+      - name: Upload terminal nav spec report (only when it failed)
+        if: steps.term-nav.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-nav-spec-report
+          path: apps/web/test-results
+          retention-days: 7
+
   repo-drift-checks:
     name: Repo drift checks (docs, notification & permission catalogs)
     runs-on: ubuntu-latest
