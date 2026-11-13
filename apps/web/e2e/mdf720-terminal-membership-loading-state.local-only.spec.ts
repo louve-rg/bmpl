@@ -2,116 +2,67 @@ import { test, expect, type Page } from '@playwright/test';
 import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
 
 /**
- * [LOCAL ONLY, MDF-705 follow-up] god's dispatch: write the gap-proof test
- * for MDF-720 BEFORE Oscar's fix, independent of whether MDF-720 is
- * slowness-shaped or error-shaped -- this test produces that evidence
- * rather than assuming it.
+ * [LOCAL ONLY, MDF-705 follow-up] Proves MDF-720 end-to-end against a real
+ * terminal MANAGER, intercepting the browser's own `/api/terminal/me` call
+ * (never the backend).
  *
- * The defect (`apps/web/lib/use-terminal-membership.ts`): `isMember` starts
- * `false` and only ever flips to `true` on a SUCCESSFUL resolve of
- * `GET /terminal/me`. There is no loading state and no error state -- a
- * request that is merely slow and a request that fails outright are both
- * indistinguishable from "not a terminal member" for as long as they are
- * pending, and an error leaves it that way FOREVER, silently (the hook's
- * own `.catch(() => {})`).
+ * THE ORIGINAL DEFECT (`apps/web/lib/use-terminal-membership.ts`, pre-#694):
+ * `isMember` started `false` and only ever flipped `true` on a SUCCESSFUL
+ * resolve. A merely slow request and a failed one were both indistinguishable
+ * from "not a terminal member" while pending, and a failure left it that way
+ * FOREVER, silently (`.catch(() => {})`). The DELAYED/ERRORED tests below
+ * were originally written as GAP-PROOF against that code, before any fix
+ * existed, intercepting a delayed and an errored response respectively.
  *
- * Two REAL tests against a genuine terminal MANAGER, intercepting the
- * browser's own `/api/terminal/me` call (never the backend) to prove each
- * half live:
- *  - GAP-PROOF: DELAYED. A delayed-but-eventually-successful response
- *    hides the nav for the whole delay, with nothing distinguishing that
- *    from "no access" -- then the nav DOES appear once it resolves. This
- *    settles the open question from the MDF-698/manager-operator-login
- *    report: the defect is logic-shaped (any pending state reads as
- *    "hide"), not merely "requests never complete" -- a real manager does
- *    eventually see the link, just with no indication anything was
- *    loading in between.
- *  - GAP-PROOF: ERRORED. A failed response hides the nav and it NEVER
- *    recovers, with no error shown anywhere.
+ * TWO SELECTOR GAPS FOUND AND FIXED while that gap-proof pair ran against
+ * unfixed main (Dwight, 2026-11-13): TERM-11's collapsible nav groups meant
+ * the group header appearing (not the inner link) was the real evidence
+ * membership resolved -- fixed by expanding the group before asserting the
+ * link; and an unscoped `getByText` absence check matched non-visible DOM a
+ * Next.js dev overlay supplied -- fixed by scoping every text check to
+ * `page.getByRole('navigation', {name: 'Dashboard'})` (`navRegion` below),
+ * the same region the link lives in, confirmed as the only such region
+ * mounted on initial load (`MobileNavDrawer` only portals its own copy
+ * behind `{open && createPortal(...)}`, closed by default).
  *
- * `test.fixme` names the target (three distinct outcomes: loading, error,
- * not-a-member) without guessing Oscar's actual implementation -- replace
- * the stub with the real selectors/copy once MDF-720 ships.
- *
- * 2026-11-13, Dwight's first real run (god's dispatch): did not reproduce
- * as written -- a selector gap, not a dead defect. Two fixes, confirmed
- * from source (`DashboardNavList.tsx`), not guessed:
- *  - The DELAYED test's post-resolve assertion failed. TERM-11 made every
- *    role-gated nav group COLLAPSIBLE, closed by default unless it
- *    contains the current page; plain `/dashboard` never does. The "Terminal"
- *    group header (`role="button"`, `aria-expanded`) appearing with no
- *    visible inner link is itself the evidence membership resolved true --
- *    the group only renders at all once `terminalForcedVisible` flips. Fixed
- *    by expanding the group before asserting the link's visibility.
- *  - The ERRORED test's "no error text anywhere" assertion failed with
- *    matches Dwight could not attribute to the product (not in the a11y
- *    tree -- `getByText` also matches non-visible DOM, which a Next.js dev
- *    overlay can supply). An assertion a dev overlay can break is not
- *    measuring the product, so both the loading- and error-absence checks
- *    are now scoped to the `<nav aria-label="Dashboard">` region itself
- *    (confirmed as the only such region mounted on initial load --
- *    `MobileNavDrawer`'s copy renders only `{open && createPortal(...)}`,
- *    closed by default) -- the same region the link they gate lives in.
- *
- * 2026-11-13: PR #694 (Oscar) ships the fix. Main itself is green
- * (god corrected an earlier stale read of mine) -- the only real reason
- * the three tests below are `test.fixme`, not `test`, is that #694 is not
- * merged: a test asserting a contract that doesn't exist on main yet must
- * not be a live test, independent of main's CI color. Real bodies, ready
- * to flip with zero edits the instant it merges. Verified by fetching the
- * PR diff directly (`git fetch origin pull/694/head`), not from the
- * agent's relayed description: `useTerminalMembership()` now returns
- * `{ status, retry }`, `status` one of `'loading' | 'member' |
+ * THE FIX SHIPPED AND MERGED (#694, main `f3696c66`): `useTerminalMembership`
+ * now returns `{ status, retry }`, one of `'loading' | 'member' |
  * 'not-member' | 'error'`, rendered in `DashboardNavList.tsx` as two new
- * elements OUTSIDE the nav groups loop, never simultaneously with each
- * other or with the real "Terminal Workspace" link:
- *  - `[data-testid="terminal-membership-loading"]`, text "Loading
- *    terminal access…".
- *  - `[data-testid="terminal-membership-error"]`, text "Something went
- *    wrong checking your terminal access.", plus a button "Try again"
- *    wired to the hook's `retry()`. A 403 is treated as definitive
- *    ('not-member', stop retrying); anything else is 'error' and retries
- *    automatically on a capped backoff (1s/3s/9s/30s, then steady 30s) in
- *    the background in addition to the manual button.
+ * elements OUTSIDE the nav groups loop, never simultaneous with each other
+ * or with the real link: `[data-testid="terminal-membership-loading"]`
+ * ("Loading terminal access…") and `[data-testid="terminal-membership-
+ * error"]` ("Something went wrong checking your terminal access." plus a
+ * "Try again" button wired to `retry()`). A 403 is definitive
+ * ('not-member'); anything else retries automatically on a capped backoff
+ * (1s/3s/9s/30s, then steady 30s) in addition to the manual button.
  *
- * 2026-11-13, re-diffed after Oscar pushed F-NAV (`10f178db`) onto the same
- * branch: TWO more changes, both re-checked against the real diff, not
- * assumed. (1) `isOpen()` now auto-opens the "Terminal" group whenever
- * `terminalForcedVisible` is true (a confirmed member) -- so the manual
- * group-click the DELAYED/ERRORED GAP-PROOF tests above needed against
- * TODAY's main (where the group is never auto-opened) would now TOGGLE AN
- * ALREADY-OPEN GROUP CLOSED against #694, failing for the wrong reason.
- * The three fixme bodies below wait for the group header, then assert the
- * link directly -- no click. (2) A new `TerminalWorkspaceBanner` (outside
- * `<nav>`, on `/dashboard` itself) renders a second link whose accessible
- * name also contains "Terminal Workspace" as a substring once `status ===
- * 'member'` -- Playwright's default name match is substring, so an
- * unscoped `getByRole('link', {name: 'Terminal Workspace'})` would match
- * both links and raise a strict-mode violation. Already a non-issue here:
- * every link assertion below was already scoped to `navRegion(page)`
- * for the dev-overlay reason above, and the banner renders outside the
- * nav -- scoping for one reason happened to close the other gap too, but
- * that's confirmed from the diff, not assumed from the first fix's intent.
+ * THE SAME BRANCH ALSO SHIPPED F-NAV (`10f178db`): the "Terminal" group now
+ * auto-opens whenever a confirmed member, and a `TerminalWorkspaceBanner`
+ * (outside `<nav>`, on `/dashboard` itself) surfaces the same link above
+ * the fold. Re-diffing before touching anything caught that the DELAYED/
+ * ERRORED tests' manual group-click would now toggle an already-open group
+ * CLOSED -- removed; and that the banner's link, whose accessible name also
+ * contains "Terminal Workspace" as a substring (Playwright's default name
+ * match), could have collided with every link assertion here -- it can't,
+ * because every one was already scoped to `navRegion`, and the banner
+ * renders outside it.
  *
- * All three assert on the test-ids directly (presence of the real one, not
- * absence of a string) -- deliberately avoided getByText-based absence
- * checks here, since asserting a positive element exists cannot pass for
- * the wrong reason the way "no matching text anywhere" can. Loading/error
- * are rendered OUTSIDE the collapsible "Terminal" group (confirmed in the
- * same diff), so only the post-resolve "link is now present" assertion
- * needs the group expanded -- the loading/error test-ids never do.
+ * FLOOR RULE SATISFIED (god, from Oscar's MDF-722 catch): a test for a
+ * defect depending on intermediate render state is credited only once
+ * PROVEN to fail against the unfixed code, not merely shown to pass against
+ * the fix. Dwight ran the revert-and-prove protocol (#694's DashboardNavList
+ * kept, only `use-terminal-membership.ts` reverted to the old bare-boolean
+ * hook): the loading and error bodies both failed/errored as required (the
+ * test-ids didn't exist on the old hook); the non-member body passed at
+ * both ends, correctly judged NOT a protocol failure since a pure absence
+ * check has no intermediate state to hide. With the real fix restored, all
+ * three passed.
  *
- * FLOOR RULE (god, from Oscar's MDF-722 catch): a test for a defect that
- * depends on intermediate render state is not credited until PROVEN to
- * fail against the unfixed code, not just shown to pass against the fix --
- * a test that cannot fail certifies the bug as fixed forever. The DELAYED
- * case here is exactly that shape (the whole point is the 4s mid-flight
- * state). Before any of these three flip from `test.fixme` to `test`,
- * whoever runs them must: (1) run them as real tests against #694 with
- * ONLY `use-terminal-membership.ts`'s fix reverted (old bare-boolean hook,
- * new DashboardNavList) and confirm they fail -- the test-ids won't exist,
- * so they should error/timeout, not silently pass; (2) restore the fix and
- * confirm they pass. Only step (2) alone is not enough to credit this.
+ * REWRITTEN, NOT DELETED (floor convention: a deleted test takes its
+ * evidence of the original defect with it). The DELAYED/ERRORED tests below
+ * are the same two gap-proof tests, same account setup, rewritten in place
+ * to assert the now-shipped positive behavior instead of the gap. The
+ * non-member test is unchanged from its `test.fixme` body, now flipped live.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -211,7 +162,7 @@ function navRegion(page: Page) {
   return page.getByRole('navigation', { name: 'Dashboard' });
 }
 
-test('GAP-PROOF: a DELAYED (but eventually successful) GET /terminal/me hides the nav for the whole delay, indistinguishable from no access', async ({ browser }) => {
+test('a DELAYED GET /terminal/me shows a visible loading affordance, then the real link once it resolves (was GAP-PROOF; #694 fixed this)', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
@@ -229,37 +180,32 @@ test('GAP-PROOF: a DELAYED (but eventually successful) GET /terminal/me hides th
   await page.goto(`${WEB}/dashboard`);
   await waitForDashboardLoaded(page);
 
-  // Mid-delay: a genuine MANAGER, request pending, not yet resolved.
+  // Mid-delay: a genuine MANAGER, request pending, not yet resolved. A
+  // visible loading affordance must distinguish this from "not a member" --
+  // before #694 nothing here would have been visible at all.
   await page.waitForTimeout(DELAY_MS / 2);
   await expect(
-    page.getByRole('link', { name: 'Terminal Workspace' }),
-    'CONFIRMED GAP: while GET /terminal/me is pending, a real MANAGER sees no Terminal Workspace link, no spinner, no indication anything is loading -- identical to having no access at all',
-  ).toHaveCount(0);
-  await expect(
-    navRegion(page).getByText(/loading/i),
-    'no loading indicator exists anywhere in the nav for this -- confirms the hidden state is not even accompanied by a spinner',
-  ).toHaveCount(0);
+    navRegion(page).getByTestId('terminal-membership-loading'),
+    'mid-delay: a visible loading affordance must distinguish this from "not a member"',
+  ).toBeVisible();
+  await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveText(/Loading terminal access/i);
+  await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+  await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
 
-  // After the delay resolves: the nav DOES appear -- proving this is a
-  // logic defect (any pending state reads as "hide"), not a request that
-  // never completes. A longer client-side timeout would not have helped a
-  // test waiting on this link; the link only ever flips once the fetch's
-  // OWN promise resolves, with nothing to poll for in between.
-  //
-  // TERM-11 made the "Terminal" group collapsible, closed by default on a
-  // page it doesn't contain (plain /dashboard): the group header appearing
-  // IS the evidence membership resolved true, but the inner link stays
-  // hidden until the group is expanded -- expand it before asserting.
+  // After the delay resolves: the link appears and the loading affordance
+  // clears. F-NAV auto-opens "Terminal" for a confirmed member -- no click
+  // needed (and none attempted: that would toggle an already-open group
+  // closed against this fixed code).
   const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
-  await expect(terminalGroup, 'Terminal nav group header never appeared -- membership never resolved true after the delay').toBeVisible({ timeout: 15_000 });
-  await terminalGroup.click();
+  await expect(terminalGroup, 'Terminal nav group header never appeared after the delay resolved').toBeVisible({ timeout: 15_000 });
+  await expect(navRegion(page).getByTestId('terminal-membership-loading'), 'loading affordance must disappear once membership resolves').toHaveCount(0);
   await expect(
     navRegion(page).getByRole('link', { name: 'Terminal Workspace' }),
-    'once GET /terminal/me finally resolves, the nav link must appear -- this is the "eventually correct, never loading" half of the defect',
+    'once GET /terminal/me finally resolves, the nav link must appear',
   ).toBeVisible({ timeout: 5_000 });
 });
 
-test('GAP-PROOF: an ERRORED GET /terminal/me hides the nav forever, with no error shown anywhere', async ({ browser }) => {
+test('an ERRORED GET /terminal/me shows a visible error affordance with a working manual retry (was GAP-PROOF; #694 fixed this)', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
@@ -268,121 +214,49 @@ test('GAP-PROOF: an ERRORED GET /terminal/me hides the nav forever, with no erro
   const page = await (await browser.newContext()).newPage();
   expect(await tryLogin(page, email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
 
+  let failRequests = true;
   await page.route('**/api/terminal/me', async (route) => {
-    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Simulated MDF-720 upstream failure' }) });
+    if (failRequests) {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Simulated MDF-720 upstream failure' }) });
+    } else {
+      await route.continue();
+    }
   });
 
   await page.goto(`${WEB}/dashboard`);
   await waitForDashboardLoaded(page);
 
-  // Give the (failed) request every chance to settle, then assert it never
-  // recovers and never surfaces anything -- the hook's own `.catch(() => {})`
-  // means a genuine MANAGER who hits a transient API blip concludes, with
-  // no evidence to the contrary anywhere on the page, that they have no
-  // terminal access at all.
+  // Give the failed request every chance to settle, then assert a visible
+  // error affordance replaced the old silent hide.
   await page.waitForTimeout(3_000);
-  await expect(
-    page.getByRole('link', { name: 'Terminal Workspace' }),
-    'CONFIRMED GAP: a real MANAGER whose GET /terminal/me errors sees no Terminal Workspace link, ever, with no error message anywhere on the page',
-  ).toHaveCount(0);
-  await expect(
-    navRegion(page).getByText(/error|something went wrong|try again/i),
-    'no error indicator exists anywhere in the nav for this -- the failure is completely silent',
-  ).toHaveCount(0);
+  const errorBox = navRegion(page).getByTestId('terminal-membership-error');
+  await expect(errorBox, 'a visible error affordance must replace the old silent hide').toBeVisible();
+  await expect(errorBox).toContainText('Something went wrong checking your terminal access.');
+  await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+
+  // Manual retry: unblock the route, click "Try again", membership resolves.
+  // Clicking "Try again" and seeing the link actually appear proves retry()
+  // re-checks rather than just dismissing the error -- a test only asserting
+  // the error text vanished would pass against a button that does nothing.
+  failRequests = false;
+  await errorBox.getByRole('button', { name: 'Try again' }).click();
+
+  // F-NAV auto-opens "Terminal" for a confirmed member -- no click needed.
+  const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
+  await expect(terminalGroup, 'retry must actually re-check membership, not just dismiss the error').toBeVisible({ timeout: 15_000 });
+  await expect(navRegion(page).getByTestId('terminal-membership-error'), 'error affordance must clear once retry succeeds').toHaveCount(0);
+  await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
 });
 
-test.fixme(
-  'MDF-720 (PR #694): a DELAYED GET /terminal/me shows a visible loading affordance, never indistinguishable from "not a member"',
-  async ({ browser }) => {
-    test.setTimeout(60_000);
-    const adminPage = await (await browser.newContext()).newPage();
-    await adminLogin(adminPage);
-    const { email } = await createTerminalManager(adminPage, 'Loading');
+test('a genuine non-member sees neither the link, the loading affordance, nor the error affordance', async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  expect(await tryLogin(page, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD), 'CUSTOMER login failed').toBeTruthy();
+  await waitForDashboardLoaded(page);
 
-    const page = await (await browser.newContext()).newPage();
-    expect(await tryLogin(page, email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
-
-    const DELAY_MS = 4_000;
-    await page.route('**/api/terminal/me', async (route) => {
-      await new Promise((r) => setTimeout(r, DELAY_MS));
-      await route.continue();
-    });
-
-    await page.goto(`${WEB}/dashboard`);
-    await waitForDashboardLoaded(page);
-
-    await page.waitForTimeout(DELAY_MS / 2);
-    await expect(
-      navRegion(page).getByTestId('terminal-membership-loading'),
-      'mid-delay: a visible loading affordance must distinguish this from "not a member", unlike before this fix',
-    ).toBeVisible();
-    await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveText(/Loading terminal access/i);
-    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
-    await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
-
-    // F-NAV auto-opens "Terminal" for a confirmed member -- do not click
-    // the header here, that would toggle an already-open group closed.
-    const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
-    await expect(terminalGroup, 'Terminal nav group header never appeared after the delay resolved').toBeVisible({ timeout: 15_000 });
-    await expect(navRegion(page).getByTestId('terminal-membership-loading'), 'loading affordance must disappear once membership resolves').toHaveCount(0);
-    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
-  },
-);
-
-test.fixme(
-  'MDF-720 (PR #694): an ERRORED GET /terminal/me shows a visible error affordance with a working manual retry, never indistinguishable from "not a member"',
-  async ({ browser }) => {
-    test.setTimeout(60_000);
-    const adminPage = await (await browser.newContext()).newPage();
-    await adminLogin(adminPage);
-    const { email } = await createTerminalManager(adminPage, 'Erroring');
-
-    const page = await (await browser.newContext()).newPage();
-    expect(await tryLogin(page, email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
-
-    let failRequests = true;
-    await page.route('**/api/terminal/me', async (route) => {
-      if (failRequests) {
-        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Simulated MDF-720 upstream failure' }) });
-      } else {
-        await route.continue();
-      }
-    });
-
-    await page.goto(`${WEB}/dashboard`);
-    await waitForDashboardLoaded(page);
-
-    await page.waitForTimeout(3_000);
-    const errorBox = navRegion(page).getByTestId('terminal-membership-error');
-    await expect(errorBox, 'CONFIRMED-FIXED: a visible error affordance must replace the old silent hide').toBeVisible();
-    await expect(errorBox).toContainText('Something went wrong checking your terminal access.');
-    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
-
-    // Manual retry: unblock the route, click "Try again", membership resolves.
-    failRequests = false;
-    await errorBox.getByRole('button', { name: 'Try again' }).click();
-
-    // F-NAV auto-opens "Terminal" for a confirmed member -- do not click
-    // the header here, that would toggle an already-open group closed.
-    const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
-    await expect(terminalGroup, 'retry must actually re-check membership, not just dismiss the error').toBeVisible({ timeout: 15_000 });
-    await expect(navRegion(page).getByTestId('terminal-membership-error'), 'error affordance must clear once retry succeeds').toHaveCount(0);
-    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toBeVisible({ timeout: 5_000 });
-  },
-);
-
-test.fixme(
-  'MDF-720 (PR #694): a genuine non-member sees neither the link, the loading affordance, nor the error affordance',
-  async ({ browser }) => {
-    const page = await (await browser.newContext()).newPage();
-    expect(await tryLogin(page, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD), 'CUSTOMER login failed').toBeTruthy();
-    await waitForDashboardLoaded(page);
-
-    // Real 403 from the real backend -- no interception. Give the hook
-    // every chance to settle before asserting the quiet, correct outcome.
-    await page.waitForTimeout(3_000);
-    await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
-    await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveCount(0);
-    await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
-  },
-);
+  // Real 403 from the real backend -- no interception. Give the hook
+  // every chance to settle before asserting the quiet, correct outcome.
+  await page.waitForTimeout(3_000);
+  await expect(navRegion(page).getByRole('link', { name: 'Terminal Workspace' })).toHaveCount(0);
+  await expect(navRegion(page).getByTestId('terminal-membership-loading')).toHaveCount(0);
+  await expect(navRegion(page).getByTestId('terminal-membership-error')).toHaveCount(0);
+});
