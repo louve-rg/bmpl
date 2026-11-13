@@ -359,8 +359,24 @@ jobs:
     # three distinct real causes (a step-ordering bug, then a pre-existing
     # gap in seed-uat-logistics.ts's own email-verification handling, then a
     # call-site placement bug in the fix for that gap) — none of them a
-    # missing env var. The question this draft existed to answer is
-    # answered: the env block below is complete as written.
+    # missing env var.
+    #
+    # THAT CONCLUSION WAS WRONG (CI-CORS-ORIGIN, 2026-11-13): it WAS a
+    # missing env var, just one nothing had exercised yet. CORS_ORIGINS
+    # (apps/api/src/config/env.ts) defaults to localhost:3000/3001, but this
+    # job's web/admin dev servers run on 3177-3180 (apps/{web,admin}/e2e/
+    # support/server.ts) and this env block never set it, so CsrfGuard
+    # rejected every authenticated MUTATING (POST/PUT/PATCH/DELETE) browser
+    # request from this job's own apps with "Request origin is not allowed"
+    # -- GETs, and the @Public() login route itself, were never affected,
+    # which is exactly why three draft runs of read-only/login-only
+    # Playwright specs all went green on this gap. It took a browser-driven
+    # mutation -- MDF-744's term-nav step, the first spec in this job ever
+    # to attempt one -- to expose it; checked directly that none of the 11
+    # pre-existing specs here (web: smoke, stickybar-coverage, 9 contrast
+    # specs; admin: 8 contrast specs) click a button or fire a POST/PUT/
+    # PATCH/DELETE at all, so none of their prior green runs were silently
+    # swallowing a 403 -- they simply never tested this path.
     #
     # Phase 1 ships exactly ONE spec (apps/web/e2e/visual/smoke.spec.ts) and
     # it is deliberately not a baseline -- no toHaveScreenshot, no committed
@@ -447,6 +463,20 @@ jobs:
       API_PORT: '4000'
       NEXT_PUBLIC_API_URL: http://localhost:4000
       ADMIN_PUBLIC_API_URL: http://localhost:4000
+      # CI-CORS-ORIGIN (god/jim, 2026-11-13): every browser origin this job
+      # actually serves -- web visual (apps/web/e2e/support/server.ts PORT)
+      # 3177, admin visual (apps/admin/e2e/support/server.ts PORT) 3178, web
+      # contrast (CONTRAST_PORT) 3179, admin contrast (CONTRAST_PORT) 3180.
+      # Setting CORS_ORIGINS at all REPLACES env.ts's own 3000/3001 default
+      # rather than extending it, and this job never serves anything on
+      # those two ports, so they are deliberately not in this list -- do
+      # not add them back without a real caller on one of them. Missing
+      # entirely before this, which is exactly why the CsrfGuard origin
+      # check 403'd every authenticated mutating browser request in this
+      # job (see the comment above this job's own `name:` line for the
+      # full story) -- keep this list exhaustive over every port this job's
+      # dev servers bind to, not just the one that happened to get caught.
+      CORS_ORIGINS: 'http://localhost:3177,http://localhost:3178,http://localhost:3179,http://localhost:3180'
       # FLOOR-SEEDTARGET (god, 2026-11-10): restores previously-implicit
       # behavior, not a new CI dependency -- this job already seeded against
       # localhost:4000 through seed-uat-logistics.ts/seed-uat-roles.ts's own
