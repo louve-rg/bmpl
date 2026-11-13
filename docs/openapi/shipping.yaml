@@ -2054,7 +2054,7 @@ components:
         hubId: { type: string }
         name: { type: string, maxLength: 120 }
         phone: { type: string }
-        email: { type: string, maxLength: 160 }
+        email: { type: string, maxLength: 160, description: "On the destination, this is the ONLY route to notify a hub-collection recipient — the collection-code and delivery-code reveal emails are sent to this address, nowhere else. Not decorative like company/landmark; omitting it on a HUB destination means the recipient is never told their code." }
         company: { type: string, maxLength: 120 }
         address: { type: string, maxLength: 200 }
         address2: { type: string, maxLength: 200 }
@@ -2081,7 +2081,10 @@ components:
       description: >-
         A quote plus what is only needed once it is real: each door end must be
         locatable (street OR pin) and name its town; the destination must carry
-        a name and phone — somebody has to be reachable at the far end.
+        a name and phone — somebody has to be reachable at the far end. For a
+        HUB destination specifically, also send destination.email — it is the
+        only way the recipient is notified of their collection code (see
+        EndpointInput.email); name and phone alone leave them with no code.
     QuoteAvailable:
       type: object
       properties:
