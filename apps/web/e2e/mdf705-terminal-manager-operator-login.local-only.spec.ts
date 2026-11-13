@@ -136,7 +136,7 @@ test('MANAGER login: real session, real nav entry, workspace shows the correct c
   // regression that hides the nav entry (but leaves the route reachable by
   // direct URL) is still caught.
   await page.goto(`${WEB}/dashboard`);
-  const navLink = page.getByRole('link', { name: 'Terminal Workspace' });
+  const navLink = page.getByRole('link', { name: 'Terminal Workspace', exact: true });
   await expect(navLink, 'MANAGER signed in but the Terminal Workspace nav entry never appeared').toBeVisible({ timeout: 15_000 });
   await navLink.click();
   await page.waitForURL(/\/dashboard\/terminal$/, { timeout: 10_000 });
@@ -159,7 +159,7 @@ test('A non-terminal-staff account never sees the Terminal Workspace nav entry o
   expect(await tryLogin(page, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
 
   await page.goto(`${WEB}/dashboard`);
-  await expect(page.getByRole('link', { name: 'Terminal Workspace' }), 'a plain customer must never see this nav entry').toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Terminal Workspace', exact: true }), 'a plain customer must never see this nav entry').toHaveCount(0);
 
   // Direct-URL check: the route itself must refuse, not merely be unlinked --
   // navigability-by-hiding-the-link is not the same guarantee as authorization.
@@ -181,7 +181,7 @@ test('TODAY: OPERATOR gets the identical workspace/nav/session a MANAGER gets --
   expect(loggedIn, 'OPERATOR could not log in through the real /login form').toBeTruthy();
 
   await page.goto(`${WEB}/dashboard`);
-  await expect(page.getByRole('link', { name: 'Terminal Workspace' }), 'OPERATOR should see the nav entry exactly as MANAGER does today').toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('link', { name: 'Terminal Workspace', exact: true }), 'OPERATOR should see the nav entry exactly as MANAGER does today').toBeVisible({ timeout: 15_000 });
   await page.goto(`${WEB}/dashboard/terminal`);
   await expect(page.getByRole('heading', { name: companyName })).toBeVisible({ timeout: 15_000 });
   await expect(
