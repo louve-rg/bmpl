@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Alert } from '../ui';
-import { useTerminalMembership } from '../../lib/use-terminal-membership';
+import { useSharedTerminalMembership } from '../../lib/terminal-membership-context';
 
 /**
  * F-NAV: Stanley drove the real product as a real invited Terminal Manager
@@ -22,7 +22,9 @@ import { useTerminalMembership } from '../../lib/use-terminal-membership';
  * affordances for those states on every dashboard page load.
  */
 export function TerminalWorkspaceBanner() {
-  const { status } = useTerminalMembership();
+  // TERM-NAV-COST: shared with the nav via TerminalMembershipProvider --
+  // see terminal-membership-context.tsx.
+  const { status } = useSharedTerminalMembership();
   if (status !== 'member') return null;
 
   return (

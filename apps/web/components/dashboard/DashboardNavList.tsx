@@ -8,7 +8,7 @@ import { approvedRoles, visibleRoleGroupsWithOverrides } from '../../lib/dashboa
 import { BASE_NAV, ROLE_GROUPS, allNavHrefs, isNavItemActive, type NavItem } from '../../lib/dashboard-nav-items';
 import { badgeCount, unreadLabel } from '../../lib/badge';
 import { useCarrierApplicationStatus } from '../../lib/use-carrier-application-status';
-import { useTerminalMembership } from '../../lib/use-terminal-membership';
+import { useSharedTerminalMembership } from '../../lib/terminal-membership-context';
 import { navApplicationBadge } from '../../lib/shipping-provider';
 
 function groupHasActiveItem(items: NavItem[], pathname: string, hrefs: string[]): boolean {
@@ -67,7 +67,11 @@ export function DashboardNavList({
   // MDF-720: `status` is one of four distinct outcomes (loading/member/
   // not-member/error), not a single boolean -- see the loading/error
   // affordances rendered below the nav groups.
-  const { status: terminalStatus, retry: retryTerminalMembership } = useTerminalMembership();
+  // TERM-NAV-COST: shared across every consumer on the page (nav + banner)
+  // via TerminalMembershipProvider in the dashboard layout -- see that
+  // file's own comment. Falls back to its own independent check if no
+  // provider is mounted (every test for this component).
+  const { status: terminalStatus, retry: retryTerminalMembership } = useSharedTerminalMembership();
   const terminalForcedVisible = terminalStatus === 'member';
 
   const forceVisible = useMemo(() => {

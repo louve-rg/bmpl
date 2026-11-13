@@ -71,13 +71,28 @@ export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'er
  * reachable no other way; the terminal workspace page itself reads
  * `/terminal/me` again on its own terms and does not depend on this hook
  * for anything but visibility.
+ *
+ * TERM-NAV-COST: this ran once per `DashboardNavList` instance (Sidebar's
+ * desktop copy AND MobileNavDrawer's mobile copy are BOTH mounted at once,
+ * CSS hides one per breakpoint, neither ever unmounts) plus once more for
+ * `TerminalWorkspaceBanner` on `/dashboard` -- up to three independent
+ * fetches and three independent retry loops for the identical fact about
+ * the identical signed-in user on one page load. `enabled` lets
+ * `terminal-membership-context.tsx`'s `useSharedTerminalMembership` call
+ * this hook UNCONDITIONALLY (rules of hooks) from every consumer while
+ * only the single instance inside `TerminalMembershipProvider` actually
+ * runs the effect -- every other consumer reads that one result over
+ * context instead. Defaults to `true` so every existing standalone caller
+ * (and every existing test, none of which wrap in that provider) keeps the
+ * exact behaviour it already had.
  */
-export function useTerminalMembership(): { status: TerminalMembershipStatus; retry: () => void } {
+export function useTerminalMembership(enabled = true): { status: TerminalMembershipStatus; retry: () => void } {
   const [status, setStatus] = useState<TerminalMembershipStatus>('loading');
   const [retryToken, setRetryToken] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
@@ -117,7 +132,7 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [retryToken, router]);
+  }, [retryToken, router, enabled]);
 
   const retry = useCallback(() => setRetryToken((t) => t + 1), []);
 
