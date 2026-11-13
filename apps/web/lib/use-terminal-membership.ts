@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { api, type ApiError } from './api';
 
 /**
@@ -46,6 +47,27 @@ export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'er
  *    also exposing `retry()` for a visible manual "try again" affordance,
  *    so the failure is never silent the way it used to be.
  *
+ * MDF-733: a 401 is neither of those. `api.get` (lib/api.ts) already tries
+ * one silent token refresh before a 401 ever reaches this `.catch` -- so a
+ * 401 here means the refresh itself failed and the session is genuinely
+ * over, the same condition every other page's own `status === 401` check
+ * sends to `/login?next=...` for (see app/cart/page.tsx, app/wallet/page.tsx
+ * and others). Treating it as `error` and retrying on the backoff is wrong
+ * twice over: it can never succeed (an expired session does not heal
+ * itself), and it tells the user the PRODUCT is broken ("Something went
+ * wrong") when in fact their SESSION ended, which is normal and expected.
+ * This hook redirects instead of exposing a fifth status -- the four
+ * outcomes above are an already-verified contract (loading/member/
+ * not-member/error, both test-ids) that collapsing or extending would
+ * break for no benefit, since the component is about to navigate away.
+ *
+ * Also MDF-733: a re-check (automatic backoff retry OR a manual `retry()`)
+ * now re-enters `loading` before the request goes out, not just on the
+ * very first check. Previously `status` only ever left `error` on success,
+ * so a "Try again" click that failed again re-issued the request but the
+ * screen never visibly changed -- indistinguishable from the button doing
+ * nothing at all.
+ *
  * Exists only so the nav can surface a workspace that is otherwise
  * reachable no other way; the terminal workspace page itself reads
  * `/terminal/me` again on its own terms and does not depend on this hook
@@ -54,6 +76,8 @@ export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'er
 export function useTerminalMembership(): { status: TerminalMembershipStatus; retry: () => void } {
   const [status, setStatus] = useState<TerminalMembershipStatus>('loading');
   const [retryToken, setRetryToken] = useState(0);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +85,7 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
     let attempt = 0;
 
     function check() {
+      if (!cancelled) setStatus('loading');
       api
         .get('/terminal/me')
         .then(() => {
@@ -68,8 +93,16 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
         })
         .catch((e) => {
           if (cancelled) return;
-          if ((e as ApiError)?.status === 403) {
+          const errorStatus = (e as ApiError)?.status;
+          if (errorStatus === 403) {
             setStatus('not-member'); // definitive: stop retrying
+            return;
+          }
+          if (errorStatus === 401) {
+            // Session genuinely expired (api.ts already tried one silent
+            // refresh) -- send the user to sign in, never retry, never
+            // claim the product is broken.
+            router.push(`/login?next=${encodeURIComponent(pathname)}`);
             return;
           }
           setStatus('error');
@@ -84,7 +117,7 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [retryToken]);
+  }, [retryToken, router, pathname]);
 
   const retry = useCallback(() => setRetryToken((t) => t + 1), []);
 

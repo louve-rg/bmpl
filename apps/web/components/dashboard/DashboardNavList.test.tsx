@@ -15,7 +15,13 @@ import type { MeView } from '../../lib/types';
  * their own unit tests in dashboard-nav.test.ts and shipping-provider.test.ts.
  */
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard' }));
+const routerPush = vi.fn();
+// A fresh `{ push: routerPush }` literal on every call would change identity
+// every render -- unlike the real `useRouter()`, which returns a stable
+// object from context -- and the hook's effect depends on `router`, so an
+// unstable mock would re-run the effect (and re-fetch) on every render.
+const mockRouter = { push: routerPush };
+vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard', useRouter: () => mockRouter }));
 
 const apiGet = vi.fn();
 vi.mock('../../lib/api', () => ({
@@ -50,6 +56,7 @@ let container: HTMLDivElement | null = null;
 
 beforeEach(() => {
   apiGet.mockReset();
+  routerPush.mockReset();
 });
 
 afterEach(() => {
@@ -358,6 +365,114 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       expect(container.textContent).not.toMatch(/Terminal/);
       expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
       expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+    });
+  });
+
+  /**
+   * MDF-733: a 401 used to fall into the same bucket as a network error or
+   * a 5xx -- `error`, retried forever on the backoff, "Something went
+   * wrong" shown to a user whose session had simply ended. `api.get`
+   * (lib/api.ts) already tries one silent refresh before a 401 ever
+   * reaches here, so this is a genuinely expired session, the same
+   * condition every other page's own `status === 401` check sends to
+   * `/login?next=...` for.
+   */
+  describe('MDF-733 — an expired session (401) sends the user to sign in, not an infinite retry loop', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not show the error affordance or retry on a 401 -- it redirects to sign-in instead', async () => {
+      let calls = 0;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        return Promise.reject({ status: 401 });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(1);
+      expect(routerPush).toHaveBeenCalledWith('/login?next=%2Fdashboard');
+      expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+      expect(container.textContent).not.toMatch(/something went wrong/i);
+
+      // Proves this is a real redirect, not merely a different label on the
+      // same forever-retry bug: unlike the 403 and backoff tests above, no
+      // amount of elapsed time issues a second request for a 401.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(calls).toBe(1);
+      expect(routerPush).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the loading state again while a manual "Try again" re-check is in flight, not a frozen error screen', async () => {
+      let calls = 0;
+      let resolveSecond: ((v: unknown) => void) | undefined;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('network error'));
+        return new Promise((resolve) => {
+          resolveSecond = resolve;
+        });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(1);
+      const retryButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Try again')!;
+      expect(retryButton).toBeDefined();
+
+      // The click issues the second request, which deliberately never
+      // resolves in this act() -- a single act() around the click would let
+      // React batch the error-cleared-to-loading transition away even
+      // though the real request is still pending (the floor's own one-
+      // act()-per-round-trip trap). A real timing gap between the click and
+      // the next assertion is what proves this against the unfixed code,
+      // where `status` never left 'error' until the request settled.
+      await act(async () => {
+        retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(2);
+      expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+      expect(container.querySelector('[data-testid="terminal-membership-loading"]')).not.toBeNull();
+      expect(container.textContent).toMatch(/Loading terminal access/);
+
+      await act(async () => {
+        resolveSecond!({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'OPERATOR', locations: [] });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
+      expect(container.textContent).toMatch(/Terminal Workspace/);
     });
   });
 });

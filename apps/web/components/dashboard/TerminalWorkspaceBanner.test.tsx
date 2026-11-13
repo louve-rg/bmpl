@@ -21,6 +21,14 @@ vi.mock('../../lib/api', () => ({
   api: { get: (...args: unknown[]) => apiGet(...args) },
 }));
 
+// MDF-733: useTerminalMembership now calls useRouter()/usePathname() to send
+// an expired session to sign-in. A stable object (not a fresh literal per
+// call) matters: the hook's effect depends on `router`, so an unstable mock
+// would re-run the effect, and re-fetch, on every render.
+const routerPush = vi.fn();
+const mockRouter = { push: routerPush };
+vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard', useRouter: () => mockRouter }));
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
