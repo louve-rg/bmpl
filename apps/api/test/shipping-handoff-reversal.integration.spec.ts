@@ -35,6 +35,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, findPinLeak, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
+import { DELIVERY_PIN_MAX_ATTEMPTS } from '@bmpl/shared';
 
 let ctx: TestContext;
 let dispatch: ShipmentDispatchService;
@@ -389,10 +390,87 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
       presentedByAssignedCourier: true,
     });
     expect(r.status).toBe(400);
+    // TERM-HANDOFF-ENFORCE-REGRESSION, case 1 (UNASSIGNED COURIER): this
+    // exact wording is one of the owner's four observed handoff-enforcement
+    // behaviours (Stanley verified it by hand) and is not expected to
+    // change — pin it, unlike case 3 below.
+    expect(r.body.message).toBe('No courier is assigned to this leg; there is no code to present.');
     const after = await legRow(firstMile.id);
     expect(after.status).toBe('IN_PROGRESS');
     // Refused before the code was ever checked — no attempt recorded.
     expect(after.handoffPinAttempts).toBe(0);
+  });
+
+  it('6e · TERM-HANDOFF-ENFORCE-REGRESSION, case 2 (WRONG CODE WITH A COURIER ASSIGNED): a wrong handoff code against a correctly assigned courier decrements the counter with the exact message, and completes nothing', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const realCode = (await legRow(firstMile.id)).handoffPin!;
+    const wrongCode = realCode === '000000' ? '111111' : '000000';
+    const ops = await makeOperator(['logistics.operate']);
+    const r2 = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: wrongCode,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(r2.status).toBe(400);
+    // The baseline this card's other three cases are contrasted against:
+    // courier and leg state are both right, only the code is wrong, so this
+    // is the one case where the comparison genuinely runs and the counter
+    // genuinely moves.
+    expect(r2.body.message).toBe(`That code is not right. ${DELIVERY_PIN_MAX_ATTEMPTS - 1} tries left.`);
+    const after2 = await legRow(firstMile.id);
+    expect(after2.status).toBe('IN_PROGRESS');
+    expect(after2.handoffPinAttempts).toBe(1);
+  });
+
+  it('6f · TERM-HANDOFF-ENFORCE-REGRESSION, case 3 (DUPLICATE HANDOFF): a WRONG code against an already-COMPLETED leg still refuses on STATE, before the code is ever compared', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const ops = await makeOperator(['logistics.operate']);
+    const realCode = (await legRow(firstMile.id)).handoffPin!;
+    const first3 = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: realCode,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(first3.status).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+
+    // A code that is definitely WRONG, submitted against the now-COMPLETED
+    // leg — the literal shape Stanley ran by hand. If the status guard did
+    // not fire before the code comparison, this would read as an ordinary
+    // wrong-code attempt (counter moves, the "tries left" message from 6e
+    // above) — exactly the leak this ordering closes. 6d (above) makes the
+    // same ordering proof with the CORRECT code; this is the wrong-code
+    // variant.
+    const wrongCode = realCode === '000000' ? '111111' : '000000';
+    const second3 = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: wrongCode,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(second3.status).toBe(400);
+    const after3 = await legRow(firstMile.id);
+    expect(after3.status).toBe('COMPLETED');
+    // State guard fired first: no attempt counted, no PIN_FAILED audit row.
+    // Message is deliberately NOT asserted here — Stanley found it currently
+    // reads "has not started" on a leg that is COMPLETED (the enforcement is
+    // right, the sentence is false), and Pam is correcting the wording in a
+    // follow-up PR. Pinning it here would break this test on the day the
+    // right fix lands.
+    expect(after3.handoffPinAttempts).toBe(0);
+    const failedAudit3 = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: ops.userId },
+    });
+    expect(failedAudit3).toBeNull();
   });
 
   it('6d · SEC7-DUPLICATE-HANDOFF: a second handoff submission against an already-COMPLETED leg is refused, even with the correct code — the owner\'s own "reject duplicate handoffs" requirement', async () => {
@@ -428,7 +506,11 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
       presentedCourierUserId: courier.userId,
     });
     expect(second.status).toBe(400);
-    expect(second.body.message).toBe('That leg has not started, so there is nothing to hand over.');
+    // TERM-HANDOFF-ENFORCE-REGRESSION: deliberately not pinning the message
+    // here — Stanley found it currently reads "has not started" on a leg
+    // that is COMPLETED (the enforcement is right, the sentence is false),
+    // and Pam is correcting the wording in a follow-up PR. The status and
+    // the ordering below are what this test (and 6f above) actually proves.
 
     // Nothing moved. Refused before the code was compared, so this is not
     // treated as a wrong-code attempt either — no attempt counted, no
@@ -609,6 +691,9 @@ describe('a terminal company\'s own staff submitting at their own location (TERM
       presentedCourierUserId: lastCourier.userId,
     });
     expect(r.status).toBe(403);
+    // TERM-HANDOFF-ENFORCE-REGRESSION, case 4 (WRONG TERMINAL): exact
+    // wording, not expected to change.
+    expect(r.body.message).toBe('You do not hold this terminal location.');
     // Refused before the code was ever checked — no attempt recorded.
     expect((await legRow(lastMile.id)).pickupPinAttempts).toBe(0);
   });
@@ -635,6 +720,10 @@ describe('a terminal company\'s own staff submitting at their own location (TERM
       presentedCourierUserId: courier.userId,
     });
     expect(r.status).toBe(403);
+    // TERM-HANDOFF-ENFORCE-REGRESSION, case 4 (WRONG TERMINAL): exact
+    // wording, not expected to change — this is the HANDOFF-door version of
+    // test 11's assertion above.
+    expect(r.body.message).toBe('You do not hold this terminal location.');
     // Refused before the code was ever checked — same discipline as test
     // 11's release-to-courier case: a location mismatch is caught before
     // verifyLegPinOrThrow runs, so the attempt counter never moves.
