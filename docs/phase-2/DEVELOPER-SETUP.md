@@ -41,6 +41,57 @@ pnpm --filter @bmpl/web dev        # web on :3000
 pnpm --filter @bmpl/admin dev      # admin on :3001
 ```
 
+## Is the local API actually running? The log is not a reliable answer
+
+Tonight's QA pass (Dwight, 2026-11-12) cost the floor three round trips
+chasing this, so it's recorded here rather than relearned per shift. **Dev
+and local stack only — none of this applies to a deployed environment.**
+
+- **A quiet `dev-restored.log` does not mean the process died.** First-hand
+  from Dwight: the log stopped recording anything after 5:12:55 PM PST while
+  the *same* API process kept running and kept serving real requests — so a
+  perfectly healthy process can show total log silence. His working guess is
+  that the stdout redirection writing that log detached from the process at
+  some point; **record that guess as unverified** — nobody has confirmed the
+  mechanism, and the restart/detach cause itself is a separate, parked
+  question this document does not attempt to answer.
+- **The reliable check is which PID owns the port, and since when — not
+  whether a log is still growing.** This is how Dwight proved the process
+  was healthy despite the silent log: PID `29532` had held port 4000 stable
+  since 5:09:14 PM PST, confirmed directly from the OS rather than inferred
+  from any log. Two existing scripts do the "which PID, is it current" half
+  of this already — use them instead of re-deriving the check by hand:
+  - `node scripts/dev-server-check.mjs <port>` — finds the PID bound to a
+    port and, for the API specifically, compares its live `/api/health`
+    `commit` field against local `git rev-parse HEAD` (`MATCH` / `MISMATCH`
+    / `UNKNOWN`); for `apps/web`/`apps/admin` it instead checks the page's
+    own static chunk actually loads (`FRESH` / `STALE`). Neither verdict
+    depends on any log file.
+  - `node scripts/dispatch-floor-check.mjs` — the broader, whole-host
+    version: joins every listening port to its owning process's full command
+    line and separately flags a non-listening `nest --watch` supervisor that
+    could still respawn a stale child later (root `CLAUDE.md` §10 has the
+    full background on why the supervisor itself is the thing to check, not
+    just the port).
+  - Neither script currently prints the PID's own start time. To corroborate
+    *how long* a given PID has held the port — the second half of what
+    confirmed `29532` above — read it straight from the OS: on Windows,
+    `Get-Process -Id <pid> | Select-Object StartTime`.
+- **The dev mailbox silently empties on every API restart — confirmed in
+  source, not just observed.** `GET /api/dev/emails/latest`
+  (`apps/api/src/dev/dev.controller.ts`) reads `DevMailboxService`
+  (`apps/api/src/notifications/dev-mailbox.service.ts:20`), which keeps
+  captured emails in a plain in-process array (`private readonly buffer:
+  CapturedEmail[] = []`) — there is no persistence behind it. A restart
+  clears that array, even though the original `send()` call already
+  returned `201` with `delivered: true` at the time it was sent; the send
+  was real, only the dev-only capture of it is gone. **This is current
+  behaviour being actively fixed, not a permanent limitation**: MDF-728
+  (Pam) is open to make the mailbox survive a restart. Until it lands, read
+  a captured verification/reset token from this endpoint promptly after the
+  send, in the same process lifetime — don't assume it will still be there
+  after any restart, deliberate or not.
+
 ## Testing
 ```bash
 pnpm test                                   # all unit tests (turbo)
