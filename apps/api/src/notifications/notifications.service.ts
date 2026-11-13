@@ -9,7 +9,6 @@ import {
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { DevMailboxService } from './dev-mailbox.service';
 
 /** Common params for creating a notification event. */
 interface NotifyParams {
@@ -38,7 +37,6 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
-    private readonly devMailbox: DevMailboxService,
   ) {}
 
   private resolveCategory(p: NotifyParams): NotificationCategory {
@@ -208,14 +206,13 @@ export class NotificationsService {
 
   /**
    * Send an out-of-band email. Returns whether delivery was accepted (never
-   * throws). The dev mailbox only records on success and only outside production.
+   * throws). The dev mailbox capture lives inside `EmailService.sendDetailed`
+   * now (MDF-709 follow-up) — recording here too would double it.
    */
   async sendEmail(message: NotificationMessage, email: string | null): Promise<boolean> {
     if (!email) return false;
     const delivered = await this.email.send({ to: email, subject: message.title, body: message.body });
-    if (delivered) {
-      this.devMailbox.record({ to: email, subject: message.title, body: message.body, createdAt: new Date().toISOString() });
-    } else {
+    if (!delivered) {
       this.logger.error(`Email not delivered to ${email} (subject="${message.title}")`);
     }
     return delivered;
