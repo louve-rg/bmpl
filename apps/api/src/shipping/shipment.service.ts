@@ -2352,6 +2352,16 @@ export class ShipmentService {
       throw new ForbiddenException(`Too many incorrect codes. An administrator has to confirm this ${label}.`);
     }
     if (kind === 'handoff' && leg.status !== 'IN_PROGRESS') {
+      // TERM-HANDOFF-STATE-COPY: the guard, its ordering (before the code
+      // check, so a duplicate handoff is genuinely refused rather than
+      // merely never reached) and every status it catches are unchanged —
+      // only the wording. COMPLETED is "already handed over", not "has not
+      // started"; collapsing both ends of the range into one sentence told
+      // a clerk who handed off twice the opposite of what actually
+      // happened, with no way to tell why the second attempt failed.
+      if (leg.status === 'COMPLETED') {
+        throw new BadRequestException('That leg has already been handed off, so there is nothing to hand over.');
+      }
       throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
     }
     // Pickup's equivalent readiness check is deliberately looser than

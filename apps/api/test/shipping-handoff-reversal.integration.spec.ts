@@ -511,6 +511,7 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
     // that is COMPLETED (the enforcement is right, the sentence is false),
     // and Pam is correcting the wording in a follow-up PR. The status and
     // the ordering below are what this test (and 6f above) actually proves.
+    // The corrected message itself is pinned separately below, in 6h.
 
     // Nothing moved. Refused before the code was compared, so this is not
     // treated as a wrong-code attempt either — no attempt counted, no
@@ -526,6 +527,53 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
       where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: ops.userId },
     });
     expect(failedAudit).toBeNull();
+  });
+
+  it('6g · TERM-HANDOFF-STATE-COPY: a genuinely not-yet-started leg keeps the original wording, distinct from a COMPLETED one', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    expect((await legRow(firstMile.id)).status).not.toBe('IN_PROGRESS'); // not yet dispatched/accepted
+
+    const ops = await makeOperator(['logistics.operate']);
+    const refused = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: '000000',
+      receivedByName: 'Terminal desk',
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toBe('That leg has not started, so there is nothing to hand over.');
+  });
+
+  it('6h · TERM-HANDOFF-STATE-COPY: a COMPLETED leg gets its own honest wording, not the "has not started" sentence 6d/6f deliberately left unpinned', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const ops = await makeOperator(['logistics.operate']);
+    const code = (await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    expect(
+      (
+        await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+          pin: code,
+          receivedByName: 'Terminal desk',
+          presentedCourierUserId: courier.userId,
+        })
+      ).status,
+    ).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+
+    // Same guard 6d and 6f already prove fires on a COMPLETED leg before the
+    // code is compared — this test adds only the message it now returns,
+    // which that sentence used to get wrong (it said "has not started").
+    const second = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(second.status).toBe(400);
+    expect(second.body.message).toBe('That leg has already been handed off, so there is nothing to hand over.');
   });
 });
 
