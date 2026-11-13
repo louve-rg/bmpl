@@ -2543,6 +2543,8 @@ export class ShipmentService {
               reference: true,
               customerUserId: true,
               recipientUserId: true,
+              destinationEmail: true,
+              recipientToken: true,
               cancelledAt: true,
               returnShipment: { select: { reference: true } },
               rerouteShipment: { select: { reference: true } },
@@ -2691,6 +2693,8 @@ export class ShipmentService {
         shipmentId: leg.shipmentId,
         customerUserId: leg.shipment.customerUserId,
         recipientUserId: leg.shipment.recipientUserId,
+        destinationEmail: leg.shipment.destinationEmail,
+        recipientToken: leg.shipment.recipientToken,
         reference: leg.shipment.reference,
         status,
         restored,
@@ -3466,6 +3470,8 @@ export class ShipmentService {
           service: true,
           customerUserId: true,
           recipientUserId: true,
+          destinationEmail: true,
+          recipientToken: true,
           legs: { select: { sequence: true, kind: true, mode: true, status: true } },
         },
       });
@@ -3490,6 +3496,8 @@ export class ShipmentService {
         shipmentId: shipment.id,
         customerUserId: shipment.customerUserId,
         recipientUserId: shipment.recipientUserId,
+        destinationEmail: shipment.destinationEmail,
+        recipientToken: shipment.recipientToken,
         reference: shipment.reference,
         status,
       };
@@ -3640,26 +3648,55 @@ export class ShipmentService {
    * exact transition `notifyCustomer` above does not reach — a shipment
    * ending at a hub (no LAST_MILE) hands nobody a door-side handoff code,
    * so the recipient's ONLY cue that their parcel is waiting is either this
-   * notification (if linked) or whatever they already see on the public
-   * tracking link (if unlinked — that view already shows AWAITING_COLLECTION
-   * and the collection hub; see trackPublic's own allowlist comment). This
-   * method never puts the actual code in the notification body — same
-   * discipline as never logging a PIN; the recipient still has to go
+   * notification (if linked) or the email below (if unlinked but an email
+   * is on file). Neither path ever puts the actual code in the message —
+   * same discipline as never logging a PIN; the recipient still has to go
    * through `recipientCollectionCode` or the request/reveal pair to read it.
+   *
+   * MDF-719: a LINKED recipient gets the in-app nudge above. An UNLINKED
+   * one (`recipientUserId` null — no BML account, owner's own standing
+   * instruction not to assume every recipient has one) previously got
+   * nothing proactive at all — only whatever the sender chose to forward.
+   * This is the system-initiated counterpart to `requestCollectionCodeEmail`
+   * below: same `destinationEmail`, same `EmailService.sendDetailed` path,
+   * same "point at the tracking page, never the code" wording, but fired on
+   * the STATUS TRANSITION rather than on the recipient's own request. No
+   * email on file is still a silent no-op — no paid SMS exists in this
+   * system and none is added here (the same owner ruling the request/reveal
+   * pair above already honours).
    */
-  private async notifyRecipientCollectionReady(r: { recipientUserId: string | null; reference: string; status: ShipmentStatus; shipmentId: string }) {
-    if (!r.recipientUserId || r.status !== 'AWAITING_COLLECTION') return;
-    await this.notifications.notifyUsers(
-      [r.recipientUserId],
-      {
-        type: 'MARKETPLACE',
-        category: 'DELIVERY',
-        event: 'SHIPMENT_STATUS',
-        title: `Shipment ${r.reference}`,
-        body: 'Your parcel has arrived and is ready for collection. Open the app to get your collection code.',
-        data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
-      },
-    );
+  private async notifyRecipientCollectionReady(r: {
+    recipientUserId: string | null;
+    reference: string;
+    status: ShipmentStatus;
+    shipmentId: string;
+    destinationEmail: string | null;
+    recipientToken: string | null;
+  }) {
+    if (r.status !== 'AWAITING_COLLECTION') return;
+    if (r.recipientUserId) {
+      await this.notifications.notifyUsers(
+        [r.recipientUserId],
+        {
+          type: 'MARKETPLACE',
+          category: 'DELIVERY',
+          event: 'SHIPMENT_STATUS',
+          title: `Shipment ${r.reference}`,
+          body: 'Your parcel has arrived and is ready for collection. Open the app to get your collection code.',
+          data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
+        },
+      );
+      return;
+    }
+    if (!r.destinationEmail || !r.recipientToken) return;
+    const link = `${this.env.NEXT_PUBLIC_SITE_URL}/track/${r.recipientToken}`;
+    const subject = `Shipment ${r.reference} is ready for collection`;
+    const body = `Your parcel (shipment ${r.reference}) has arrived and is ready for collection. Visit your tracking page to see your collection code: ${link}\n\nThis email does not contain your collection code — it only links to the tracking page where you can see it.`;
+    const sendResult = await this.email.sendDetailed({ to: r.destinationEmail, subject, body });
+    await this.audit.record({
+      action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT',
+      newValue: { shipmentId: r.shipmentId, reference: r.reference, delivered: sendResult.delivered, outcome: sendResult.outcome },
+    });
   }
 
   /**

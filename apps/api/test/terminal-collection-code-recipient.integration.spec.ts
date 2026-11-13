@@ -286,6 +286,58 @@ describe('MDF-709 piece 3: the linked recipient is notified at AWAITING_COLLECTI
   });
 });
 
+describe('MDF-719 (TERM-UNLINKED-NOTIFY): an unlinked recipient with an email on file is told by email', () => {
+  it('emails the on-file destinationEmail at AWAITING_COLLECTION, pointing at the tracking page, never the code', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const destEmail = `unlinked_${uniq()}@example.com`;
+    const booked = await bookDoorToHub(senderCookies, net, destEmail);
+
+    await driveToAwaitingCollection(booked.id);
+
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email: destEmail });
+    expect(inbox.status).toBe(200);
+    expect(inbox.body.subject).toContain(booked.reference);
+
+    const emailBody = inbox.body.body as string;
+    expect(emailBody).toContain(`/track/${booked.recipientTrackingToken}`);
+    const code = (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id }, select: { collectionPin: true } })).collectionPin!;
+    expect(emailBody).not.toContain(code);
+
+    const auditRow = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT' },
+      orderBy: { id: 'desc' },
+    });
+    expect(auditRow).not.toBeNull();
+    expect((auditRow!.newValue as { reference: string }).reference).toBe(booked.reference);
+  });
+
+  it('with no destinationEmail on file, still just a no-op — no crash, no email, no audit row', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const before = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT' } });
+
+    await bookedAwaitingCollection(senderCookies, net);
+
+    const after = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT' } });
+    expect(after).toBe(before);
+  });
+
+  it('a LINKED recipient gets the in-app nudge, not this email — no audit row fires for a linked recipient', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const destEmail = `linkedignored_${uniq()}@example.com`;
+    const booked = await bookDoorToHub(senderCookies, net, destEmail);
+    await claimedRecipient(booked, `reciplinked_${uniq()}@example.com`);
+    const before = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT' } });
+
+    await driveToAwaitingCollection(booked.id);
+
+    const after = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_COLLECTION_READY_EMAIL_SENT' } });
+    expect(after).toBe(before);
+  });
+});
+
 describe('MDF-709 piece 4: STAFF still never sees the collection code (re-asserted, not assumed)', () => {
   it('a staff track() read keeps collectionCode null at AWAITING_COLLECTION', async () => {
     const net = await makeNetwork();
