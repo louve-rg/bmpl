@@ -216,6 +216,17 @@ describe('MDF-709 piece 2: the unlinked recipient, token-gated request/reveal', 
     const revealToken = /: ([A-Z0-9]{10})/.exec(inbox.body.body)?.[1];
     expect(revealToken).toBeDefined();
 
+    // URGENT fix, Stanley: the token is NOT the collection code — a
+    // recipient told to give it "at the counter" would walk the clerk
+    // into a wrong-code refusal, burning one of DELIVERY_PIN_MAX_ATTEMPTS
+    // with no terminal-side unlock at all. The email must say to use the
+    // token on the tracking page, never at a counter or with staff.
+    const emailBody = (inbox.body.body as string).toLowerCase();
+    expect(emailBody).not.toContain('counter');
+    expect(emailBody).not.toContain('give this code');
+    expect(emailBody).not.toContain('give this to');
+    expect(emailBody).toContain('tracking page');
+
     const revealRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
     expect(revealRes.status).toBe(201);
     const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id }, select: { collectionPin: true } });
