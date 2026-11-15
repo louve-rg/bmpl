@@ -44,18 +44,25 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function stubFetch(adminPermissions: string[]) {
+function stubFetch(adminPermissions: string[], opts: { hubs?: unknown[]; routes?: unknown[] } = {}) {
+  const posts: Array<{ url: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const method = init?.method ?? 'GET';
       if (url.includes('/api/admin/logistics/routes/route_1/schedule')) return jsonResponse(200, SCHEDULE);
-      if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, [ROUTE]);
-      if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, [HUB]);
+      if (url.includes('/api/admin/logistics/routes') && method === 'POST') {
+        posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(201, { ...ROUTE, id: 'route_new' });
+      }
+      if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, opts.routes ?? [ROUTE]);
+      if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, opts.hubs ?? [HUB]);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
+  return posts;
 }
 
 async function mount() {
@@ -165,5 +172,69 @@ describe('RouteScheduleEditor — the toggle-revealed panel, where most of BMPL-
     expect(texts).toContain('Remove');
     expect(texts).toContain('Add exception');
     expect(document.body.querySelector('select')).not.toBeNull();
+  });
+});
+
+describe('RoutesPage — simulation visibility (TERM-SIM-ROUTE-FORM-CREATES-REAL-ROUTE)', () => {
+  const SIM_HUB = { id: 'hub_3', code: 'SIM', name: 'Simulation Strip', modes: ['AIR'], isActive: true, isTest: true };
+
+  it('sends isTest in the create body, checked or not', async () => {
+    const posts = stubFetch(['logistics.manage'], { hubs: [HUB, SIM_HUB] });
+    await mount();
+
+    const fromSelect = document.body.querySelector<HTMLSelectElement>('#route-from')!;
+    const toSelect = document.body.querySelector<HTMLSelectElement>('#route-to')!;
+    await act(async () => {
+      fromSelect.value = 'hub_1';
+      fromSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      toSelect.value = 'hub_3';
+      toSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const priceInput = document.body.querySelector<HTMLInputElement>('#route-price')!;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeInputValueSetter.call(priceInput, '80.00');
+      priceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const checkbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => {
+      checkbox.click();
+    });
+
+    const addButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Add route')!;
+    await act(async () => {
+      addButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const createPost = posts.find((p) => p.url.includes('/api/admin/logistics/routes'));
+    expect(createPost?.body).toMatchObject({ isTest: true });
+  });
+
+  it('marks a simulation hub in the From/To option text without hiding or filtering it', async () => {
+    stubFetch(['logistics.manage'], { hubs: [HUB, SIM_HUB] });
+    await mount();
+
+    const fromOptions = Array.from(document.body.querySelectorAll<HTMLOptionElement>('#route-from option')).map((o) => o.textContent);
+    expect(fromOptions).toContain('SPA · San Pedro Airstrip');
+    expect(fromOptions).toContain('SIM · Simulation Strip · Simulation');
+  });
+
+  it('badges a simulation route "Simulation" in the list, same as the other surfaces', async () => {
+    stubFetch(['logistics.read'], { routes: [{ ...ROUTE, isTest: true }] });
+    await mount();
+
+    const routeRow = Array.from(document.body.querySelectorAll('.p-4')).find((el) => el.textContent?.includes('Tropic Air'));
+    expect(routeRow?.textContent).toContain('Simulation');
+  });
+
+  it('shows no Simulation badge for a real route', async () => {
+    stubFetch(['logistics.read']);
+    await mount();
+
+    const routeRow = Array.from(document.body.querySelectorAll('.p-4')).find((el) => el.textContent?.includes('Tropic Air'));
+    expect(routeRow?.textContent).not.toContain('Simulation');
   });
 });

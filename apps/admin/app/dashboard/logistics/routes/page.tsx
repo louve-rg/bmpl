@@ -19,6 +19,7 @@ interface HubRef {
   code: string;
   name: string;
   modes: string[];
+  isTest?: boolean;
 }
 
 interface Route {
@@ -32,12 +33,13 @@ interface Route {
   durationMinutes: number;
   priceMinor: number;
   isActive: boolean;
+  isTest?: boolean;
 }
 
 const blank = {
   originHubId: '', destinationHubId: '', mode: 'AIR',
   carrierName: '', carrierPhone: '', scheduleNote: '',
-  durationMinutes: '60', price: '',
+  durationMinutes: '60', price: '', isTest: false,
 };
 
 /** "1h 45m" reads better to an operator than "105". */
@@ -108,6 +110,7 @@ export default function RoutesPage() {
         scheduleNote: form.scheduleNote || undefined,
         durationMinutes: Number(form.durationMinutes),
         priceMinor: Math.round(Number(form.price) * 100),
+        isTest: form.isTest,
       });
       setForm({ ...blank });
       await load();
@@ -159,7 +162,7 @@ export default function RoutesPage() {
             <Select id="route-from" value={form.originHubId} onChange={(e) => setForm({ ...form, originHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.map((h) => (
-                <option key={h.id} value={h.id}>{h.code} · {h.name}</option>
+                <option key={h.id} value={h.id}>{h.code} · {h.name}{h.isTest ? ' · Simulation' : ''}</option>
               ))}
             </Select>
           </Field>
@@ -167,7 +170,7 @@ export default function RoutesPage() {
             <Select id="route-to" value={form.destinationHubId} onChange={(e) => setForm({ ...form, destinationHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.filter((h) => h.id !== form.originHubId).map((h) => (
-                <option key={h.id} value={h.id}>{h.code} · {h.name}</option>
+                <option key={h.id} value={h.id}>{h.code} · {h.name}{h.isTest ? ' · Simulation' : ''}</option>
               ))}
             </Select>
           </Field>
@@ -187,6 +190,10 @@ export default function RoutesPage() {
             <Input id="route-schedule" value={form.scheduleNote} onChange={(e) => setForm({ ...form, scheduleNote: e.target.value })} placeholder="Mon/Wed/Fri 09:00" />
           </Field>
         </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
+          <input type="checkbox" checked={form.isTest} onChange={(e) => setForm({ ...form, isTest: e.target.checked })} className="accent-belize-blue" />
+          Simulation route (isTest) — never mixed with real hubs or real staff
+        </label>
         <Button
           onClick={create}
           disabled={saving || !form.originHubId || !form.destinationHubId || !form.price}
@@ -211,6 +218,7 @@ export default function RoutesPage() {
                     </span>
                     <Badge tone="info">{r.mode}</Badge>
                     <Badge tone={r.isActive ? 'success' : 'neutral'}>{r.isActive ? 'Running' : 'Suspended'}</Badge>
+                    {r.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>
                   <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                     {r.carrierName ?? 'Carrier not named'} · {duration(r.durationMinutes)} · ${(r.priceMinor / 100).toFixed(2)}
