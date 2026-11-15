@@ -637,6 +637,7 @@ function MembersCard({
                     <span className="text-xs text-slate-500">{m.email}</span>{' '}
                     <Badge tone={m.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{m.memberRole}</Badge>{' '}
                     <Badge tone={m.status === 'ACTIVE' ? 'success' : 'neutral'}>{m.status}</Badge>
+                    {company.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>
                   {canManage && m.status === 'ACTIVE' && (
                     <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId)}>
