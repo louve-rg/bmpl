@@ -256,6 +256,40 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     expect(container!.textContent).toContain('No active locations — this member currently has no access, regardless of role.');
   });
 
+  it('TERM-SIM-MEMBERS-ROW-UNLABELLED: badges a member row "Simulation" for a simulation company, same as the other four surfaces', async () => {
+    stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        isTest: true,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    await mount();
+
+    const memberRow = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Jane Doe'));
+    expect(memberRow?.textContent).toContain('Simulation');
+  });
+
+  it('shows no Simulation badge on a member row for a real (non-test) company', async () => {
+    stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        isTest: false,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    await mount();
+
+    const memberRow = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Jane Doe'));
+    expect(memberRow?.textContent).not.toContain('Simulation');
+  });
+
   it("a member's grant on a since-deactivated location does not read as current access", async () => {
     stubFetch({
       company: {
