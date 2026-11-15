@@ -138,5 +138,25 @@ describe('LogisticsNetworkService — route simulation boundary (TERM-SIM-ROUTE-
       ).rejects.toThrow(/simulation hubs/i);
       expect(updated).toHaveLength(0);
     });
+
+    it('SELF-HEAL: a stale route (hubs now agree as simulation, stored isTest is still the old false) is corrected by an unrelated price update with isTest omitted, not refused', async () => {
+      const { svc, updated } = makeService([hub({ id: 'origin', isTest: true }), hub({ id: 'destination', isTest: true })]);
+      await svc.updateRoute('route-1', updateInput({ priceMinor: 2000 }), 'actor-1');
+      expect(updated).toHaveLength(1);
+      expect((updated[0] as { isTest: boolean }).isTest).toBe(true);
+    });
+
+    it('SELF-HEAL: the same stale route is also corrected when the caller explicitly echoes isTest:false (the stale stored value) rather than omitting it, on an unrelated price update', async () => {
+      const { svc, updated } = makeService([hub({ id: 'origin', isTest: true }), hub({ id: 'destination', isTest: true })]);
+      await svc.updateRoute('route-1', updateInput({ priceMinor: 2000, isTest: false }), 'actor-1');
+      expect(updated).toHaveLength(1);
+      expect((updated[0] as { isTest: boolean }).isTest).toBe(true);
+    });
+
+    it('BRANCH 3b — REFUSE A DELIBERATE FLIP: neither hub is touched, but isTest is explicitly set to a value that differs from what is stored, and it contradicts the (real) hubs', async () => {
+      const { svc, updated } = makeService([hub({ id: 'origin', isTest: false }), hub({ id: 'destination', isTest: false })]);
+      await expect(svc.updateRoute('route-1', updateInput({ isTest: true }), 'actor-1')).rejects.toThrow(/real hubs/i);
+      expect(updated).toHaveLength(0);
+    });
   });
 });
