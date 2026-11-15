@@ -296,7 +296,16 @@ export class LogisticsNetworkService {
     const mode = input.mode ?? before.mode;
     if (originHubId === destinationHubId) throw new BadRequestException('A route has to go between two different hubs.');
     const hubsIsTest = await this.assertRouteIsPossible(originHubId, destinationHubId, mode);
-    const isTest = this.resolveRouteIsTest(input.isTest, hubsIsTest);
+    // A caller that isn't re-pointing either hub and sends back isTest exactly
+    // as it was already stored (e.g. a form that round-trips the whole row)
+    // has not asserted anything new - treat it the same as omitted so a route
+    // written isTest=false before this invariant existed self-heals on its
+    // next ordinary edit instead of being permanently stuck refusing. A value
+    // that actually differs from what's stored, or that comes with a hub
+    // re-point, is a deliberate choice and stays subject to refusal below.
+    const hubsUntouched = input.originHubId === undefined && input.destinationHubId === undefined;
+    const requestedIsTest = hubsUntouched && input.isTest === before.isTest ? undefined : input.isTest;
+    const isTest = this.resolveRouteIsTest(requestedIsTest, hubsIsTest);
     if (input.operatedByProviderId) {
       await assertOperableProvider(this.prisma, input.operatedByProviderId, isTest);
     }
