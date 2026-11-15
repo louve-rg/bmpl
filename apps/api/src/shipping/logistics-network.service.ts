@@ -267,15 +267,18 @@ export class LogisticsNetworkService {
   }
 
   async createRoute(input: CreateRouteInput, actorId: string) {
-    await this.assertRouteIsPossible(input.originHubId, input.destinationHubId, input.mode);
+    const hubsIsTest = await this.assertRouteIsPossible(input.originHubId, input.destinationHubId, input.mode);
+    const isTest = this.resolveRouteIsTest(input.isTest, hubsIsTest);
     // A standing carrier org must be real, active, approved, and on this
     // route's side of the simulation boundary — the one shared rule
-    // (assertOperableProvider), not a local copy of it.
+    // (assertOperableProvider), not a local copy of it. Uses the RESOLVED
+    // isTest, not the raw input, for the identical reason resolveRouteIsTest
+    // exists at all: an omitted input.isTest must never be read as false.
     if (input.operatedByProviderId) {
-      await assertOperableProvider(this.prisma, input.operatedByProviderId, input.isTest ?? false);
+      await assertOperableProvider(this.prisma, input.operatedByProviderId, isTest);
     }
     const route = await this.prisma.logisticsRoute.create({
-      data: { ...input, priceMinor: BigInt(input.priceMinor), isActive: input.isActive ?? true },
+      data: { ...input, isTest, priceMinor: BigInt(input.priceMinor), isActive: input.isActive ?? true },
     });
     await this.audit.record({
       action: 'LOGISTICS_ROUTE_CREATED',
@@ -292,14 +295,15 @@ export class LogisticsNetworkService {
     const destinationHubId = input.destinationHubId ?? before.destinationHubId;
     const mode = input.mode ?? before.mode;
     if (originHubId === destinationHubId) throw new BadRequestException('A route has to go between two different hubs.');
-    await this.assertRouteIsPossible(originHubId, destinationHubId, mode);
+    const hubsIsTest = await this.assertRouteIsPossible(originHubId, destinationHubId, mode);
+    const isTest = this.resolveRouteIsTest(input.isTest, hubsIsTest);
     if (input.operatedByProviderId) {
-      await assertOperableProvider(this.prisma, input.operatedByProviderId, input.isTest ?? before.isTest);
+      await assertOperableProvider(this.prisma, input.operatedByProviderId, isTest);
     }
 
     const route = await this.prisma.logisticsRoute.update({
       where: { id },
-      data: { ...input, ...(input.priceMinor != null ? { priceMinor: BigInt(input.priceMinor) } : {}) },
+      data: { ...input, isTest, ...(input.priceMinor != null ? { priceMinor: BigInt(input.priceMinor) } : {}) },
     });
     await this.audit.record({
       action: 'LOGISTICS_ROUTE_UPDATED',
@@ -311,24 +315,56 @@ export class LogisticsNetworkService {
   }
 
   /**
-   * Both hubs must exist and both must handle the mode.
+   * Both hubs must exist, both must handle the mode, and both must be on the
+   * same side of the simulation boundary — the two sides never mix, the same
+   * rule TerminalService.addLocation already enforces one level in, for a
+   * hub-to-company pairing rather than this hub-to-hub one
+   * (TERM-SIM-ROUTE-FORM-CREATES-REAL-ROUTE). Returns the shared isTest so a
+   * caller can derive a route's own isTest from its hubs instead of letting
+   * the column default to false.
    *
    * Caught here rather than at plan time because a route an airstrip cannot
    * service is a configuration mistake, and the person who can fix it is the one
    * making it right now — not the customer who gets a strange quote next week.
    */
-  private async assertRouteIsPossible(originHubId: string, destinationHubId: string, mode: 'LAND' | 'AIR' | 'SEA') {
+  private async assertRouteIsPossible(originHubId: string, destinationHubId: string, mode: 'LAND' | 'AIR' | 'SEA'): Promise<boolean> {
     const hubs = await this.prisma.logisticsHub.findMany({
       where: { id: { in: [originHubId, destinationHubId] } },
-      select: { id: true, name: true, modes: true },
+      select: { id: true, name: true, modes: true, isTest: true },
     });
-    for (const id of [originHubId, destinationHubId]) {
-      const hub = hubs.find((h) => h.id === id);
-      if (!hub) throw new NotFoundException('One of those hubs does not exist.');
-      if (!hub.modes.includes(mode)) {
-        throw new BadRequestException(`${hub.name} does not handle ${mode.toLowerCase()} transport.`);
-      }
+    const originHub = hubs.find((h) => h.id === originHubId);
+    if (!originHub) throw new NotFoundException('One of those hubs does not exist.');
+    const destinationHub = hubs.find((h) => h.id === destinationHubId);
+    if (!destinationHub) throw new NotFoundException('One of those hubs does not exist.');
+    if (!originHub.modes.includes(mode)) {
+      throw new BadRequestException(`${originHub.name} does not handle ${mode.toLowerCase()} transport.`);
     }
+    if (!destinationHub.modes.includes(mode)) {
+      throw new BadRequestException(`${destinationHub.name} does not handle ${mode.toLowerCase()} transport.`);
+    }
+    if (originHub.isTest !== destinationHub.isTest) {
+      throw new BadRequestException('A route cannot connect a real hub to a simulation hub — the two sides never mix.');
+    }
+    return originHub.isTest;
+  }
+
+  /**
+   * TERM-SIM-ROUTE-FORM-CREATES-REAL-ROUTE: an omitted `isTest` is DERIVED
+   * from the hubs (never left to the column's own `false` default), and an
+   * EXPLICIT, contradicting `isTest` is refused rather than silently
+   * overridden — a caller that asserts a value the hubs disagree with has a
+   * bug worth being told about, not a value worth correcting quietly.
+   */
+  private resolveRouteIsTest(requestedIsTest: boolean | undefined, hubsIsTest: boolean): boolean {
+    if (requestedIsTest === undefined) return hubsIsTest;
+    if (requestedIsTest !== hubsIsTest) {
+      throw new BadRequestException(
+        hubsIsTest
+          ? 'These hubs are simulation hubs; isTest must be true (or omitted) to match them.'
+          : 'These hubs are real hubs; isTest must be false (or omitted) to match them.',
+      );
+    }
+    return requestedIsTest;
   }
 
   /* ------------------------------------------------------ route schedule */
