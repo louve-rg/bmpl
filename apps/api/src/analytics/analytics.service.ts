@@ -116,10 +116,15 @@ export class AnalyticsService {
     // Bucketed by BELIZE calendar day, not UTC (BMPL-197): createdAt is a
     // TIMESTAMP(3) with no time zone, so this arithmetic is on the literal
     // stored value, not a session-timezone conversion.
+    // MDF-777 exclusion #3: this query had no join to orders at all, so there
+    // was no hop to isTest in existence — unlike the other four reads in this
+    // file, which only needed a WHERE clause added to an existing join, this
+    // one needed the join (p."orderId" -> o."isTest") added.
     const rows = await this.prisma.$queryRaw<Array<{ day: Date; orders: bigint; gross: bigint }>>`
       SELECT date_trunc('day', p."createdAt" - interval '6 hours') AS day, COUNT(*)::bigint AS orders, COALESCE(SUM(p."amountMinor"),0)::bigint AS gross
       FROM payments p
-      WHERE p.status IN ${PAID} AND p."createdAt" >= ${since}
+      JOIN orders o ON o.id = p."orderId"
+      WHERE p.status IN ${PAID} AND p."createdAt" >= ${since} AND o."isTest" = false
       GROUP BY day ORDER BY day`;
     return { days: d, series: this.fillSeries(rows, d) };
   }
@@ -131,7 +136,7 @@ export class AnalyticsService {
       JOIN vendor_orders vo ON vo.id = oi."vendorOrderId"
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id
-      WHERE oi."productId" IS NOT NULL AND p.status IN ${PAID}
+      WHERE oi."productId" IS NOT NULL AND p.status IN ${PAID} AND o."isTest" = false
       GROUP BY oi."productId" ORDER BY sold DESC LIMIT ${limit}`;
     return rows.map((r) => ({ productId: r.id, title: r.title, unitsSold: n(r.sold), revenueMinor: n(r.revenue) }));
   }
@@ -143,7 +148,7 @@ export class AnalyticsService {
       JOIN vendor_profiles vp ON vp.id = vo."vendorProfileId"
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id
-      WHERE p.status IN ${PAID}
+      WHERE p.status IN ${PAID} AND o."isTest" = false
       GROUP BY vo."vendorProfileId" ORDER BY revenue DESC LIMIT ${limit}`;
     return rows.map((r) => ({ vendorProfileId: r.id, businessName: r.name, orders: n(r.orders), revenueMinor: n(r.revenue) }));
   }
@@ -211,7 +216,7 @@ export class AnalyticsService {
       FROM vendor_orders vo
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id
-      WHERE vo."vendorProfileId" = ${vp} AND p.status IN ${PAID} AND vo."createdAt" >= ${since}
+      WHERE vo."vendorProfileId" = ${vp} AND p.status IN ${PAID} AND vo."createdAt" >= ${since} AND o."isTest" = false
       GROUP BY day ORDER BY day`;
     return { days: d, series: this.fillSeries(rows, d) };
   }
@@ -224,7 +229,7 @@ export class AnalyticsService {
       JOIN vendor_orders vo ON vo.id = oi."vendorOrderId"
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id
-      WHERE vo."vendorProfileId" = ${vp} AND oi."productId" IS NOT NULL AND p.status IN ${PAID}
+      WHERE vo."vendorProfileId" = ${vp} AND oi."productId" IS NOT NULL AND p.status IN ${PAID} AND o."isTest" = false
       GROUP BY oi."productId" ORDER BY sold DESC LIMIT ${limit}`;
     return rows.map((r) => ({ productId: r.id, title: r.title, unitsSold: n(r.sold), revenueMinor: n(r.revenue) }));
   }
