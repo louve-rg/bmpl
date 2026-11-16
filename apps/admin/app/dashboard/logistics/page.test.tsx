@@ -146,6 +146,28 @@ describe('LogisticsOpsPage — an unassigned LINE_HAUL leg reads as awaiting ful
     expect(document.body.textContent).not.toContain('needs assigning by hand');
     expect(document.body.textContent).toContain('Tropic Overland Ltd');
   });
+
+  /**
+   * TERM-DEPARTED-LEG-FORGETS-THE-CARRIER-THAT-CLEARED-IT: a formal operator
+   * assignment (`operatedByProviderId`) is a human already having assigned
+   * this leg — it must silence the same banner, even though it deliberately
+   * never also sets a `carrierName` string (MDF-500: the id is kept separate
+   * from the display label on purpose; see shipment.service.ts's own comment).
+   * `operator` stays null here on purpose — this must NOT turn into a case
+   * that blends the org id into the human-readable label.
+   */
+  it('says nothing extra once a carrier ORGANIZATION is assigned, even with no carrierName string on record', async () => {
+    stubFetchRows(['logistics.read'], [
+      {
+        ...CROSS_TOWN_ROW,
+        legs: CROSS_TOWN_ROW.legs.map((l) => (l.kind === 'LINE_HAUL' ? { ...l, operatedByProviderId: 'prov_1' } : l)),
+      },
+    ]);
+    await mount();
+
+    expect(document.body.textContent).not.toContain('No carrier assigned');
+    expect(document.body.textContent).not.toContain('needs assigning by hand');
+  });
 });
 
 /**

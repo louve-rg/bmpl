@@ -34,6 +34,19 @@ interface OpsLeg {
   from: string;
   to: string;
   operator: string | null;
+  /**
+   * TERM-DEPARTED-LEG-FORGETS-THE-CARRIER-THAT-CLEARED-IT: read ONLY to
+   * decide whether a carrier is on record at all, never rendered as the
+   * display label — `operator` above stays the single human-readable string
+   * (MDF-500's own comment on the API side: a provider org id must never be
+   * blended into that label, since the org may only be PROPOSED, awaiting
+   * the carrier's own accept/reject, not yet a confirmed assignment). A leg
+   * can carry this with `operator` still null — formal operator assignment
+   * deliberately does not also set a carrierName string — and that leg has
+   * already been assigned by a human; it is not what `legNeedsCarrier` exists
+   * to catch.
+   */
+  operatedByProviderId: string | null;
   needsDriver: boolean;
   /**
    * CLOSE-20: the discriminant behind the flat `needsDriver` boolean above.
@@ -94,7 +107,14 @@ const money = (n: number) => `$${(n / 100).toFixed(2)}`;
  * fallback, same position `needsDriver` already holds for the courier case.
  */
 function legNeedsCarrier(leg: OpsLeg): boolean {
-  return leg.kind === 'LINE_HAUL' && !leg.operator && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION';
+  return (
+    leg.kind === 'LINE_HAUL' &&
+    !leg.operator &&
+    !leg.operatedByProviderId &&
+    leg.status !== 'COMPLETED' &&
+    leg.status !== 'CANCELLED' &&
+    leg.status !== 'EXCEPTION'
+  );
 }
 
 /**
