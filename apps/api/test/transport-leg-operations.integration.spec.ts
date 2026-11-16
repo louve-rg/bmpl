@@ -295,6 +295,11 @@ describe('a transport leg must name a carrier somewhere before it can depart (MD
     await ctx.prisma.shipmentLeg.update({ where: { id: lineHaul.id }, data: { operatedByProviderId: provider.id } });
     const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
     expect(r.status).toBe(201);
+    // MDF-500/TERM-DEPARTED-LEG-FORGETS-THE-CARRIER-THAT-CLEARED-IT: a formal
+    // operator org is NOT blended into the display label — carrierName stays
+    // exactly what it was (null), untouched by this depart.
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.carrierName).toBeNull();
   });
 
   it('still departs normally when the route names its own carrier — unchanged from before this check', async () => {
@@ -303,6 +308,33 @@ describe('a transport leg must name a carrier somewhere before it can depart (MD
     // seedWaterTaxiNetwork() already names 'UAT Water Taxi' on this route.
     const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
     expect(r.status).toBe(201);
+  });
+
+  /**
+   * TERM-DEPARTED-LEG-FORGETS-THE-CARRIER-THAT-CLEARED-IT: the guard above
+   * accepts the ROUTE's own carrier name as identifying who carries this leg
+   * — so the leg that just departed on that basis must end up recording it,
+   * not stay null forever while every later reader (the admin ops list
+   * included) sees a carrier-less departed leg that in fact departed
+   * correctly.
+   */
+  it('backfills the route\'s own carrier name onto the leg once it departs on that basis alone', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    expect(lineHaul.carrierName).toBeNull();
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    expect(r.status).toBe(201);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.carrierName).toBe('UAT Water Taxi');
+  });
+
+  it('keeps an explicit carrier name supplied at departure — does not get overwritten by the route\'s', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, { carrierName: 'Relief Carrier — not the route default' });
+    expect(r.status).toBe(201);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.carrierName).toBe('Relief Carrier — not the route default');
   });
 });
 

@@ -1934,7 +1934,14 @@ export class ShipmentService {
       // either. That combination means the leg departs with genuinely no one
       // identified as carrying it — the actual integrity gap, not the
       // informal-assignment case this check leaves alone.
-      const carrierName = input.carrierName ?? leg.carrierName;
+      // What actually cleared this leg to depart — not merely what was true
+      // when the guard ran. A leg cleared on the ROUTE's carrier name alone
+      // (the `!leg.operatedByProviderId && !carrierName` branch below) must
+      // end up RECORDING that name on the leg itself: the guard accepting it
+      // as who carries this leg and the leg's own record staying null is
+      // exactly how every later reader — the admin ops list included — sees
+      // a carrier-less departed leg that in fact departed correctly.
+      let carrierName = input.carrierName ?? leg.carrierName;
       if (!leg.operatedByProviderId && !carrierName) {
         const route = await tx.logisticsRoute.findUnique({ where: { id: leg.routeId }, select: { carrierName: true } });
         if (!route?.carrierName) {
@@ -1942,6 +1949,7 @@ export class ShipmentService {
             'No carrier is identified for this leg — assign an operator, or record a carrier name, before confirming departure.',
           );
         }
+        carrierName = route.carrierName;
       }
       await tx.shipmentLeg.update({
         where: { id: leg.id },
@@ -1949,7 +1957,7 @@ export class ShipmentService {
           status: 'IN_PROGRESS',
           startedAt: leg.startedAt ?? new Date(),
           departedAt: new Date(),
-          carrierName: input.carrierName ?? leg.carrierName,
+          carrierName,
           carrierBookingRef: input.carrierBookingRef ?? leg.carrierBookingRef,
         },
       });
