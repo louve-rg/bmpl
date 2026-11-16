@@ -28,6 +28,25 @@ function withFieldErrors(raw: string, errors: Array<{ path: string; message: str
   return `${raw}: ${errors.map((e) => (e.path ? `${e.path} — ${e.message}` : e.message)).join('; ')}`;
 }
 
+type SessionExpiredListener = () => void;
+let sessionExpiredListener: SessionExpiredListener | null = null;
+
+/**
+ * SESSION-EXPIRY-MID-ACTION (god, 2026-11-16): the one place that notifies
+ * the app a session has genuinely died -- registered once, from the root
+ * layout, not per page, since the 401 this fires on can happen on any
+ * authenticated action anywhere. Fired only AFTER the silent refresh below
+ * (or in `uploadBinary`) has already been tried and failed, never on the
+ * first 401 -- by then re-authentication has actually been attempted, not
+ * just guessed at. The two existing hand-written 401 messages this app
+ * already has (`uploadErrorMessage` in components/products/uploads.ts, the
+ * dashboard/reviews page) are untouched and keep showing their own copy
+ * alongside this -- this is one new, consistent path, not a replacement.
+ */
+export function onSessionExpired(listener: SessionExpiredListener | null) {
+  sessionExpiredListener = listener;
+}
+
 function readCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
@@ -70,6 +89,10 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
       credentials: 'include',
     });
     if (refreshed.ok) return requestWithResponse(path, init, false);
+    // Refresh itself failed, not just the original call -- a real expiry, not
+    // a guess. Never for an `/auth/*` call itself (login/register/etc. 401
+    // for their own reasons; there was no session there to have expired).
+    if (!path.startsWith('/auth/')) sessionExpiredListener?.();
   }
 
   const text = await res.text();
@@ -137,6 +160,7 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   if (res.status === 401 && retry) {
     const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
     if (refreshed.ok) return uploadBinary<T>(path, body, false);
+    sessionExpiredListener?.();
   }
 
   const text = await res.text();
