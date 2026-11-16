@@ -162,6 +162,15 @@ describe('headlineFor', () => {
     const s = shipment({ status: 'CANCELLED', statusLabel: 'Cancelled', cancelledAt: new Date().toISOString() });
     expect(headlineFor(s)).toBe('Cancelled');
   });
+
+  // TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: the hub-start wording
+  // correction now lives server-side in shipmentStatusLabel() (packages/shared),
+  // so every audience — not just this one web render — reads the true string.
+  // headlineFor has nothing left to override here; it trusts statusLabel as-is.
+  it('trusts the server label as-is for a hub-start AWAITING_PICKUP shipment — the correction is server-side now', () => {
+    const s = shipment({ service: 'HUB_TO_HUB', status: 'AWAITING_PICKUP', statusLabel: 'Awaiting drop-off at the departure terminal' });
+    expect(headlineFor(s)).toBe('Awaiting drop-off at the departure terminal');
+  });
 });
 
 describe('showsEta', () => {

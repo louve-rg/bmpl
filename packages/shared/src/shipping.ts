@@ -188,6 +188,25 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   CANCELLED: 'Cancelled',
 };
 
+/**
+ * The label for a given status, worded for the service it belongs to.
+ *
+ * TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: `SHIPMENT_STATUS_LABELS`
+ * on its own says AWAITING_PICKUP is "Waiting to be collected" — true for
+ * DOOR_TO_DOOR/DOOR_TO_HUB, where a courier is dispatched to go get it, but
+ * HUB_TO_HUB/HUB_TO_DOOR have no FIRST_MILE leg at all: the sender walks the
+ * parcel into the terminal themselves, and nobody has been or will be sent to
+ * collect it. Every audience that reads a shipment's status label — sender,
+ * recipient, staff — must go through this function, not the raw table, or
+ * the correction only reaches whichever one call site remembered to apply it.
+ */
+export function shipmentStatusLabel(status: ShipmentStatus, service: ShippingService): string {
+  if (status === 'AWAITING_PICKUP' && !needsFirstMile(service)) {
+    return 'Awaiting drop-off at the departure terminal';
+  }
+  return SHIPMENT_STATUS_LABELS[status] ?? status;
+}
+
 /* ------------------------------------------------------- exception copy */
 
 /**
@@ -251,7 +270,15 @@ export function deriveShipmentStatus(legs: readonly LegView[], endsAtHub: boolea
 
   // The first leg that has not finished is the one that describes the shipment.
   const current = live.find((l) => l.status !== 'COMPLETED')!;
-  const priorDone = live.filter((l) => l.sequence < current.sequence).every((l) => l.status === 'COMPLETED');
+  const priorLegs = live.filter((l) => l.sequence < current.sequence);
+  // TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: `[].every(...)` is
+  // vacuously true, so when `current` is the shipment's own first live leg
+  // (HUB_TO_HUB/HUB_TO_DOOR have no FIRST_MILE before their LINE_HAUL leg)
+  // "no prior leg exists" was reading as "every prior leg finished" — true
+  // the instant a leg is created, unpaid, before anyone has dropped anything
+  // off. `priorDone` now requires an actual completed prior leg, not merely
+  // the absence of one.
+  const priorDone = priorLegs.length > 0 && priorLegs.every((l) => l.status === 'COMPLETED');
 
   // One courier, door to door. Before they set off the parcel is still with the
   // sender; once they have it, it is on its way to the recipient. Falling through
