@@ -412,9 +412,28 @@ export default function NewShipmentPage() {
                 one it verified itself by re-running the real planner against it —
                 never a guess from partial schedule rows. */}
             {quote.message}
+            {/* ROUTE-SAME-DISTRICT-DOOR-TO-HUB-REFUSED-AS-LOCAL-DELIVERY: the old
+                copy here ("order through the marketplace") was advice for buying
+                goods -- a person sending a parcel has no order to place, so it
+                pointed nowhere. Door to door is the service type that actually
+                covers a run like this; the switch happens right here rather than
+                asking the customer to find the Service type dropdown unaided.
+                Deliberately not "this will work" -- a local run can still be
+                refused on its own (an unconfigured courier fee), so this only
+                offers the applicable route, never a promise it completes. */}
             {quote.useLocalDelivery && (
-              <span className="mt-1 block">
-                For a delivery inside one town, order through the marketplace and choose delivery at checkout.
+              <span className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="block w-full">
+                  A delivery inside one town does not need a terminal. Door to door is the service type for a run
+                  like this — switch to see what it would cost.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setService('DOOR_TO_DOOR')}
+                  className="min-h-[36px] rounded-full border border-belize-blue px-3 text-sm font-medium text-belize-blue hover:bg-belize-blue hover:text-white"
+                >
+                  Switch to Door to door
+                </button>
               </span>
             )}
             {quote.dateUnavailable && quote.nextAvailableDate && (
