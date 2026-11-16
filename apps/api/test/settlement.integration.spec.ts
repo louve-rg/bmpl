@@ -454,6 +454,35 @@ describe('reads, permissions, reconciliation, fee config', () => {
   });
 
   /**
+   * MDF-777 exclusion #3 (tenth read closed): the admin Internal-system-accounts
+   * list (`GET /admin/settlements/accounts`, and `GET /admin/wallet/accounts`
+   * — both routes share `WalletService.adminAccounts()`) must agree with the
+   * reconciliation tiles above: SYSTEM_ESCROW is one pooled row per currency,
+   * so a raw `cachedBalanceMinor` read mixes a simulation hold into the same
+   * figure as real escrow. Checked both directions on the SAME escrow row:
+   * a simulation hold must move it by nothing, and a real one immediately
+   * afterward must move it by exactly its own total — a method that always
+   * reports zero would pass the first half but fail the second.
+   */
+  it('MDF-777 exclusion #3: the admin system-accounts list excludes a simulation escrow hold and still includes a real one', async () => {
+    const escrowBalance = async () => {
+      const rows = (await get(adminCookies, 'admin/settlements/accounts')).body as Array<{ type: string; cachedBalanceMinor: number }>;
+      return rows.find((r) => r.type === 'SYSTEM_ESCROW')!.cachedBalanceMinor;
+    };
+    const before = await escrowBalance();
+
+    const sim = await seedDelivered({ subtotal: 3000, deliveryFee: 100 });
+    expect(await escrowBalance()).toBe(before); // simulation hold: no movement
+
+    const real = await seedDelivered({ subtotal: 3000, deliveryFee: 100, funding: 'REAL' });
+    expect(await escrowBalance()).toBe(before + 3100); // real hold: moves by its own total
+
+    await settle(sim.vendorOrderId).expect(201);
+    await settle(real.vendorOrderId).expect(201);
+    expect(await escrowBalance()).toBe(before); // both released; back to baseline
+  });
+
+  /**
    * MDF-777 exclusion #3, the PENDING half: `reconciliation()`'s
    * pendingVendorLiabilityMinor/pendingDriverLiabilityMinor read
    * VendorSettlement/DriverEarning rows directly, by status, with no wallet
