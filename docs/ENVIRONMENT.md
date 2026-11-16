@@ -40,7 +40,7 @@ Placeholders below are **examples only** — never commit real secrets.
 
 | Name | App | Req? | Secret? | Purpose | Example |
 |---|---|---|---|---|---|
-| `JWT_ACCESS_SECRET` | api | ✅ | 🔒 | Signs 15-min access JWTs (≥16 chars) | `«48-byte base64url»` |
+| `JWT_ACCESS_SECRET` | api | ✅ | 🔒 | Signs access JWTs (≥16 chars) | `«48-byte base64url»` |
 | `JWT_REFRESH_SECRET` | api | ✅ | 🔒 | Refresh signing/entropy (≥16 chars) | `«48-byte base64url»` |
 | `JWT_ACCESS_TTL` | api | ⭕ | 🌐 | Access token lifetime (session survives reload; DB session still re-checked every request, so revocation stays immediate) | `2h` |
 | `JWT_REFRESH_TTL` | api | ⭕ | 🌐 | Refresh token lifetime | `30d` |
