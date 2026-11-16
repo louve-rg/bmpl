@@ -403,7 +403,7 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     expect(grantCall?.body).toEqual({ locationId: hubBLocation.id });
   });
 
-  it("revokes one of an ACTIVE member's locations without ending their membership", async () => {
+  it("revokes one of an ACTIVE member's locations without ending their membership, after confirming which hub and member", async () => {
     const hubBLocation = { id: 'loc_3', isActive: true, hub: { id: 'hub_3', code: 'SPR', name: 'San Pedro Hub', city: 'San Pedro' } };
     const posts = stubFetch({
       company: {
@@ -414,6 +414,8 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
         ],
       },
     });
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirmSpy);
     await mount();
 
     const revokeButton = container!.querySelector<HTMLButtonElement>(`button[aria-label="Revoke ${ACTIVE_LOCATION.hub.name} from Jane Doe"]`)!;
@@ -422,7 +424,32 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
+    // Names the hub and the member, not a generic "are you sure".
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining(ACTIVE_LOCATION.hub.name));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Jane Doe'));
     expect(posts.some((p) => p.method === 'DELETE' && p.url.includes(`/members/u1/locations/${ACTIVE_LOCATION.id}`))).toBe(true);
+  });
+
+  it('ADMIN-LOCATION-X-STRIPS-A-MANAGER-WITH-NO-CONFIRMATION: does nothing if the confirmation is declined', async () => {
+    const posts = stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    await mount();
+
+    const revokeButton = container!.querySelector<HTMLButtonElement>(`button[aria-label="Revoke ${ACTIVE_LOCATION.hub.name} from Jane Doe"]`)!;
+    await act(async () => {
+      revokeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(posts.some((p) => p.method === 'DELETE' && p.url.includes('/locations/'))).toBe(false);
   });
 
   it('offers no grant control for an ACTIVE member already holding every active location', async () => {
