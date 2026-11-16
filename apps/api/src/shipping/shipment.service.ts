@@ -5472,9 +5472,19 @@ export class ShipmentService {
         // would otherwise show up here as "ready to hand off" at a hub it has
         // not reached. Requiring `arrivedAt` is this query's own fix for that;
         // `completeLeg`'s write-side gap is unchanged and reported separately.
+        //
+        // TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: EXCEPTION is
+        // included alongside READY/IN_PROGRESS so a leg that locked here (five
+        // wrong handoff codes, or a staff-flagged hold) stays visible to the
+        // terminal physically holding it instead of vanishing from the tab —
+        // `locked` below is how a caller tells it apart from an actionable row.
+        // `resolveException`'s RESUME path is the only way out (already
+        // audited, already the same permission tier as collection's unlock);
+        // this query does not add a second one and does not touch the 5-try
+        // lockout or `completeLeg`'s own guards.
         where: {
           destinationHubId: { in: hubIds },
-          status: { in: ['READY', 'IN_PROGRESS'] },
+          status: { in: ['READY', 'IN_PROGRESS', 'EXCEPTION'] },
           OR: [{ kind: 'FIRST_MILE' }, { kind: 'LINE_HAUL', arrivedAt: { not: null } }],
         },
         orderBy: [{ arrivedAt: { sort: 'desc', nulls: 'last' } }, { sequence: 'asc' }],
@@ -5546,6 +5556,12 @@ export class ShipmentService {
         broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
         arrived: l.arrivedAt != null || l.courierStatus === 'ARRIVING',
         isTest: l.shipment.isTest,
+        // TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: true once this
+        // leg has locked (five wrong handoff codes, or a staff-flagged hold).
+        // A locked row is still shown, never hidden, so the terminal physically
+        // holding the parcel can see it — but it is not actionable through the
+        // Hand off form; only an admin's audited RESUME clears it.
+        locked: l.status === 'EXCEPTION',
         // MDF-747: `broughtBy` above is for DISPLAY only — it falls back to
         // the literal 'Carrier' and is indistinguishable, client-side, from
         // a real carrier named "Carrier". `courier` mirrors

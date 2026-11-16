@@ -357,6 +357,58 @@ describe('TERM-8: the existing handoff door still agrees with the queue', () => 
   });
 });
 
+/**
+ * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: before this fix, a
+ * leg that locked out (five wrong handoff codes, `shipment.service.ts`'s
+ * `verifyLegPinOrThrow` flagging it EXCEPTION) dropped out of this exact
+ * query the instant it locked — the `status: { in: ['READY',
+ * 'IN_PROGRESS'] }` filter excluded EXCEPTION outright — so the destination
+ * terminal saw "Nothing to hand off right now" for a parcel it was
+ * physically holding. The fix adds EXCEPTION to that filter and a `locked`
+ * flag on the row; it does not touch the 5-try lockout, `completeLeg`'s
+ * guards, or add a second unlock path — `resolveException`'s already-audited
+ * RESUME (same permission tier as collection's unlock) is still the only way
+ * out.
+ */
+describe('TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: a locked leg stays visible instead of vanishing', () => {
+  it('reports locked: true after five wrong codes, refuses a correct code while locked, then locked: false and a successful handoff once an admin resumes it', async () => {
+    const net = await makeNetwork();
+    const destStaff = await makeTerminalStaff([net.destinationHubId]);
+    const { lineHaul } = await bookedReadyToDepart(await fundedSender(), net);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+
+    for (let i = 0; i < 5; i++) {
+      await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/handoff`, { pin: '000000', receivedByName: 'Wrong' });
+    }
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } })).status).toBe('EXCEPTION');
+
+    const lockedQueue = await get(destStaff.cookies, 'terminal/queue');
+    const lockedRow = lockedQueue.body.find((i: { action: string; legId: string }) => i.action === 'HANDOFF' && i.legId === lineHaul.id);
+    expect(lockedRow).toBeDefined();
+    expect(lockedRow.locked).toBe(true);
+
+    // Locked means locked — even the correct code is refused, not just a
+    // wrong one (verifyLegPinOrThrow's attempts>=MAX check is a 403, ahead
+    // of the code comparison). RESUME, not a retry, is the only way out.
+    const correctPin = await pinOf(lineHaul.id);
+    const refusedWhileLocked = await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/handoff`, { pin: correctPin, receivedByName: 'Desk' });
+    expect(refusedWhileLocked.status).toBe(403);
+
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/resolve-exception`, {
+      resolution: 'RESUME', note: 'Confirmed the code with the carrier by phone; cleared to retry.',
+    })).status).toBe(201);
+
+    const resumedQueue = await get(destStaff.cookies, 'terminal/queue');
+    const resumedRow = resumedQueue.body.find((i: { action: string; legId: string }) => i.action === 'HANDOFF' && i.legId === lineHaul.id);
+    expect(resumedRow).toBeDefined();
+    expect(resumedRow.locked).toBe(false);
+
+    const handed = await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/handoff`, { pin: correctPin, receivedByName: 'Desk' });
+    expect(handed.status).toBe(201);
+  });
+});
+
 describe('TERM-8: release to courier — the existing door, now also surfaced in the queue', () => {
   it('a LAST_MILE leg a courier has accepted appears at the hub they are collecting from', async () => {
     const net = await makeNetwork();
