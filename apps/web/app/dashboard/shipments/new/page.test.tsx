@@ -508,3 +508,90 @@ describe('NewShipmentPage hub-destination recipient email (MDF-746)', () => {
     expect(body.destination.email).toBeUndefined();
   }, 10000);
 });
+
+/**
+ * ROUTE-SAME-DISTRICT-DOOR-TO-HUB-REFUSED-AS-LOCAL-DELIVERY: Stanley booked
+ * Door to terminal with both ends in Belize City and got the planner's
+ * LOCAL_DELIVERY refusal twice over, plus "order through the marketplace and
+ * choose delivery at checkout" -- advice for buying goods, pointing nowhere
+ * for someone sending a parcel. The fix offers the applicable service type
+ * (Door to door) as a one-click switch right there, rather than naming it
+ * and leaving the customer to find the Service type dropdown unaided -- and
+ * is worded so it never promises the booking will go through, since Door to
+ * door can itself be blocked separately (an unconfigured courier fee).
+ */
+describe('NewShipmentPage same-town local-delivery hint (ROUTE-SAME-DISTRICT-DOOR-TO-HUB-REFUSED-AS-LOCAL-DELIVERY)', () => {
+  const HUB = {
+    id: 'hub-1',
+    code: 'BZE',
+    name: 'Belize City Hub',
+    type: 'TERMINAL',
+    district: 'BELIZE',
+    city: 'Belize City',
+    address: null,
+    latitude: null,
+    longitude: null,
+    modes: ['LAND'],
+    instructions: null,
+  };
+
+  /** Door to terminal, both ends Belize City -- Stanley's exact repro --
+   *  mocked straight to the LOCAL_DELIVERY refusal the planner gives for it. */
+  async function fillDoorToHubSameTown(): Promise<void> {
+    apiGet.mockImplementation((path: string) => (path === '/shipping/hubs/mine' ? Promise.resolve([HUB]) : defaultApiGetImpl(path)));
+    mount();
+    await flush();
+    await waitForNoPulse(container!);
+
+    const serviceSelect = container!.querySelector<HTMLSelectElement>('#service-type')!;
+    setSelectValue(serviceSelect, 'DOOR_TO_HUB');
+    fillTownAndDistrict(container!, 'Collect from', 'Belize City', 'BELIZE');
+    const destFieldset = container!.querySelector('fieldset[aria-label="Deliver to"]')!;
+    setSelectValue(destFieldset.querySelector<HTMLSelectElement>('select')!, HUB.id);
+
+    quoteMock.mockResolvedValueOnce({
+      available: false,
+      reason: 'LOCAL_DELIVERY',
+      message: 'Both ends are served by the same terminal, so this is a local delivery — no transport leg is needed.',
+      useLocalDelivery: true,
+      requestedDate: '2026-11-03',
+      dateUnavailable: false,
+      nextAvailableDate: null,
+    });
+    await settleQuote();
+  }
+
+  it('offers a one-click switch to Door to door instead of dead-end marketplace advice', async () => {
+    await fillDoorToHubSameTown();
+
+    expect(container!.textContent).not.toContain('order through the marketplace');
+    expect(container!.textContent).toContain('Door to door is the service type for a run like this');
+    const switchBtn = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Switch to Door to door');
+    expect(switchBtn).toBeTruthy();
+  });
+
+  it('words the hint as "see what it would cost", never as a promise the booking will go through', async () => {
+    await fillDoorToHubSameTown();
+
+    expect(container!.textContent).not.toMatch(/this will work|you can book|will complete/i);
+    expect(container!.textContent).toContain('switch to see what it would cost');
+  });
+
+  it('clicking the switch actually changes the Service type and the destination field, not just names the option', async () => {
+    await fillDoorToHubSameTown();
+    const switchBtn = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Switch to Door to door')!;
+
+    await act(async () => {
+      switchBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect((container!.querySelector('#service-type') as HTMLSelectElement).value).toBe('DOOR_TO_DOOR');
+    // Door to door needs a door address on both ends -- the now-stale hub
+    // picker ("Choose a terminal") is gone, replaced by the address field
+    // Door to door actually needs.
+    const destFieldset = container!.querySelector('fieldset[aria-label="Deliver to"]')!;
+    expect(destFieldset.textContent).not.toContain('Choose a terminal');
+    expect(destFieldset.querySelector('input[autocomplete="address-level2"]')).not.toBeNull();
+  });
+});
