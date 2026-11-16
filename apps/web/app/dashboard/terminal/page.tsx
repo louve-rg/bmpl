@@ -174,6 +174,14 @@ type QueueRow =
       broughtBy: string;
       arrived: boolean;
       isTest: boolean;
+      // TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: true once the
+      // leg has hit EXCEPTION (five wrong codes, or a staff-flagged hold).
+      // The row stays in this section rather than vanishing -- the bug was
+      // the row disappearing while the terminal still physically held the
+      // parcel. Even the correct code is refused (403) while this is true,
+      // so the Hand off form below must not be offered; only an admin's
+      // Resume on the leg clears it.
+      locked: boolean;
       // MDF-747: `broughtBy` above is display-only (falls back to the
       // literal 'Carrier', indistinguishable from a real carrier of that
       // name). `kind`/`courier` are the real signal -- `completeLeg`'s own
@@ -728,6 +736,7 @@ function QueueRowCard({
           </Badge>
         )}
         {row.action === 'HANDOFF' && row.arrived && <Badge tone="success">Arrived</Badge>}
+        {row.action === 'HANDOFF' && row.locked && <Badge tone="warning">Locked</Badge>}
         {/* T-7/MDF-736: same text-only Demo badge as the workspace header and
             the Lookup tab's own result -- one visual language for the one
             fact, not a second marker invented for the queue. */}
@@ -747,11 +756,17 @@ function QueueRowCard({
           </Button>
         )}
 
-        {row.action === 'HANDOFF' && row.kind === 'FIRST_MILE' && row.courier === null && (
+        {row.action === 'HANDOFF' && row.locked && (
+          <Alert tone="warning" title="Locked">
+            Too many incorrect codes were entered. The code will not be accepted here even if it is correct -- an administrator must resume this leg before it can be handed off.
+          </Alert>
+        )}
+
+        {row.action === 'HANDOFF' && !row.locked && row.kind === 'FIRST_MILE' && row.courier === null && (
           <Alert tone="neutral">This leg has no courier yet.</Alert>
         )}
 
-        {row.action === 'HANDOFF' && !(row.kind === 'FIRST_MILE' && row.courier === null) && (
+        {row.action === 'HANDOFF' && !row.locked && !(row.kind === 'FIRST_MILE' && row.courier === null) && (
           <>
             <p className="text-xs text-[color:var(--bmpl-text-muted)]">
               Ask the courier or driver for the code on their own device, and who is receiving it.
