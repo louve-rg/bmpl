@@ -811,6 +811,7 @@ components:
         arrived: { type: boolean, description: HANDOFF only. }
         kind: { type: string, enum: [FIRST_MILE, LINE_HAUL], description: "HANDOFF only (MDF-747). A LINE_HAUL leg is carrier-operated and never has an assigned courier by design — completeLeg's \"No courier is assigned to this leg\" refusal exempts it entirely. Offer the Hand off form unless kind is FIRST_MILE and courier (below) is null; never gate on courier alone." }
         courier: { type: string, nullable: true, description: "RELEASE_TO_COURIER and HANDOFF (MDF-747) — the assigned driver's display name, or genuinely null when none is assigned. On HANDOFF, null is expected and NOT a block for a LINE_HAUL row — see `kind` above." }
+        locked: { type: boolean, description: "HANDOFF only (TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK). True once this leg's status is EXCEPTION — five wrong handoff codes, or a staff-flagged hold. The row stays visible rather than disappearing from the queue, but is not actionable through the Hand off form; only an admin's audited resolve-exception RESUME clears it." }
         isTest: { type: boolean, description: The underlying shipment's own isTest (MDF-700/MDF-707 — every item carries it as of the same card that added inbound/outbound/custody below). }
     TerminalStaffRoster:
       type: object
