@@ -91,6 +91,10 @@ export class DiscoveryService {
    * Popular by real sales (units sold on AUTHORIZED/SETTLING/SETTLED orders), with a
    * deterministic cold-start fallback (top-rated → featured → newest) so the section
    * is never empty on a fresh catalog.
+   *
+   * MDF-777 exclusion #3: a simulation purchase must never steer what a REAL
+   * customer sees as popular — a different risk than misreported revenue
+   * (every other exclusion in this series), but the same missing filter.
    */
   async popular(limit = DISCOVERY_SECTION_SIZE) {
     const sold = await this.prisma.$queryRaw<Array<{ id: string }>>`
@@ -99,7 +103,7 @@ export class DiscoveryService {
       JOIN vendor_orders vo ON vo.id = oi."vendorOrderId"
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id
-      WHERE oi."productId" IS NOT NULL AND p.status IN ('AUTHORIZED','SETTLING','SETTLED')
+      WHERE oi."productId" IS NOT NULL AND p.status IN ('AUTHORIZED','SETTLING','SETTLED') AND o."isTest" = false
       GROUP BY oi."productId"
       ORDER BY sold DESC
       LIMIT ${limit}`;

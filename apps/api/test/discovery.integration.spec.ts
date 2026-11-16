@@ -41,6 +41,24 @@ async function makeProduct(opts: { categoryId: string; title?: string; status?: 
   });
   return p;
 }
+/** A fully paid order selling `qty` units of `product`, for the `popular` sales ranking. */
+async function seedSale(product: { id: string; title: string }, qty: number, opts: { isTest?: boolean } = {}) {
+  const s = uniq();
+  const buyer = await register(`buy_${s}@example.bz`);
+  const subtotal = 1500n * BigInt(qty);
+  return ctx.prisma.order.create({
+    data: {
+      orderNumber: `ORD-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: qty, subtotalMinor: subtotal, deliveryFeeMinor: 0n, totalMinor: subtotal, isTest: opts.isTest ?? false,
+      vendorOrders: {
+        create: {
+          orderNumber: `ORD-${s}-1`, vendorProfileId, deliveryMethod: 'DELIVERY', itemCount: qty, subtotalMinor: subtotal, status: 'PICKED_UP', pickedUpAt: new Date(),
+          items: { create: { productId: product.id, productTitle: product.title, sku: `SK-${s}`, unitPriceMinor: 1500n, quantity: qty, subtotalMinor: subtotal } },
+        },
+      },
+      payment: { create: { paymentNumber: `PAY-${s}`, userId: buyer.userId, amountMinor: subtotal, currency: 'BZD', status: 'SETTLED', authorizedAt: new Date() } },
+    },
+  });
+}
 
 beforeAll(async () => {
   ctx = await bootApp();
@@ -79,6 +97,26 @@ describe('homepage discovery bundle', () => {
     expect(res.body.categories.every((c: { productCount: number }) => c.productCount >= 1)).toBe(true);
     // popular falls back to non-empty on a catalog with no sales
     expect(res.body.popular.length).toBeGreaterThan(0);
+  });
+});
+
+describe('popular section excludes simulation sales (MDF-777 exclusion #3)', () => {
+  /**
+   * `DiscoveryService.popular()` ranked purely by raw SUM(quantity) with no
+   * isTest filter — a simulation purchase could outrank a real one and steer
+   * what a genuine customer sees as popular. A simulation order sells FAR
+   * more units (50) than the real one (5): if the filter is missing, the
+   * simulation product's inflated count puts it first; filtered correctly,
+   * only the real sale counts and the real product ranks first.
+   */
+  it('a simulation sale never outranks a real one in the popular ranking', async () => {
+    const real = await makeProduct({ categoryId: catA, title: `Real Seller ${uniq()}` });
+    const test = await makeProduct({ categoryId: catA, title: `Test Seller ${uniq()}` });
+    await seedSale(test, 50, { isTest: true });
+    await seedSale(real, 5, { isTest: false });
+
+    const res = await guestGet('marketplace/discovery');
+    expect(res.body.popular[0]).toMatchObject({ id: real.id });
   });
 });
 
