@@ -213,11 +213,9 @@ describe('vendor own-storefront analytics (ownership-scoped)', () => {
    * MDF-777 exclusion #3, vendor-scoped: `vendorOverview`'s own
    * `vendorSettlement.aggregate` (analytics.service.ts:176) had the same gap
    * as adminOverview's above. A brand-new vendor starts at absolute zero, so
-   * no delta is needed here — unlike `paidOrders`/`grossSalesMinor` (the
-   * `vendorOrder.aggregate` at :173, a pre-existing unfiltered read outside
-   * this fix's authorized scope — not asserted here), `netRevenueMinor`/
-   * `commissionPaidMinor` come from the aggregate this fix touched and must
-   * reflect only the real order.
+   * no delta is needed here — `netRevenueMinor`/`commissionPaidMinor` come
+   * from the aggregate this fix touched and must reflect only the real
+   * order.
    */
   it('MDF-777 exclusion #3: a vendor\'s own netRevenueMinor/commissionPaidMinor exclude a simulation settlement', async () => {
     const v = await makeVendor();
@@ -228,6 +226,25 @@ describe('vendor own-storefront analytics (ownership-scoped)', () => {
     expect(ov.body.netRevenueMinor).toBe(real.net);
     expect(ov.body.commissionPaidMinor).toBe(real.commission);
     expect(ov.body.settledGrossMinor).toBe(real.total);
+  });
+
+  /**
+   * MDF-777 exclusion #3 (sixth unfiltered read): `vendorOverview`'s
+   * `vendorOrder.aggregate` (`paidAgg`, analytics.service.ts:179) fed
+   * `paidOrders`/`grossSalesMinor` with no isTest filter at all — the one
+   * sibling aggregate in this method still missing the NOT_TEST pattern
+   * `unitsAgg` right below it already uses. A brand-new vendor starts at
+   * absolute zero, so the simulation order's own count/subtotal would show
+   * up directly if the filter were missing.
+   */
+  it('MDF-777 exclusion #3 (sixth read): a vendor\'s own paidOrders/grossSalesMinor exclude a simulation order', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const ov = await get(v.vendorCookies, 'vendor/analytics/overview');
+    expect(ov.body.paidOrders).toBe(1);
+    expect(ov.body.grossSalesMinor).toBe(real.subtotal);
   });
 
   it('rejects non-vendors from the vendor analytics surface', async () => {
