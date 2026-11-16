@@ -59,6 +59,7 @@ const HANDOFF_ROW = {
   isTest: false,
   kind: 'FIRST_MILE' as const,
   courier: 'Juan Perez',
+  locked: false,
 };
 // MDF-747: a FIRST_MILE leg with no assigned courier -- submitting a code
 // here would always 400 server-side (completeLeg's own precheck), so the
@@ -68,6 +69,9 @@ const HANDOFF_ROW_NO_COURIER = { ...HANDOFF_ROW, legId: 'leg_h2', reference: 'BM
 // -- completeLeg exempts LINE_HAUL from the guard entirely, so the form
 // must still be offered here despite courier also being null.
 const HANDOFF_ROW_LINE_HAUL = { ...HANDOFF_ROW, legId: 'leg_h3', reference: 'BML-31', kind: 'LINE_HAUL' as const, courier: null };
+// TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: the leg hit EXCEPTION
+// (five wrong codes) -- the row must still render, locked, not vanish.
+const HANDOFF_ROW_LOCKED = { ...HANDOFF_ROW, legId: 'leg_h4', reference: 'BML-32', locked: true };
 const RELEASE_ROW = {
   action: 'RELEASE_TO_COURIER' as const,
   legId: 'leg_r',
@@ -359,6 +363,27 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
     expect(container!.querySelector('#handoff-pin-leg_h')).not.toBeNull();
     expect(container!.textContent).not.toContain('This leg has no courier yet.');
+  });
+
+  /**
+   * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: the actual defect
+   * was the row vanishing from the queue while the terminal still held the
+   * parcel. The fix is this row staying put with `locked: true` -- this
+   * test proves it renders, says it is locked, and offers no form that
+   * would 403 anyway, and does NOT invite retrying the code (even the
+   * correct one is refused while locked).
+   */
+  it('TERM-HANDOFF-LOCK: a locked HANDOFF row stays in the queue, says it is locked, and offers no form', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW_LOCKED] });
+    await mount();
+
+    expect(container!.textContent).toContain('BML-32');
+    expect(container!.textContent).toContain('Locked');
+    expect(container!.textContent).toContain('an administrator must resume this leg');
+    expect(container!.textContent).not.toContain('Try the code again');
+    expect(container!.querySelector('#handoff-pin-leg_h4')).toBeNull();
+    expect(container!.querySelector('#handoff-who-leg_h4')).toBeNull();
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Record handoff')).toBe(false);
   });
 
   it('submits a release-to-courier with only the pin', async () => {
