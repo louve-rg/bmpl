@@ -411,6 +411,19 @@ describe('D2/D3 — proposal, idempotency, and mutual consent', () => {
 
     expect(await ctx.prisma.notification.count({ where: { event: 'SHIPMENT_LEG_OPERATOR_REJECTED' } })).toBe(notifBefore + 1);
 
+    // TERM-DEPARTED-LEG-FORGETS-THE-CARRIER-THAT-CLEARED-IT: the admin ops
+    // list is what the "needs assigning" banner reads, and a rejected
+    // proposal must genuinely need reassignment — not the one case the
+    // banner's operatedByProviderId check is allowed to stay silent on. This
+    // is the DB-level assertion above (legAfter.operatedByProviderId is
+    // null), confirmed on the actual wire the frontend condition depends on.
+    const opsRow = await get(admin, `admin/logistics/shipments?operatedByProviderId=${carrier.profileId}`);
+    expect(opsRow.body.rows.map((r: { id: string }) => r.id)).not.toContain(shipment.id);
+    const allOps = await get(admin, 'admin/logistics/shipments');
+    const opsLeg = allOps.body.rows.find((r: { id: string }) => r.id === shipment.id).legs.find((l: { id: string }) => l.id === leg.id);
+    expect(opsLeg.operatedByProviderId).toBeNull();
+    expect(opsLeg.operator).toBeNull();
+
     // Having lost the leg, the org cannot act on it again.
     expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(404);
 
