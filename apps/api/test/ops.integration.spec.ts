@@ -12,6 +12,7 @@ let ctx: TestContext;
 let adminCookies: string[];
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
+const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const patch = (c: string[], p: string, b: object | string) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
@@ -254,6 +255,66 @@ describe('automatic dispatch status (BMPL-293)', () => {
     expect(afterReal.body.queues.failedSettlements).toBe(baseFailed + 1);
     expect(afterReal.body.queues.deliveriesPendingAssignment).toBe(basePending + 1);
     expect(afterReal.body.queues.awaitingPickupCollection).toBe(baseAwaiting + 1);
+  });
+
+  /**
+   * MDF-846: the two remaining unfiltered counts in the same overview()
+   * array that PR #759 (MDF-777 exclusion #3, group 2) left untouched —
+   * pendingDriverVehicles and pendingRoleApplications — plus
+   * moreInfoRoleApplications, the same shape sibling, fixed in the same
+   * PR per an explicit decision not to repeat #759's own gap. Both
+   * DriverVehicle.driverProfile and RoleApplication.user are REQUIRED
+   * relations, so each filter is a direct `{ isTest: false }` — no isNot.
+   * pendingDriverVehicles joins DriverProfile.isTest (driver-specific, same
+   * flag assignmentEligibility trusts); pendingRoleApplications and
+   * moreInfoRoleApplications join User.isTest instead, because
+   * RoleApplication.roleCode spans all 14 role codes and a non-driver
+   * application has no DriverProfile to check at all.
+   */
+  async function pendingDriverVehicle(opts: { isTest?: boolean } = {}) {
+    const s = uniq();
+    const user = await ctx.prisma.user.create({ data: { email: `dv_${s}@example.bz`, passwordHash: 'x', firstName: 'D', lastName: 'V', isTest: opts.isTest ?? false } });
+    const profile = await ctx.prisma.driverProfile.create({
+      data: {
+        userId: user.id, legalName: 'D V', displayName: `Dv${s}`, phone: '+5016000000', homeDistrict: 'BELIZE',
+        licenceNumber: `DL-${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED', isTest: opts.isTest ?? false,
+      },
+    });
+    await ctx.prisma.driverVehicle.create({
+      data: { driverProfileId: profile.id, type: 'CAR', make: 'Toyota', model: 'Corolla', licencePlate: `BZ-${s}`.slice(0, 18), approvalStatus: 'PENDING' },
+    });
+  }
+
+  async function roleApplication(status: 'PENDING' | 'MORE_INFO_REQUIRED', opts: { isTest?: boolean } = {}) {
+    const s = uniq();
+    const user = await ctx.prisma.user.create({ data: { email: `ra_${s}@example.bz`, passwordHash: 'x', firstName: 'R', lastName: 'A', isTest: opts.isTest ?? false } });
+    await ctx.prisma.roleApplication.create({ data: { userId: user.id, roleCode: 'DELIVERY_DRIVER', status } });
+  }
+
+  it('excludes a simulation driver from pendingDriverVehicles and a simulation applicant from pendingRoleApplications/moreInfoRoleApplications', async () => {
+    const before = await get(adminCookies, 'admin/ops/overview');
+    const baseVehicles = before.body.queues.pendingDriverVehicles;
+    const basePending = before.body.queues.pendingRoleApplications;
+    const baseMoreInfo = before.body.queues.moreInfoRoleApplications;
+
+    await pendingDriverVehicle({ isTest: true });
+    await roleApplication('PENDING', { isTest: true });
+    await roleApplication('MORE_INFO_REQUIRED', { isTest: true });
+
+    const afterTest = await get(adminCookies, 'admin/ops/overview');
+    expect(afterTest.body.queues.pendingDriverVehicles).toBe(baseVehicles);
+    expect(afterTest.body.queues.pendingRoleApplications).toBe(basePending);
+    expect(afterTest.body.queues.moreInfoRoleApplications).toBe(baseMoreInfo);
+
+    // Real rows right after prove every count still works at all — this is
+    // an exclusion, not a count that silently stopped incrementing.
+    await pendingDriverVehicle();
+    await roleApplication('PENDING');
+    await roleApplication('MORE_INFO_REQUIRED');
+    const afterReal = await get(adminCookies, 'admin/ops/overview');
+    expect(afterReal.body.queues.pendingDriverVehicles).toBe(baseVehicles + 1);
+    expect(afterReal.body.queues.pendingRoleApplications).toBe(basePending + 1);
+    expect(afterReal.body.queues.moreInfoRoleApplications).toBe(baseMoreInfo + 1);
   });
 });
 
