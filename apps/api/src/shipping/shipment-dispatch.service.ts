@@ -817,9 +817,22 @@ export class ShipmentDispatchService {
    * How many legs `sweepUndispatched` would act on right now — the WHOLE
    * count, not the 50-per-tick slice it actually processes, so a backlog
    * bigger than one sweep reads as itself rather than as "50 or fewer".
+   *
+   * MDF-777 exclusion #4 (production operational metrics): this count feeds
+   * the admin ops board (`OpsService.dispatchStatus`), read there as "how
+   * much real work is backlogged" — so a simulation leg is excluded here,
+   * on top of `waitingLegsWhere()`, not inside it. `sweepUndispatched` keeps
+   * using the bare predicate and must keep acting on a simulation leg
+   * exactly as it does a real one, or a rehearsal shipment would never
+   * dispatch to its designated test driver. LINE_HAUL never reaches this
+   * count at all (excluded by kind in `waitingLegsWhere`), so in practice
+   * this only matters when a rehearsal shipment also carries a FIRST_MILE or
+   * LAST_MILE leg to or from the simulation hub.
    */
   async waitingCount(): Promise<number> {
-    return this.prisma.shipmentLeg.count({ where: this.waitingLegsWhere() });
+    return this.prisma.shipmentLeg.count({
+      where: { ...this.waitingLegsWhere(), shipment: { isTest: false } },
+    });
   }
 
   /**

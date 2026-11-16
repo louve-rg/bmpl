@@ -107,9 +107,9 @@ describe('automatic dispatch status (BMPL-293)', () => {
   }
 
   /** A shipment leg in exactly the state ShipmentDispatchService.sweepUndispatched acts on. */
-  async function waitingLeg() {
+  async function waitingLeg(opts: { isTest?: boolean } = {}) {
     const s = uniq();
-    const shipment = await ctx.prisma.shipment.create({ data: { reference: `BML293-${s}`, service: 'DOOR_TO_DOOR' } });
+    const shipment = await ctx.prisma.shipment.create({ data: { reference: `BML293-${s}`, service: 'DOOR_TO_DOOR', isTest: opts.isTest ?? false } });
     const leg = await ctx.prisma.shipmentLeg.create({
       data: { shipmentId: shipment.id, sequence: 1, kind: 'FIRST_MILE', mode: 'LAND', status: 'READY' },
     });
@@ -169,6 +169,22 @@ describe('automatic dispatch status (BMPL-293)', () => {
     // the admin dispatch console's own list.
     expect(after.body.queues.deliveriesPendingAssignment).toBe(base + 1);
     expect(after.body.dispatch.waitingDeliveries).toBe(baseWaiting + 1);
+  });
+
+  it('excludes a simulation leg from waitingShipmentLegs (MDF-777 exclusion #4) — a rehearsal leg must not inflate the number an operator reads as real backlog', async () => {
+    const before = await get(adminCookies, 'admin/ops/overview');
+    const baseLegs = before.body.dispatch.waitingShipmentLegs;
+
+    await waitingLeg({ isTest: true });
+
+    const afterTest = await get(adminCookies, 'admin/ops/overview');
+    expect(afterTest.body.dispatch.waitingShipmentLegs).toBe(baseLegs);
+
+    // A real leg right after proves the count still works at all — this is
+    // an exclusion, not a count that silently stopped incrementing.
+    await waitingLeg();
+    const afterReal = await get(adminCookies, 'admin/ops/overview');
+    expect(afterReal.body.dispatch.waitingShipmentLegs).toBe(baseLegs + 1);
   });
 });
 
