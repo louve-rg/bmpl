@@ -297,7 +297,12 @@ describe('automatic dispatch releases LAST_MILE across two line-haul hops, with 
     expect(lastMileAfterRelease.courierStatus).toBe('ASSIGNED');
 
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
-    expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`)).status).toBe(201);
+    // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
+    // leg is terminal-held, so self-submit pickup is refused outright — only
+    // staff release (admin/logistics/legs/:id/release-to-courier) may move
+    // it to PICKUP_CONFIRMED.
+    const lastMilePickupPin = (await legRow(lastMile.id)).pickupPin!;
+    expect((await post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: lastMilePickupPin })).status).toBe(201);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/in-transit`)).status).toBe(201);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/arriving`)).status).toBe(201);
 

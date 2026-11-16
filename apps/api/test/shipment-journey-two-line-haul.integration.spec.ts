@@ -249,9 +249,12 @@ describe('the complete journey over two line-haul hops (SHIPPING-E2E-JOURNEY)', 
     /* --------------------------------------------------------- LAST_MILE */
     expect((await assign(lastMile.id, lastCourier)).status).toBe(201);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
-    // LAST_MILE's own pickup (collecting from the terminal) never enforced a
-    // code — no body at all, same contract proven elsewhere for this leg kind.
-    expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`)).status).toBe(201);
+    // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
+    // leg is terminal-held, so self-submit pickup is refused outright — only
+    // staff release (admin/logistics/legs/:id/release-to-courier) may move
+    // it to PICKUP_CONFIRMED.
+    const lastMilePickupPin = (await legRow(lastMile.id)).pickupPin!;
+    expect((await post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: lastMilePickupPin })).status).toBe(201);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/in-transit`)).status).toBe(201);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/arriving`)).status).toBe(201);
     const lastMilePin = (await legRow(lastMile.id)).handoffPin!;

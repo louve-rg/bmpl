@@ -306,7 +306,19 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     expect(ok.status).toBe(201);
   });
 
-  it('7 · a LAST_MILE leg never enforced a pickup code, and still does not: no pin, wrong-shaped pin, anything — all harmlessly ignored', async () => {
+  /**
+   * TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
+   * leg starts at a hub (its `originHub` is always set — the planner never
+   * produces one any other way), so the parcel is physically held BY that
+   * terminal. Self-submit `confirmPickup` must refuse it outright,
+   * regardless of what pin (if any) is sent — this is NOT the same gap as
+   * ruling 1 above (a missing/wrong SENDER code on a door pickup); there is
+   * no pin to check here at all, because this leg kind must never reach
+   * self-submit in the first place. The only legitimate path is staff
+   * release at the terminal (proven in
+   * shipping-handoff-reversal.integration.spec.ts's TERM-5 suite).
+   */
+  it('7 · a LAST_MILE leg is terminal-held: self-submit pickup is refused outright, pin or no pin', async () => {
     const sender = await fundedSender();
     const firstCourier = await makeCourier('STANN_CREEK');
     const lastCourier = await makeCourier('BELIZE');
@@ -331,10 +343,20 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     await dispatch.dispatchLeg(lastMile.id);
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
 
-    // No body at all — a LAST_MILE leg's own pickup (collecting from the
-    // terminal, not a sender's door) never enforced one and still does not.
-    expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`)).status).toBe(201);
-    expect((await legRow(lastMile.id)).status).toBe('IN_PROGRESS');
+    // No body at all — still refused.
+    const noBody = await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`);
+    expect(noBody.status).toBe(400);
+    expect((await legRow(lastMile.id)).courierStatus).toBe('DRIVER_ACCEPTED'); // never advanced
+    expect((await legRow(lastMile.id)).pickedUpAt).toBeNull();
+
+    // The leg's OWN real pickup pin, sent anyway — still refused. There is no
+    // pin-checking path for this leg kind to fall into; the refusal fires
+    // before any pin comparison.
+    const realPickupPin = (await legRow(lastMile.id)).pickupPin!;
+    const withPin = await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`, { pin: realPickupPin });
+    expect(withPin.status).toBe(400);
+    expect((await legRow(lastMile.id)).courierStatus).toBe('DRIVER_ACCEPTED');
+    expect((await legRow(lastMile.id)).pickupPinAttempts).toBe(0); // refused before any attempt is even counted
   });
 
   it('8 · MIGRATION DAY (owner ruling): a leg that predates the pickup-pin feature collects with no code at all, and the exemption is recorded on the audit row', async () => {

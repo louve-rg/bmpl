@@ -5908,11 +5908,32 @@ export class ShipmentService {
    * `isAssignedCourier` comparison — refused through the same failure path
    * as everything else — instead of being silently ignored. See
    * `completeLeg`'s own comment for the full reasoning.
+   *
+   * TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: once
+   * `ShipmentDriverService.confirmPickup` refuses self-submit for a LAST_MILE
+   * leg, THIS method becomes the only release path for one — including a
+   * migration-day grandfathered leg (`pickupPinGrandfathered`, the same
+   * owner-ruled exemption `confirmPickup` already applies) that has no
+   * `pickupPin` and never will. Without the exemption below, closing
+   * self-submit would strand that leg: unpickupable by either path. The
+   * exemption is narrow — only a grandfathered leg skips the pin check;
+   * one created by this feature always has a real pin and still must match
+   * it — and it is named on the audit row so an exempted release stays
+   * distinguishable from a verified one.
    */
   async staffReleaseToCourier(legId: string, input: { pin: string; presentedCourierUserId?: string }, actor: { userId: string }) {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
-      select: { id: true, shipmentId: true, kind: true, status: true, courierStatus: true, assignedDriverProfileId: true, shipment: { select: { reference: true } } },
+      select: {
+        id: true,
+        shipmentId: true,
+        kind: true,
+        status: true,
+        courierStatus: true,
+        assignedDriverProfileId: true,
+        pickupPinGrandfathered: true,
+        shipment: { select: { reference: true } },
+      },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
     if (leg.kind !== 'LAST_MILE') {
@@ -5929,15 +5950,26 @@ export class ShipmentService {
       await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
     ).userId;
 
-    // Checked BEFORE the write below, in its own write — same reasoning as
-    // completeLeg's own call: a failed attempt recorded only inside a later
-    // transaction would roll back when that transaction throws, and the
-    // counter would never climb.
-    await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
+    // Only a grandfathered leg skips this — see the method's own comment.
+    // A leg with a real pin still must match it, exactly as before.
+    if (!leg.pickupPinGrandfathered) {
+      // Checked BEFORE the write below, in its own write — same reasoning as
+      // completeLeg's own call: a failed attempt recorded only inside a later
+      // transaction would roll back when that transaction throws, and the
+      // counter would never climb.
+      await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
+    }
 
     const claimed = await this.prisma.shipmentLeg.updateMany({
       where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
-      data: { courierStatus: 'PICKUP_CONFIRMED', pickedUpAt: new Date(), pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' },
+      data: {
+        courierStatus: 'PICKUP_CONFIRMED',
+        pickedUpAt: new Date(),
+        // Left unset on the grandfather exemption — same as confirmPickup's
+        // own exempt path — so the record still shows an unverified pickup
+        // rather than claiming a verification that never happened.
+        ...(leg.pickupPinGrandfathered ? {} : { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' }),
+      },
     });
     if (claimed.count === 0) {
       throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be released.');
@@ -5951,6 +5983,9 @@ export class ShipmentService {
         reference: leg.shipment.reference,
         releasedBy: 'STAFF',
         presentedCourierUserId,
+        // Named explicitly so an exempted release stays distinguishable from
+        // a verified one (owner ruling).
+        pickupPinGrandfathered: leg.pickupPinGrandfathered,
       },
     });
     return this.startLeg(legId, { userId: presentedCourierUserId, label: 'Courier (verified at terminal)' });
