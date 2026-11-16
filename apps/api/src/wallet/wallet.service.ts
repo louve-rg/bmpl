@@ -48,6 +48,25 @@ export class WalletService {
     return entries.reduce((sum, e) => sum + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
   }
 
+  /**
+   * MDF-777 exclusion #3 (financial reporting). NOT a replacement for
+   * `balanceMinor` above — a USER wallet's balance must keep counting a
+   * test-funded customer's own simulation money; that money is genuinely
+   * theirs to spend inside the sandbox. This exists only for a pooled SYSTEM
+   * account (escrow, platform fees) read for financial reporting, where
+   * simulation and real money both land in the one account and reporting
+   * needs to see only the real share. `transaction.isTest` is a direct FK on
+   * `WalletLedgerEntry`, already indexed (`@@index([isTest, createdAt])` on
+   * `WalletTransaction`) for exactly this read.
+   */
+  async realBalanceMinor(accountId: string, db: Db = this.prisma): Promise<bigint> {
+    const entries = await db.walletLedgerEntry.findMany({
+      where: { accountId, transaction: { isTest: false } },
+      select: { direction: true, amountMinor: true },
+    });
+    return entries.reduce((sum, e) => sum + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+  }
+
   /** Get-or-create a SYSTEM account (e.g. escrow) for a currency (userId = null). */
   async ensureSystemAccount(type: WalletAccountType, currency: Currency, tx: Tx): Promise<WalletAccount> {
     const existing = await tx.walletAccount.findFirst({ where: { type, userId: null, currency } });

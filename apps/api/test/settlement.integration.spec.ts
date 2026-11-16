@@ -147,14 +147,45 @@ interface Settleable { vendorOrderId: string; vendorUserId: string; driverUserId
  * authorization path produces the exact escrow state these tests need.
  * The final DELIVERED-unsettled step is simulated; see markDeliveredUnsettled.
  */
-async function seedDelivered(opts: { subtotal: number; deliveryFee: number } = { subtotal: 10000, deliveryFee: 500 }): Promise<Settleable> {
+let realTopupCounter = 0;
+/**
+ * MDF-777 exclusion #3: a balanced, REAL (isTest default false) TOPUP posted
+ * directly via raw Prisma — the same documented-workaround class as
+ * `markDeliveredUnsettled` above, needed because every funding path this
+ * product actually exposes (admin test-credit, self-service UAT credit) is
+ * unconditionally `isTest: true` by design (wallet.service.ts), and no real
+ * payment rail exists yet (root CLAUDE.md §4) to produce genuine real money
+ * any other way. Mirrors wallet-authorization.integration.spec.ts's own
+ * `fundWallet` fixture, which relies on the same thing: `register()` already
+ * creates the USER/BZD wallet account, so no `ensureUserAccount` call is
+ * needed first.
+ */
+async function fundRealWallet(userId: string, amountMinor: number) {
+  const wallet = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { userId, type: 'USER', currency: 'BZD' } });
+  const clearing = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { type: 'SYSTEM_TOPUP_CLEARING', userId: null, currency: 'BZD' } });
+  realTopupCounter += 1;
+  await ctx.prisma.walletTransaction.create({
+    data: {
+      type: 'TOPUP', status: 'POSTED', currency: 'BZD', reference: `mdf777-real-topup-${realTopupCounter}`, postedAt: new Date(),
+      entries: { create: [{ accountId: wallet.id, direction: 'CREDIT', amountMinor: BigInt(amountMinor) }, { accountId: clearing.id, direction: 'DEBIT', amountMinor: BigInt(amountMinor) }] },
+    },
+  });
+}
+
+async function seedDelivered(
+  opts: { subtotal: number; deliveryFee: number; funding?: 'TEST_CREDIT' | 'REAL' } = { subtotal: 10000, deliveryFee: 500 },
+): Promise<Settleable> {
   const s = uniq();
   const total = opts.subtotal + opts.deliveryFee;
   const vendor = await makeVendor(s, opts.subtotal, opts.deliveryFee);
   const driver = await makeApprovedDriver(s);
 
   const cust = await register(`cust_${s}@example.bz`);
-  expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: total, reason: 'Settlement fixture funding.' })).status).toBe(201);
+  if (opts.funding === 'REAL') {
+    await fundRealWallet(cust.userId, total);
+  } else {
+    expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: total, reason: 'Settlement fixture funding.' })).status).toBe(201);
+  }
   expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBe(201);
   const co = await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY' }], deliveryAddress: ADDRESS, payWithWallet: true });
   expect(co.status).toBe(201);
@@ -384,6 +415,105 @@ describe('reads, permissions, reconciliation, fee config', () => {
     expect((await get(cust.cookies, 'admin/settlements')).status).toBe(403);
     // restore default for other tests
     await patch(adminCookies, 'admin/settlements/fee-config', { commissionBps: 1000 });
+  });
+
+  /**
+   * MDF-777 exclusion #3: a simulation payment (admin test-credit — always
+   * isTest:true by design, wallet.service.ts) must never reach the admin
+   * reconciliation's escrow/platform figures; a real one (fundRealWallet
+   * above) must. Checked at both points in the settlement lifecycle where
+   * these two numbers actually move: `escrowBalanceMinor` while the payment
+   * is authorized-but-unsettled (both held in escrow right now), and
+   * `platformRevenueMinor` once both are POSTED (escrow fully releases on
+   * settle, so `escrowBalanceMinor` returns to baseline for both — that
+   * return-to-baseline is itself part of what this test checks).
+   */
+  it('MDF-777 exclusion #3: a simulation payment never reaches escrow/platform reconciliation figures; a real one does', async () => {
+    const before = await get(adminCookies, 'admin/settlements/reconciliation');
+
+    const sim = await seedDelivered({ subtotal: 4000, deliveryFee: 200 });
+    const real = await seedDelivered({ subtotal: 4000, deliveryFee: 200, funding: 'REAL' });
+    const total = 4200;
+
+    // Both authorized, neither settled: escrow holds both right now, but the
+    // reconciliation figure must show only the real one.
+    const mid = await get(adminCookies, 'admin/settlements/reconciliation');
+    expect(mid.body.escrowBalanceMinor - before.body.escrowBalanceMinor).toBe(total);
+
+    await settle(sim.vendorOrderId).expect(201);
+    await settle(real.vendorOrderId).expect(201);
+
+    const after = await get(adminCookies, 'admin/settlements/reconciliation');
+    // Both releases happened — escrow returns to baseline for the real one
+    // too, same as it always would once settled.
+    expect(after.body.escrowBalanceMinor - before.body.escrowBalanceMinor).toBe(0);
+    // commission = 10% of 4000 = 400; driver = 80% of 200 = 160; platformFee
+    // = 200 − 160 = 40; platform = 400 + 40 = 440 (DEFAULT_FEE_CONFIG, same
+    // formula the existing driver/vendor tests above already rely on).
+    expect(after.body.platformRevenueMinor - before.body.platformRevenueMinor).toBe(440);
+  });
+
+  /**
+   * MDF-777 exclusion #3, the PENDING half: `reconciliation()`'s
+   * pendingVendorLiabilityMinor/pendingDriverLiabilityMinor read
+   * VendorSettlement/DriverEarning rows directly, by status, with no wallet
+   * movement involved — the real settle flow resolves PENDING to POSTED
+   * atomically inside one transaction, so a raw Prisma row is the only way
+   * to observe a PENDING one at all (same documented-workaround class as
+   * `markDeliveredUnsettled` and `fundRealWallet` above). DriverEarning is
+   * tested through BOTH relations the schema allows (shipmentLeg XOR
+   * orderDelivery, enforced by a CHECK) since the fix's OR-clause has to
+   * get both right.
+   */
+  it('MDF-777 exclusion #3: PENDING vendor/driver liabilities exclude simulation rows via either DriverEarning relation', async () => {
+    const before = await get(adminCookies, 'admin/settlements/reconciliation');
+
+    const s = uniq();
+    const vendor = await makeVendor(s, 5000, 300);
+    const driver = await makeApprovedDriver(s);
+
+    async function minimalOrder(isTest: boolean, tag: string) {
+      const buyer = await register(`pend_${tag}_${s}@example.bz`);
+      const total = 5300;
+      const order = await ctx.prisma.order.create({
+        data: {
+          orderNumber: `MDF777-${tag}-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: 1,
+          subtotalMinor: 5000n, deliveryFeeMinor: 300n, totalMinor: BigInt(total), isTest,
+          vendorOrders: { create: { orderNumber: `MDF777-${tag}-${s}-1`, vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 5000n, status: 'PICKED_UP', pickedUpAt: new Date() } },
+          payment: { create: { paymentNumber: `MDF777PAY-${tag}-${s}`, userId: buyer.userId, amountMinor: BigInt(total), currency: 'BZD', status: 'AUTHORIZED', authorizedAt: new Date() } },
+        },
+        include: { vendorOrders: true, payment: true },
+      });
+      const vo = order.vendorOrders[0]!;
+      await ctx.prisma.vendorSettlement.create({
+        data: {
+          vendorProfileId: vendor.vendorProfileId, vendorOrderId: vo.id, paymentId: order.payment!.id, currency: 'BZD',
+          merchandiseSubtotalMinor: 5000n, deliveryFeeMinor: 300n, commissionMinor: 500n, driverAllocationMinor: 240n,
+          platformFeeMinor: 60n, grossMinor: BigInt(total), netMinor: 4500n, status: 'PENDING', snapshot: {},
+        },
+      });
+      // orderDelivery-linked DriverEarning (marketplace hop: 3 relations).
+      const delivery = await ctx.prisma.orderDelivery.create({ data: { vendorOrderId: vo.id } });
+      await ctx.prisma.driverEarning.create({
+        data: { driverProfileId: driver.driverProfileId, orderDeliveryId: delivery.id, currency: 'BZD', method: 'FLAT', grossMinor: 240n, netMinor: 240n, status: 'PENDING', snapshot: {} },
+      });
+      // shipmentLeg-linked DriverEarning (shipping hop: 2 relations).
+      const shipment = await ctx.prisma.shipment.create({ data: { reference: `MDF777LEG-${tag}-${s}`, service: 'DOOR_TO_DOOR', isTest } });
+      const leg = await ctx.prisma.shipmentLeg.create({ data: { shipmentId: shipment.id, sequence: 1, kind: 'LAST_MILE', mode: 'LAND', status: 'READY' } });
+      await ctx.prisma.driverEarning.create({
+        data: { driverProfileId: driver.driverProfileId, shipmentLegId: leg.id, currency: 'BZD', method: 'FLAT', grossMinor: 150n, netMinor: 150n, status: 'PENDING', snapshot: {} },
+      });
+      return { vendorNetMinor: 4500, driverEarningMinor: 240 + 150 };
+    }
+
+    // The simulation rows exist (proving genuine exclusion, not absence) —
+    // the delta assertions below cover only the real contribution.
+    await minimalOrder(true, 'sim');
+    const real = await minimalOrder(false, 'real');
+
+    const after = await get(adminCookies, 'admin/settlements/reconciliation');
+    expect(after.body.pendingVendorLiabilityMinor - before.body.pendingVendorLiabilityMinor).toBe(real.vendorNetMinor);
+    expect(after.body.pendingDriverLiabilityMinor - before.body.pendingDriverLiabilityMinor).toBe(real.driverEarningMinor);
   });
 
   it('customer can read their own order settlement status', async () => {

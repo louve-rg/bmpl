@@ -69,7 +69,12 @@ export class AnalyticsService {
         this.prisma.payment.aggregate({ where: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] }, order: NOT_TEST }, _sum: { amountMinor: true }, _count: true }),
         this.prisma.order.count({ where: NOT_TEST }),
         this.prisma.order.count({ where: { ...NOT_TEST, status: 'CANCELLED' } }),
-        this.prisma.vendorSettlement.aggregate({ where: { status: 'POSTED' }, _sum: { commissionMinor: true, platformFeeMinor: true, netMinor: true, grossMinor: true } }),
+        // MDF-777 exclusion #3: VendorSettlement has no isTest of its own —
+        // one hop via vendorOrder.order, same as every other aggregate here.
+        this.prisma.vendorSettlement.aggregate({
+          where: { status: 'POSTED', vendorOrder: { order: NOT_TEST } },
+          _sum: { commissionMinor: true, platformFeeMinor: true, netMinor: true, grossMinor: true },
+        }),
         this.prisma.orderItem.aggregate({ where: { vendorOrder: { order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
         this.prisma.userRole.count({ where: { roleCode: 'VENDOR', status: 'APPROVED' } }),
         this.prisma.userRole.count({ where: { roleCode: 'DELIVERY_DRIVER', status: 'APPROVED' } }),
@@ -173,7 +178,11 @@ export class AnalyticsService {
     const [paidAgg, unitsAgg, settlementAgg, pendingSettlements, publishedProducts, profile] = await Promise.all([
       this.prisma.vendorOrder.aggregate({ where: { vendorProfileId: vp, order: { payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } }, _sum: { subtotalMinor: true }, _count: true }),
       this.prisma.orderItem.aggregate({ where: { vendorOrder: { vendorProfileId: vp, order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
-      this.prisma.vendorSettlement.aggregate({ where: { vendorProfileId: vp, status: 'POSTED' }, _sum: { netMinor: true, commissionMinor: true, grossMinor: true } }),
+      // MDF-777 exclusion #3: same one-hop filter as adminOverview above.
+      this.prisma.vendorSettlement.aggregate({
+        where: { vendorProfileId: vp, status: 'POSTED', vendorOrder: { order: NOT_TEST } },
+        _sum: { netMinor: true, commissionMinor: true, grossMinor: true },
+      }),
       this.prisma.vendorSettlement.count({ where: { vendorProfileId: vp, status: 'PENDING' } }),
       this.prisma.product.count({ where: { vendorProfileId: vp, status: 'PUBLISHED' } }),
       this.prisma.vendorProfile.findUniqueOrThrow({ where: { id: vp }, select: { ratingAverage: true, ratingCount: true } }),

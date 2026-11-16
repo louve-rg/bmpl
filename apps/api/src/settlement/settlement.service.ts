@@ -541,17 +541,38 @@ export class SettlementService {
   /**
    * Reconciliation: internal liabilities vs escrow, and global ledger net.
    * A mismatch is surfaced (not hidden) for the admin console.
+   *
+   * MDF-777 exclusion #3: every figure here is REAL money only. `escrow` and
+   * `SYSTEM_PLATFORM_FEES` are pooled accounts that carry both real and
+   * simulation money in the same balance, so `realBalanceMinor` (not the
+   * plain `balanceMinor` every user wallet read still needs) is used for
+   * both. `pendingVendor`/`pendingDriver` follow their settlement row back
+   * to the real order/shipment that produced it — `driverEarning` is either
+   * a shipment courier leg or a marketplace delivery, never both (schema
+   * CHECK), so the OR below only ever has one side with a row to match.
+   * `globalNet` stays a valid balance check once filtered: every individual
+   * transaction nets to zero on its own (`assertBalanced`), so the sum over
+   * any subset of them — real transactions alone — nets to zero too.
    */
   async reconciliation() {
     const accounts = await this.prisma.walletAccount.findMany({ where: { userId: null } });
     const escrow = accounts.find((a) => a.type === 'SYSTEM_ESCROW');
     const platform = accounts.find((a) => a.type === 'SYSTEM_PLATFORM_FEES');
-    const escrowBalance = escrow ? await this.wallet.balanceMinor(escrow.id) : 0n;
-    const platformBalance = platform ? await this.wallet.balanceMinor(platform.id) : 0n;
-    const pendingVendor = await this.prisma.vendorSettlement.aggregate({ where: { status: 'PENDING' }, _sum: { netMinor: true } });
-    const pendingDriver = await this.prisma.driverEarning.aggregate({ where: { status: 'PENDING' }, _sum: { netMinor: true } });
+    const escrowBalance = escrow ? await this.wallet.realBalanceMinor(escrow.id) : 0n;
+    const platformBalance = platform ? await this.wallet.realBalanceMinor(platform.id) : 0n;
+    const pendingVendor = await this.prisma.vendorSettlement.aggregate({
+      where: { status: 'PENDING', vendorOrder: { order: { isTest: false } } },
+      _sum: { netMinor: true },
+    });
+    const pendingDriver = await this.prisma.driverEarning.aggregate({
+      where: {
+        status: 'PENDING',
+        OR: [{ shipmentLeg: { shipment: { isTest: false } } }, { orderDelivery: { vendorOrder: { order: { isTest: false } } } }],
+      },
+      _sum: { netMinor: true },
+    });
     // Global ledger net (must be exactly zero if every transaction balanced).
-    const entries = await this.prisma.walletLedgerEntry.findMany({ select: { direction: true, amountMinor: true } });
+    const entries = await this.prisma.walletLedgerEntry.findMany({ where: { transaction: { isTest: false } }, select: { direction: true, amountMinor: true } });
     const globalNet = entries.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
     return {
       escrowBalanceMinor: money(escrowBalance),
