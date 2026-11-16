@@ -589,7 +589,7 @@ export default function ShipmentOpsPage() {
                                 id={`${leg.id}-depart-carrier`}
                                 value={d.carrierName}
                                 onChange={(e) => setDepartForm({ ...departForm, [leg.id]: { ...d, carrierName: e.target.value } })}
-                                placeholder="Tropic Air"
+                                placeholder="Enter the carrier's name"
                               />
                             </Field>
                             <Field label="Booking reference" htmlFor={`${leg.id}-depart-ref`} hint="Optional">

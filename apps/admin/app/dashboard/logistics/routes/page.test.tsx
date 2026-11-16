@@ -302,6 +302,121 @@ describe('RoutesPage — Carrier is required (TERM-ROUTE-BLANK-CARRIER-STRANDS-A
   });
 });
 
+describe('RoutesPage — the form says why it will not proceed (ADMIN-ROUTE-FORM-HIDES-ITS-HUBS-AND-NEVER-SAYS-WHY)', () => {
+  it('names the cause when no hub serves the selected mode, without hiding or filtering any hub', async () => {
+    // Only an AIR hub exists — exactly production's shape today, where the
+    // owner is about to hand-build ground simulation hubs into an empty list.
+    stubFetch(['logistics.manage'], { hubs: [HUB] });
+    await mount();
+
+    // Mode defaults to Flight/AIR, so there is no empty state yet.
+    expect(document.body.textContent).not.toMatch(/No hubs serve this mode yet/);
+
+    const modeSelect = document.body.querySelector<HTMLSelectElement>('#route-mode')!;
+    await act(async () => {
+      modeSelect.value = 'LAND';
+      modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toMatch(/No hubs serve this mode yet — switch Mode, or add a hub for it\./);
+    // The filtering itself is untouched: the AIR hub still never appears for Road.
+    const fromOptions = Array.from(document.body.querySelectorAll<HTMLOptionElement>('#route-from option')).map((o) => o.textContent);
+    expect(fromOptions).toEqual(['Choose…']);
+  });
+
+  it('says nothing about hub coverage while the hubs fetch is still in flight — hubs is empty then too, but that is not the same as "none for this mode"', async () => {
+    let resolveHubs!: (res: Response) => void;
+    const pendingHubs = new Promise<Response>((resolve) => {
+      resolveHubs = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/admin/logistics/hubs')) return pendingHubs;
+        if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, []);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.manage'] });
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RoutesPage />);
+    });
+
+    // The default mode (Flight/AIR) has no hub yet either — `hubs` is still
+    // `[]` because the fetch has not resolved — but the form must not claim
+    // that as a fact about coverage while it's still finding out.
+    expect(document.body.textContent).not.toMatch(/No hubs serve this mode yet/);
+
+    await act(async () => {
+      resolveHubs(jsonResponse(200, []));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Now the load has genuinely finished with no hub for this mode.
+    expect(document.body.textContent).toMatch(/No hubs serve this mode yet/);
+  });
+
+  it('does not claim no hub exists for this mode when the hub load fails — it reports the real error instead', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(500, { message: 'Could not reach the hub service.' });
+        if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, []);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.manage'] });
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/No hubs serve this mode yet/);
+    expect(document.body.textContent).toMatch(/Could not reach the hub service\./);
+  });
+
+  it('says which fields are still missing while Add route stays disabled', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Still needed: From, To, Carrier, Price\./);
+
+    const fromSelect = document.body.querySelector<HTMLSelectElement>('#route-from')!;
+    await act(async () => {
+      fromSelect.value = 'hub_1';
+      fromSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // Narrows as fields fill in, naming only what's left.
+    expect(document.body.textContent).toMatch(/Still needed: To, Carrier, Price\./);
+    expect(document.body.textContent).not.toMatch(/Still needed: From,/);
+  });
+
+  it('marks every required label with an asterisk', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+
+    const labels = Array.from(document.body.querySelectorAll('label')).map((l) => l.textContent?.trim());
+    expect(labels).toContain('From *');
+    expect(labels).toContain('To *');
+    expect(labels).toContain('Carrier *');
+    expect(labels).toContain('Price (BZ$) *');
+    // Mode always has a value and Duration always has a default — neither is "missing".
+    expect(labels).toContain('Mode');
+  });
+
+  it('does not place a real operator name in the Carrier placeholder', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+
+    const carrierInput = document.body.querySelector<HTMLInputElement>('#route-carrier')!;
+    expect(carrierInput.placeholder).not.toMatch(/Tropic Air/);
+  });
+});
+
 describe('RoutesPage — an already-blank route is recoverable (TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 3)', () => {
   const BLANK = { ...ROUTE, id: 'route_blank', carrierName: null };
 
