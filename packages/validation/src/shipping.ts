@@ -91,7 +91,13 @@ const routeBase = z.object({
   originHubId: cuidSchema,
   destinationHubId: cuidSchema,
   mode: z.enum(TRANSPORT_MODES),
-  carrierName: z.string().trim().max(120).optional(),
+  // TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG: a route created with nobody
+  // named to operate it plans a leg that departLeg() then refuses outright
+  // (no operatedByProviderId, no carrierName on the leg, no carrierName on
+  // the route) — the parcel is stuck at a terminal with no screen left to
+  // name a carrier before the next depart attempt. Required at the one point
+  // the record is created rather than left recoverable only by chance.
+  carrierName: z.string().trim().min(1, 'Name the carrier operating this route.').max(120),
   carrierPhone: phoneSchema.optional(),
   // The standing carrier ORGANIZATION for this route (BMPL-137): copied onto
   // each new leg at booking. Null clears it. Validated in the service.
@@ -113,6 +119,8 @@ const notSelfReferential = <T extends z.ZodTypeAny>(schema: T) =>
   );
 
 export const createRouteSchema = notSelfReferential(routeBase);
+/** Required on create (above); still optional on an update that touches other fields, but a carrier
+ *  name that IS given still has to be non-blank — see TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG. */
 export const updateRouteSchema = notSelfReferential(
   routeBase.partial().refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' }),
 );

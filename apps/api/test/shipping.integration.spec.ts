@@ -691,7 +691,7 @@ describe('the network is data', () => {
       code: 'SIG', name: 'San Ignacio Depot', type: 'WAREHOUSE', district: 'CAYO', city: 'San Ignacio', modes: ['LAND'],
     });
     await post(admin, 'admin/logistics/routes', {
-      originHubId: created.body.id, destinationHubId: hub.MUN, mode: 'LAND', durationMinutes: 120, priceMinor: 3000,
+      originHubId: created.body.id, destinationHubId: hub.MUN, mode: 'LAND', durationMinutes: 120, priceMinor: 3000, carrierName: 'Belize Road Freight',
     });
 
     const after = await post(customer, 'shipping/quote', {
@@ -704,7 +704,7 @@ describe('the network is data', () => {
 
   it('refuses a route a terminal cannot physically service', async () => {
     const r = await post(admin, 'admin/logistics/routes', {
-      originHubId: hub.PLA, destinationHubId: hub.MUN, mode: 'SEA', durationMinutes: 200, priceMinor: 4000,
+      originHubId: hub.PLA, destinationHubId: hub.MUN, mode: 'SEA', durationMinutes: 200, priceMinor: 4000, carrierName: 'Tropic Air',
     });
     expect(r.status).toBe(400);
     expect(r.body.message).toContain('does not handle sea');

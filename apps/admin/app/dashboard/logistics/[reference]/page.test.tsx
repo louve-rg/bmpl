@@ -99,15 +99,22 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function stubFetch(adminPermissions: string[]) {
+  const posts: Array<{ url: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
       if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, SHIPMENT);
+      if (url.includes('/api/admin/logistics/providers')) return jsonResponse(200, []);
+      if ((init?.method ?? 'GET') === 'POST' && url.includes('/api/admin/logistics/legs/')) {
+        posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(200, SHIPMENT);
+      }
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
+  return posts;
 }
 
 async function mount() {
@@ -160,6 +167,54 @@ describe('ShipmentOpsPage — write affordances gated on logistics.operate (BMPL
     expect(texts).toContain('Record collection');
     expect(texts).toContain('Mark departed');
     expect(document.body.textContent).toMatch(/Report a problem with this leg/);
+  });
+});
+
+/**
+ * TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 2: departLeg accepts
+ * carrierName/carrierBookingRef, mirroring the carrier-provider portal's own
+ * depart form, but this screen used to post an empty body regardless of what
+ * an operator typed. Mark departed must now send whatever was entered.
+ */
+describe('ShipmentOpsPage — Mark departed can name a carrier (TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG)', () => {
+  it('posts the typed carrier name and booking reference on depart', async () => {
+    const posts = stubFetch(['logistics.operate']);
+    await mount();
+
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const carrierInput = document.body.querySelector<HTMLInputElement>('#leg_1-depart-carrier')!;
+    await act(async () => {
+      nativeInputValueSetter.call(carrierInput, 'Tropic Air');
+      carrierInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const refInput = document.body.querySelector<HTMLInputElement>('#leg_1-depart-ref')!;
+    await act(async () => {
+      nativeInputValueSetter.call(refInput, 'TA-4471');
+      refInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const departButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Mark departed')!;
+    await act(async () => {
+      departButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const departPost = posts.find((p) => p.url.endsWith('/legs/leg_1/depart'));
+    expect(departPost?.body).toEqual({ carrierName: 'Tropic Air', carrierBookingRef: 'TA-4471' });
+  });
+
+  it('omits both fields rather than sending blanks when nothing was typed', async () => {
+    const posts = stubFetch(['logistics.operate']);
+    await mount();
+
+    const departButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Mark departed')!;
+    await act(async () => {
+      departButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const departPost = posts.find((p) => p.url.endsWith('/legs/leg_1/depart'));
+    expect(departPost?.body).toEqual({});
   });
 });
 

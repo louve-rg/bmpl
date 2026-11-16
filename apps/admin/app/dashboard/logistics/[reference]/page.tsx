@@ -186,6 +186,11 @@ export default function ShipmentOpsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<Record<string, { pin: string; who: string }>>({});
   const [schedule, setSchedule] = useState<Record<string, { departure: string; arrival: string }>>({});
+  // TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 2: mirrors
+  // apps/web/components/shipping-provider/LegsManager.tsx's own depart
+  // form — legDepartSchema has always accepted carrierName/carrierBookingRef
+  // on depart; this screen is the one that never offered the input.
+  const [departForm, setDepartForm] = useState<Record<string, { carrierName: string; carrierBookingRef: string }>>({});
   const [canOperate, setCanOperate] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -508,6 +513,7 @@ export default function ShipmentOpsPage() {
               {s.legs.map((leg) => {
                 const c = controlsFor(leg);
                 const h = handoff[leg.id] ?? { pin: '', who: '' };
+                const d = departForm[leg.id] ?? { carrierName: '', carrierBookingRef: '' };
                 return (
                   <li key={leg.id} className="rounded-bmpl-md border border-[color:var(--bmpl-border)] p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -576,9 +582,37 @@ export default function ShipmentOpsPage() {
 
                     {canOperate && (c.depart || c.arrive || c.handoff) && (
                       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+                        {c.depart && (
+                          <div className="mb-2 flex flex-wrap items-end gap-2">
+                            <Field label="Carrier name" htmlFor={`${leg.id}-depart-carrier`} hint="Optional — only needed if none is on record already.">
+                              <Input
+                                id={`${leg.id}-depart-carrier`}
+                                value={d.carrierName}
+                                onChange={(e) => setDepartForm({ ...departForm, [leg.id]: { ...d, carrierName: e.target.value } })}
+                                placeholder="Tropic Air"
+                              />
+                            </Field>
+                            <Field label="Booking reference" htmlFor={`${leg.id}-depart-ref`} hint="Optional">
+                              <Input
+                                id={`${leg.id}-depart-ref`}
+                                value={d.carrierBookingRef}
+                                onChange={(e) => setDepartForm({ ...departForm, [leg.id]: { ...d, carrierBookingRef: e.target.value } })}
+                              />
+                            </Field>
+                          </div>
+                        )}
                         <div className="flex flex-wrap gap-2">
                           {c.depart && (
-                            <Button variant="outline" disabled={busy != null} onClick={() => void act(leg.id, 'depart')}>
+                            <Button
+                              variant="outline"
+                              disabled={busy != null}
+                              onClick={() =>
+                                void act(leg.id, 'depart', {
+                                  carrierName: d.carrierName.trim() || undefined,
+                                  carrierBookingRef: d.carrierBookingRef.trim() || undefined,
+                                })
+                              }
+                            >
                               Mark departed
                             </Button>
                           )}
