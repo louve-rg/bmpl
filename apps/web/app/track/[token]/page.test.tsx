@@ -38,6 +38,7 @@ const view: RecipientTrackingView = {
   deliveredAt: null,
   destination: { city: 'Belize City', district: 'Belize' },
   collectionHub: null,
+  deliveryCodeEligible: false,
   steps: [],
 };
 

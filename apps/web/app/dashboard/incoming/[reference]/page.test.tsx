@@ -39,6 +39,7 @@ const view: LinkedRecipientTrackingView = {
   deliveredAt: null,
   destination: { city: 'Belize City', district: 'Belize' },
   collectionHub: null,
+  deliveryCodeEligible: false,
   steps: [],
 };
 

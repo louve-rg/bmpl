@@ -40,6 +40,7 @@ function baseView(overrides: Partial<RecipientTrackingView> = {}): RecipientTrac
     deliveredAt: null,
     destination: { city: 'San Pedro', district: 'BELIZE' },
     collectionHub: null,
+    deliveryCodeEligible: false,
     steps: [baseStep()],
     eta: { confidence: 'UNKNOWN', estimatedArrivalAt: null },
     ...overrides,
