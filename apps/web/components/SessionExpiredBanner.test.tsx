@@ -61,7 +61,7 @@ describe('SessionExpiredBanner', () => {
     expect(el.textContent).toBe('');
   });
 
-  it('shows the sign-in prompt, with the typed-work reassurance, once a real 401 survives the silent refresh', async () => {
+  it('shows the sign-in prompt, with the typed-work reassurance and a new-tab sign-in link, once a real 401 survives the silent refresh', async () => {
     const el = await mount();
     stubExpiredSession();
 
@@ -70,9 +70,12 @@ describe('SessionExpiredBanner', () => {
     });
 
     expect(el.textContent).toContain('Your session expired');
-    expect(el.textContent).toContain('anything you’ve typed on this page is still here');
-    expect(el.querySelector('#session-expired-email')).not.toBeNull();
-    expect(el.querySelector('#session-expired-password')).not.toBeNull();
+    expect(el.textContent).toContain('Nothing on this page has been lost');
+    const link = el.querySelector('a') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/login');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
   it('never navigates away -- the location stays put throughout', async () => {
@@ -84,80 +87,5 @@ describe('SessionExpiredBanner', () => {
     });
     expect(el.textContent).toContain('Your session expired');
     expect(window.location.pathname).toBe(before);
-  });
-
-  it('signs back in in place, replacing the prompt with a success state', async () => {
-    const el = await mount();
-    stubExpiredSession();
-    await act(async () => {
-      await api.get('/orders').catch(() => {});
-    });
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith('/auth/login')) return jsonResponse(200, { ok: true });
-        return jsonResponse(404, { message: 'not mocked: ' + url });
-      }),
-    );
-
-    const emailInput = el.querySelector('#session-expired-email') as HTMLInputElement;
-    const passwordInput = el.querySelector('#session-expired-password') as HTMLInputElement;
-    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setValue.call(emailInput, 'shopper@example.com');
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-      setValue.call(passwordInput, 'correct-password');
-      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    const form = el.querySelector('form')!;
-    await act(async () => {
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(el.textContent).toContain('Signed in again');
-    expect(el.textContent).toContain('Nothing on this page was lost');
-  });
-
-  it('shows the login failure inline and keeps the prompt open on wrong credentials', async () => {
-    const el = await mount();
-    stubExpiredSession();
-    await act(async () => {
-      await api.get('/orders').catch(() => {});
-    });
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith('/auth/login')) return jsonResponse(401, { message: 'Invalid email or password.' });
-        return jsonResponse(404, { message: 'not mocked: ' + url });
-      }),
-    );
-
-    const emailInput = el.querySelector('#session-expired-email') as HTMLInputElement;
-    const passwordInput = el.querySelector('#session-expired-password') as HTMLInputElement;
-    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setValue.call(emailInput, 'shopper@example.com');
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-      setValue.call(passwordInput, 'wrong');
-      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    const form = el.querySelector('form')!;
-    await act(async () => {
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(el.textContent).toContain('Invalid email or password.');
-    expect(el.textContent).toContain('Your session expired');
-    expect(el.textContent).not.toContain('Signed in again');
   });
 });
