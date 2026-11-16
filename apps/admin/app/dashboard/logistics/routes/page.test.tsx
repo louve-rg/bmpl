@@ -324,6 +324,60 @@ describe('RoutesPage — the form says why it will not proceed (ADMIN-ROUTE-FORM
     expect(fromOptions).toEqual(['Choose…']);
   });
 
+  it('says nothing about hub coverage while the hubs fetch is still in flight — hubs is empty then too, but that is not the same as "none for this mode"', async () => {
+    let resolveHubs!: (res: Response) => void;
+    const pendingHubs = new Promise<Response>((resolve) => {
+      resolveHubs = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/admin/logistics/hubs')) return pendingHubs;
+        if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, []);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.manage'] });
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RoutesPage />);
+    });
+
+    // The default mode (Flight/AIR) has no hub yet either — `hubs` is still
+    // `[]` because the fetch has not resolved — but the form must not claim
+    // that as a fact about coverage while it's still finding out.
+    expect(document.body.textContent).not.toMatch(/No hubs serve this mode yet/);
+
+    await act(async () => {
+      resolveHubs(jsonResponse(200, []));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Now the load has genuinely finished with no hub for this mode.
+    expect(document.body.textContent).toMatch(/No hubs serve this mode yet/);
+  });
+
+  it('does not claim no hub exists for this mode when the hub load fails — it reports the real error instead', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(500, { message: 'Could not reach the hub service.' });
+        if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, []);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.manage'] });
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/No hubs serve this mode yet/);
+    expect(document.body.textContent).toMatch(/Could not reach the hub service\./);
+  });
+
   it('says which fields are still missing while Add route stays disabled', async () => {
     stubFetch(['logistics.manage']);
     await mount();

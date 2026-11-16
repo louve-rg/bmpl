@@ -110,7 +110,14 @@ export default function RoutesPage() {
   // mode's hubs to compare against) has no way to tell those two apart
   // without this naming the cause. The hub-to-mode filtering itself is
   // unchanged; this only explains what it already does.
-  const noHubsForMode = usable.length === 0;
+  //
+  // `usable` derives from `hubs`, which starts as `[]` before the load
+  // resolves and STAYS `[]` if it fails — so the raw emptiness check alone
+  // would assert "no hubs serve this mode" while the fetch is still in
+  // flight, and keep asserting it forever if the fetch never succeeds. Gate
+  // on a load that actually finished without error: still loading or failed
+  // means we don't know, not that the hub is missing.
+  const noHubsForMode = !loading && !err && usable.length === 0;
 
   const missingFields: string[] = [];
   if (!form.originHubId) missingFields.push('From');
