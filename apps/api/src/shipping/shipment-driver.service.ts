@@ -249,6 +249,19 @@ export class ShipmentDriverService {
       throw new BadRequestException('The parcel has not reached this leg yet.');
     }
 
+    // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a leg whose
+    // origin is a hub is physically held BY that hub — only the terminal can
+    // hand it over, through `staffReleaseToCourier`'s own pin-verified
+    // release, never through the courier's own self-submit here. Checked on
+    // `originHub` (the physical fact: a terminal holds this parcel), not
+    // `leg.kind`, because that is what makes the parcel terminal-held, not
+    // the route-shape label — a leg that genuinely starts at a door
+    // (FIRST_MILE, DIRECT) never has one, so this cannot ever reject a
+    // legitimate door pickup.
+    if (leg.originHub != null) {
+      throw new BadRequestException('This parcel is held at a terminal. A staff member there must release it to you before you can confirm pickup.');
+    }
+
     // Structurally eligible for enforcement by kind + service alone — but a
     // row that predates this feature (migration-day grandfather, owner
     // ruling) is exempt even when structurally eligible: it has no pin and

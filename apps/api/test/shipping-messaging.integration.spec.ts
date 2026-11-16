@@ -149,7 +149,16 @@ async function flyLineHaul(legId: string) {
 
 async function driveLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) });
+  const kind = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true } })).kind;
+  if (kind === 'LAST_MILE') {
+    // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
+    // leg is terminal-held, so self-submit pickup is refused outright — only
+    // staff release (admin/logistics/legs/:id/release-to-courier) may move
+    // it to PICKUP_CONFIRMED.
+    await post(admin, `admin/logistics/legs/${legId}/release-to-courier`, { pin: await pickupPinFor(legId) });
+  } else {
+    await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) });
+  }
   await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`);
   await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`);
   const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {

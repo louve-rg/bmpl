@@ -578,6 +578,41 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
 });
 
 describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () => {
+  /**
+   * TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: the bypass
+   * this card closes. Before the fix, the courier's own self-submit
+   * `driver/shipping-jobs/:id/pickup` advanced this exact leg with no
+   * release from the terminal at all — proven here failing FIRST (the
+   * courier is refused), then the only legitimate path — staff release,
+   * same test 7 below already covers — succeeds on the identical leg.
+   */
+  it('6 · a courier cannot self-submit pickup on a LAST_MILE leg — only staff release at the terminal may move it', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+
+    const selfSubmit = await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`);
+    expect(selfSubmit.status).toBe(400);
+    const afterRefusal = await legRow(lastMile.id);
+    expect(afterRefusal.courierStatus).toBe('DRIVER_ACCEPTED');
+    expect(afterRefusal.pickedUpAt).toBeNull();
+
+    // The only legitimate path, on the SAME leg the self-submit above failed
+    // to move: staff release at the terminal, with the courier's own code.
+    const ops = await makeOperator(['logistics.operate']);
+    const code = (await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`)).body.code;
+    const released = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
+      pin: code,
+      presentedCourierUserId: lastCourier.userId,
+    });
+    expect(released.status).toBe(201);
+    const afterRelease = await legRow(lastMile.id);
+    expect(afterRelease.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(afterRelease.pickedUpAt).not.toBeNull();
+  });
+
   it('7 · staff release the leg with the courier\'s own self-revealed code — the gap confirmPickup never covered', async () => {
     const sender = await fundedSender();
     const firstCourier = await makeCourier('STANN_CREEK');

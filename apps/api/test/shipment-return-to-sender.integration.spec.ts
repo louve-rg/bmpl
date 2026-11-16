@@ -195,7 +195,10 @@ async function walkToLastMileException(reason?: string) {
   const last = (await legs(shipment.id)).find((l) => l.kind === 'LAST_MILE')!;
   expect((await assign(last.id, lastDriver)).status).toBe(201);
   expect((await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/accept`)).status).toBe(201);
-  expect((await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/pickup`, { pin: await pickupPinFor(last.id) })).status).toBe(201);
+  // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE leg
+  // is terminal-held, so self-submit pickup is refused outright — only staff
+  // release (admin/logistics/legs/:id/release-to-courier) may move it.
+  expect((await post(admin, `admin/logistics/legs/${last.id}/release-to-courier`, { pin: await pickupPinFor(last.id) })).status).toBe(201);
 
   expect((await flag(last.id, reason)).status).toBe(201);
   return { shipment, legId: last.id, driver: lastDriver };

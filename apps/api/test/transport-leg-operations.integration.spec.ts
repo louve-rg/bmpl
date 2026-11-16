@@ -737,7 +737,11 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect((await post(bumped.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(404);
     // The newly assigned courier proceeds with no special case.
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
-    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`, { pin: await pickupPinFor(lastMile.id) })).status).toBe(201);
+    // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
+    // leg is terminal-held, so self-submit pickup is refused outright — only
+    // staff release (admin/logistics/legs/:id/release-to-courier) may move
+    // it to PICKUP_CONFIRMED.
+    expect((await post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: await pickupPinFor(lastMile.id) })).status).toBe(201);
     expect(await custodyCount(s.id)).toBe(6); // hub -> courier
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/in-transit`)).status).toBe(201);
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/arriving`)).status).toBe(201);
