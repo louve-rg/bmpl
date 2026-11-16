@@ -76,7 +76,12 @@ export class AnalyticsService {
           _sum: { commissionMinor: true, platformFeeMinor: true, netMinor: true, grossMinor: true },
         }),
         this.prisma.orderItem.aggregate({ where: { vendorOrder: { order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
-        this.prisma.userRole.count({ where: { roleCode: 'VENDOR', status: 'APPROVED' } }),
+        // MDF-777 exclusion #3: same shape as approvedDrivers below —
+        // UserRole has no isTest of its own, `User.vendorProfile` is
+        // optional (same as `driverProfile`), so `isNot` keeps an approved
+        // vendor with no profile row yet in the count; only one positively
+        // confirmed isTest:true is excluded.
+        this.prisma.userRole.count({ where: { roleCode: 'VENDOR', status: 'APPROVED', user: { vendorProfile: { isNot: { isTest: true } } } } }),
         // MDF-777 exclusion #3: UserRole has no isTest of its own. Joined to
         // DriverProfile.isTest specifically (not the separate User.isTest) —
         // that is the exact flag DriverService's assignmentEligibility /

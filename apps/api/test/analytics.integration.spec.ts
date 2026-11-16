@@ -214,6 +214,29 @@ describe('admin platform analytics (analytics.read)', () => {
   });
 
   /**
+   * MDF-777 exclusion #3: same shape as approvedDrivers below —
+   * `approvedVendors` (analytics.service.ts:79) counted every APPROVED
+   * VENDOR UserRole with no isTest hop to `vendorProfile` at all. `User.
+   * vendorProfile` is optional (same as `driverProfile`), so the fix uses
+   * `isNot: { isTest: true }`, not `is: { isTest: false }` — an approved
+   * vendor with no profile row yet is never silently dropped from the
+   * count. Added to this PR per owner decision rather than a fourth PR for
+   * one join of the same class.
+   */
+  it('MDF-777 exclusion #3: approvedVendors excludes a simulation vendor and still includes a real one', async () => {
+    const before = await get(adminCookies, 'admin/analytics/overview');
+
+    const sim = await makeVendor();
+    expect((await patch(adminCookies, `admin/vendors/${sim.vendorProfileId}/test-mode`, { isTest: true, reason: 'MDF-777 analytics isolation test.' })).status).toBe(200);
+    const midSim = await get(adminCookies, 'admin/analytics/overview');
+    expect(midSim.body.approvedVendors - before.body.approvedVendors).toBe(0);
+
+    await makeVendor();
+    const after = await get(adminCookies, 'admin/analytics/overview');
+    expect(after.body.approvedVendors - before.body.approvedVendors).toBe(1);
+  });
+
+  /**
    * MDF-777 exclusion #3 (tenth-class read, closed alongside #761):
    * `approvedDrivers` (analytics.service.ts:80) counted every APPROVED
    * DELIVERY_DRIVER UserRole with no isTest filter at all. `UserRole` has no
