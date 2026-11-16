@@ -73,6 +73,36 @@ async function seedPaidOrder(v: { vendorProfileId: string; productId: string; pr
   return { total: Number(total), subtotal: Number(subtotal), commission: Number(commission), platform: Number(commission + platformFee), net: Number(subtotal - commission), qty };
 }
 
+/** Seed an order whose settlement is still PENDING (not yet posted) — exactly the state vendorOverview's own pendingSettlements counts. */
+async function seedPendingSettlementOrder(v: { vendorProfileId: string; productId: string; productTitle: string }, opts: { isTest?: boolean } = {}) {
+  const s = uniq();
+  const buyer = await register(`pend_${s}@example.bz`);
+  const subtotal = 1000n;
+  const delivery = 500n;
+  const total = subtotal + delivery;
+  const order = await ctx.prisma.order.create({
+    data: {
+      orderNumber: `ORDP-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: 1, subtotalMinor: subtotal, deliveryFeeMinor: delivery, totalMinor: total, isTest: opts.isTest ?? false,
+      vendorOrders: {
+        create: {
+          orderNumber: `ORDP-${s}-1`, vendorProfileId: v.vendorProfileId, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: subtotal, status: 'PICKED_UP', pickedUpAt: new Date(),
+          items: { create: { productId: v.productId, productTitle: v.productTitle, sku: `SKP-${s}`, unitPriceMinor: 1000n, quantity: 1, subtotalMinor: subtotal } },
+        },
+      },
+      payment: { create: { paymentNumber: `PAYP-${s}`, userId: buyer.userId, amountMinor: total, currency: 'BZD', status: 'SETTLED', authorizedAt: new Date() } },
+    },
+    include: { vendorOrders: true, payment: true },
+  });
+  const vo = order.vendorOrders[0]!;
+  await ctx.prisma.vendorSettlement.create({
+    data: {
+      vendorProfileId: v.vendorProfileId, vendorOrderId: vo.id, paymentId: order.payment!.id, currency: 'BZD',
+      merchandiseSubtotalMinor: subtotal, deliveryFeeMinor: delivery, commissionMinor: 100n, driverAllocationMinor: 400n,
+      platformFeeMinor: 100n, grossMinor: total, netMinor: 900n, status: 'PENDING', snapshot: {},
+    },
+  });
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -298,6 +328,21 @@ describe('vendor own-storefront analytics (ownership-scoped)', () => {
     const ov = await get(v.vendorCookies, 'vendor/analytics/overview');
     expect(ov.body.paidOrders).toBe(1);
     expect(ov.body.grossSalesMinor).toBe(real.subtotal);
+  });
+
+  /**
+   * MDF-777 exclusion #3: `vendorOverview`'s own `vendorSettlement.count`
+   * (`pendingSettlements`) had no isTest filter — a simulation order's own
+   * PENDING settlement would show up in a vendor's own count of real
+   * outstanding settlements. A brand-new vendor starts at absolute zero.
+   */
+  it('MDF-777 exclusion #3: a vendor\'s own pendingSettlements excludes a simulation order\'s pending settlement', async () => {
+    const v = await makeVendor();
+    await seedPendingSettlementOrder(v, { isTest: true });
+    await seedPendingSettlementOrder(v, { isTest: false });
+
+    const ov = await get(v.vendorCookies, 'vendor/analytics/overview');
+    expect(ov.body.pendingSettlements).toBe(1);
   });
 
   /**

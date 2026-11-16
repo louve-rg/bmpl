@@ -188,7 +188,9 @@ export class AnalyticsService {
         where: { vendorProfileId: vp, status: 'POSTED', vendorOrder: { order: NOT_TEST } },
         _sum: { netMinor: true, commissionMinor: true, grossMinor: true },
       }),
-      this.prisma.vendorSettlement.count({ where: { vendorProfileId: vp, status: 'PENDING' } }),
+      // MDF-777 exclusion #3: a simulation order's own pending settlement
+      // must not show up in a vendor's pendingSettlements count.
+      this.prisma.vendorSettlement.count({ where: { vendorProfileId: vp, status: 'PENDING', vendorOrder: { order: NOT_TEST } } }),
       this.prisma.product.count({ where: { vendorProfileId: vp, status: 'PUBLISHED' } }),
       this.prisma.vendorProfile.findUniqueOrThrow({ where: { id: vp }, select: { ratingAverage: true, ratingCount: true } }),
     ]);

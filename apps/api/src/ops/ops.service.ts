@@ -54,7 +54,12 @@ export class OpsService {
       this.prisma.roleApplication.count({ where: { status: 'MORE_INFO_REQUIRED' } }),
       this.prisma.reviewReport.count({ where: { status: 'OPEN' } }),
       this.prisma.conversation.count({ where: { contextType: 'SUPPORT_CASE', status: 'OPEN' } }),
-      this.prisma.vendorSettlement.count({ where: { status: 'FAILED' } }),
+      // MDF-777 exclusion #3: a simulation settlement/order must not inflate
+      // an action-queue tile an operator reads as real outstanding work.
+      // VendorSettlement/VendorOrder have no isTest of their own — one or
+      // two hops via vendorOrder(.order), same pattern analytics.service.ts
+      // and settlement.service.ts already use.
+      this.prisma.vendorSettlement.count({ where: { status: 'FAILED', vendorOrder: { order: { isTest: false } } } }),
       // BMPL-295: was `status: 'PENDING_ASSIGNMENT'` only, which silently
       // excluded a delivery a driver just declined. That is wrong by this
       // tile's OWN navigation, not by its label: this tile links straight to
@@ -69,8 +74,8 @@ export class OpsService {
       // having arrived — that is this fix taking effect, not a regression.
       // See waitingDeliveries below for a DIFFERENT question this tile does
       // not answer and was never meant to.
-      this.prisma.orderDelivery.count({ where: { status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] } } }),
-      this.prisma.vendorOrder.count({ where: { status: 'READY_FOR_PICKUP' } }),
+      this.prisma.orderDelivery.count({ where: { status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] }, vendorOrder: { order: { isTest: false } } } }),
+      this.prisma.vendorOrder.count({ where: { status: 'READY_FOR_PICKUP', order: { isTest: false } } }),
       this.prisma.user.count({ where: { status: 'SUSPENDED' } }),
       this.prisma.userRole.count({ where: { status: 'SUSPENDED' } }),
     ]);
