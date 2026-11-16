@@ -114,7 +114,14 @@ export default function RecipientTrackingPage() {
           <div className="mt-4">
             <RecipientTracking view={view} />
 
-            <UnlinkedDeliveryCode token={token} />
+            {/* TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: a shipment with no
+                LAST_MILE/DIRECT leg has no driver to hand a code off to —
+                `revealDeliveryCode` itself would return null for one.
+                `deliveryCodeEligible` is the same leg condition, true/false
+                at every status (unlike `collectionHub`, which stays null
+                until AWAITING_COLLECTION and would wrongly hide this card
+                through the whole in-transit window on a hub-to-hub parcel). */}
+            {view.deliveryCodeEligible && <UnlinkedDeliveryCode token={token} />}
 
             {/* MDF-710: only while the shipment is actually AWAITING_COLLECTION
                 at a terminal -- `collectionHub` is non-null for exactly that

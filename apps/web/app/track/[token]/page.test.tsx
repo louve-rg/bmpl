@@ -120,4 +120,78 @@ describe('anonymous /track/[token] page', () => {
 
     expect(container!.textContent).not.toContain('Get your collection code');
   });
+
+  /**
+   * TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: a hub-to-hub parcel has no
+   * LAST_MILE/DIRECT leg, so no driver will ever ask for a delivery code --
+   * `deliveryCodeEligible: false` says so at EVERY status, not only once
+   * AWAITING_COLLECTION. Gating on `collectionHub` alone (null for most of
+   * the journey) would have let the false "Your driver will ask" card
+   * survive through the whole in-transit window; these two cases are
+   * exactly that window and the one status after it.
+   */
+  it('shows only the collection card, never the driver delivery-code card, for a hub-to-hub parcel in transit', async () => {
+    trackPublic.mockResolvedValue({
+      ...view,
+      status: 'IN_TRANSIT',
+      statusLabel: 'In transit',
+      deliveryCodeEligible: false,
+      collectionHub: null,
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RecipientTrackingPage />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).not.toContain('Get your delivery code');
+    expect(container!.textContent).not.toContain('Your driver will ask');
+    // Nothing to collect yet either -- collectionHub is still null at this status.
+    expect(container!.textContent).not.toContain('Get your collection code');
+  });
+
+  it('shows only the collection card, never the driver delivery-code card, for the same hub-to-hub parcel once awaiting collection', async () => {
+    trackPublic.mockResolvedValue({
+      ...view,
+      status: 'AWAITING_COLLECTION',
+      statusLabel: 'Awaiting collection',
+      deliveryCodeEligible: false,
+      collectionHub: { name: 'Belize City Hub', city: 'Belize City', address: null, instructions: null },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RecipientTrackingPage />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).not.toContain('Get your delivery code');
+    expect(container!.textContent).not.toContain('Your driver will ask');
+    expect(container!.textContent).toContain('Get your collection code');
+  });
+
+  it('offers "Get your delivery code" for a door-to-door parcel with a real LAST_MILE leg', async () => {
+    trackPublic.mockResolvedValue({ ...view, deliveryCodeEligible: true });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RecipientTrackingPage />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).toContain('Get your delivery code');
+  });
 });
