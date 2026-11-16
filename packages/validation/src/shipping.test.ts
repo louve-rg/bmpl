@@ -9,6 +9,7 @@ import {
   shipmentListSchema,
   shipmentQuoteSchema,
   updateHubSchema,
+  updateRouteSchema,
 } from './shipping';
 
 describe('shipmentListSchema', () => {
@@ -120,7 +121,14 @@ describe('updateHubSchema', () => {
 });
 
 describe('createRouteSchema', () => {
-  const base = { originHubId: 'clh0000000000000000000000', destinationHubId: 'clh1111111111111111111111', mode: 'AIR', durationMinutes: 45, priceMinor: 8000 };
+  const base = {
+    originHubId: 'clh0000000000000000000000',
+    destinationHubId: 'clh1111111111111111111111',
+    mode: 'AIR',
+    durationMinutes: 45,
+    priceMinor: 8000,
+    carrierName: 'Tropic Air',
+  };
 
   it('refuses a route from a hub to itself', () => {
     // The planner would be free to loop through it at no cost.
@@ -130,6 +138,36 @@ describe('createRouteSchema', () => {
   it('accepts a free route but not a negative one', () => {
     expect(createRouteSchema.safeParse({ ...base, priceMinor: 0 }).success).toBe(true);
     expect(createRouteSchema.safeParse({ ...base, priceMinor: -1 }).success).toBe(false);
+  });
+
+  // TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG: a route with nobody named
+  // to operate it plans a leg that depart() then refuses outright, with no
+  // screen left afterward to name a carrier before the next attempt.
+  it('refuses a route with no carrier named — blank, whitespace-only, or omitted entirely', () => {
+    expect(createRouteSchema.safeParse({ ...base, carrierName: '' }).success).toBe(false);
+    expect(createRouteSchema.safeParse({ ...base, carrierName: '   ' }).success).toBe(false);
+    const { carrierName, ...withoutCarrier } = base;
+    expect(createRouteSchema.safeParse(withoutCarrier).success).toBe(false);
+  });
+
+  it('accepts a route once a real carrier is named', () => {
+    expect(createRouteSchema.safeParse(base).success).toBe(true);
+  });
+});
+
+describe('updateRouteSchema', () => {
+  it('can set just the carrier on a route that already exists, touching nothing else', () => {
+    const parsed = updateRouteSchema.parse({ carrierName: 'Tropic Air' });
+    expect(parsed.carrierName).toBe('Tropic Air');
+  });
+
+  it('still refuses a blank carrier name when one is given, even on an update', () => {
+    expect(updateRouteSchema.safeParse({ carrierName: '' }).success).toBe(false);
+  });
+
+  it('leaves carrierName untouched when an update does not mention it', () => {
+    const parsed = updateRouteSchema.parse({ isActive: false });
+    expect(parsed.carrierName).toBeUndefined();
   });
 });
 

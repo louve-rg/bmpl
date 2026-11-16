@@ -56,6 +56,10 @@ function stubFetch(adminPermissions: string[], opts: { hubs?: unknown[]; routes?
         posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
         return jsonResponse(201, { ...ROUTE, id: 'route_new' });
       }
+      if (url.includes('/api/admin/logistics/routes/') && method === 'PATCH') {
+        posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(200, { ...ROUTE });
+      }
       if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, opts.routes ?? [ROUTE]);
       if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, opts.hubs ?? [HUB]);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
@@ -198,6 +202,11 @@ describe('RoutesPage — simulation visibility (TERM-SIM-ROUTE-FORM-CREATES-REAL
       nativeInputValueSetter.call(priceInput, '80.00');
       priceInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    const carrierInput = document.body.querySelector<HTMLInputElement>('#route-carrier')!;
+    await act(async () => {
+      nativeInputValueSetter.call(carrierInput, 'Tropic Air');
+      carrierInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     const checkbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     await act(async () => {
       checkbox.click();
@@ -236,5 +245,97 @@ describe('RoutesPage — simulation visibility (TERM-SIM-ROUTE-FORM-CREATES-REAL
 
     const routeRow = Array.from(document.body.querySelectorAll('.p-4')).find((el) => el.textContent?.includes('Tropic Air'));
     expect(routeRow?.textContent).not.toContain('Simulation');
+  });
+});
+
+describe('RoutesPage — Carrier is required (TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG)', () => {
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+  const setInput = async (el: HTMLInputElement, value: string) => {
+    await act(async () => {
+      nativeInputValueSetter.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  it('keeps Add route disabled until origin, destination, price AND carrier are all filled', async () => {
+    const HUB_2 = { id: 'hub_2', code: 'BZE', name: 'Belize City Airstrip', modes: ['AIR'], isActive: true };
+    const posts = stubFetch(['logistics.manage'], { hubs: [HUB, HUB_2] });
+    await mount();
+
+    const addButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Add route')! as HTMLButtonElement;
+    expect(addButton.disabled).toBe(true);
+
+    const fromSelect = document.body.querySelector<HTMLSelectElement>('#route-from')!;
+    const toSelect = document.body.querySelector<HTMLSelectElement>('#route-to')!;
+    await act(async () => {
+      fromSelect.value = 'hub_1';
+      fromSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      toSelect.value = 'hub_2';
+      toSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await setInput(document.body.querySelector<HTMLInputElement>('#route-price')!, '80.00');
+    // Still disabled with no carrier named, even though every other required field is filled.
+    expect(addButton.disabled).toBe(true);
+
+    await setInput(document.body.querySelector<HTMLInputElement>('#route-carrier')!, '   ');
+    // Whitespace-only does not count as named.
+    expect(addButton.disabled).toBe(true);
+
+    await setInput(document.body.querySelector<HTMLInputElement>('#route-carrier')!, 'Tropic Air');
+    expect(addButton.disabled).toBe(false);
+
+    await act(async () => {
+      addButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const createPost = posts.find((p) => p.url.includes('/api/admin/logistics/routes'));
+    expect(createPost?.body).toMatchObject({ carrierName: 'Tropic Air' });
+  });
+
+  it('marks the Carrier input required', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+    const carrierInput = document.body.querySelector<HTMLInputElement>('#route-carrier')!;
+    expect(carrierInput.required).toBe(true);
+  });
+});
+
+describe('RoutesPage — an already-blank route is recoverable (TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 3)', () => {
+  const BLANK = { ...ROUTE, id: 'route_blank', carrierName: null };
+
+  it('a logistics.read-only reader never sees the Edit carrier control', async () => {
+    stubFetch(['logistics.read'], { routes: [BLANK] });
+    await mount();
+    expect(buttonTexts()).not.toContain('Edit carrier');
+  });
+
+  it('a logistics.manage operator can name a carrier on a route that has none, by PATCHing the existing route', async () => {
+    const posts = stubFetch(['logistics.manage'], { routes: [BLANK] });
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Carrier not named/);
+
+    const editButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Edit carrier')!;
+    await act(async () => {
+      editButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const carrierInput = document.body.querySelector<HTMLInputElement>(`#route-carrier-edit-${BLANK.id}`)!;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeInputValueSetter.call(carrierInput, 'Belize Road Freight');
+      carrierInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Save carrier')!;
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const patchPost = posts.find((p) => p.url.includes(`/api/admin/logistics/routes/${BLANK.id}`));
+    expect(patchPost?.body).toMatchObject({ carrierName: 'Belize Road Freight' });
   });
 });

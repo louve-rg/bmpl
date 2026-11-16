@@ -59,6 +59,13 @@ export default function RoutesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [scheduleFor, setScheduleFor] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
+  // TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 3: the one place a
+  // route already saved with no carrier (or the wrong one) can be fixed.
+  // `updateRouteSchema` has accepted a partial carrierName since it was
+  // written; no screen ever called it for this field until now.
+  const [editCarrierFor, setEditCarrierFor] = useState<string | null>(null);
+  const [carrierEdit, setCarrierEdit] = useState<Record<string, string>>({});
+  const [savingCarrier, setSavingCarrier] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +138,26 @@ export default function RoutesPage() {
     }
   }
 
+  async function saveCarrier(route: Route) {
+    const value = (carrierEdit[route.id] ?? route.carrierName ?? '').trim();
+    if (!value) {
+      setErr('Name the carrier operating this route.');
+      return;
+    }
+    setSavingCarrier(true);
+    setErr(null);
+    try {
+      await api.patch(`/admin/logistics/routes/${route.id}`, { carrierName: value });
+      setEditCarrierFor(null);
+      await load();
+    } catch (e) {
+      const a = e as ApiError;
+      setErr(a.errors?.[0]?.message ?? a.message ?? 'Could not update the carrier.');
+    } finally {
+      setSavingCarrier(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -174,8 +201,8 @@ export default function RoutesPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Carrier" htmlFor="route-carrier" hint="Who actually operates it.">
-            <Input id="route-carrier" value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
+          <Field label="Carrier" htmlFor="route-carrier" hint="Required — the carrier named here is who moves parcels along this route.">
+            <Input id="route-carrier" required value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
           </Field>
           <Field label="Carrier phone" htmlFor="route-carrier-phone">
             <Input id="route-carrier-phone" value={form.carrierPhone} onChange={(e) => setForm({ ...form, carrierPhone: e.target.value })} />
@@ -196,7 +223,7 @@ export default function RoutesPage() {
         </label>
         <Button
           onClick={create}
-          disabled={saving || !form.originHubId || !form.destinationHubId || !form.price}
+          disabled={saving || !form.originHubId || !form.destinationHubId || !form.price || !form.carrierName.trim()}
           className="mt-3"
         >
           {saving ? 'Adding…' : 'Add route'}
@@ -233,12 +260,38 @@ export default function RoutesPage() {
                     {scheduleFor === r.id ? 'Hide schedule' : 'Schedule'}
                   </Button>
                   {canManage && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setCarrierEdit({ ...carrierEdit, [r.id]: carrierEdit[r.id] ?? r.carrierName ?? '' });
+                        setEditCarrierFor(editCarrierFor === r.id ? null : r.id);
+                      }}
+                    >
+                      {editCarrierFor === r.id ? 'Cancel' : 'Edit carrier'}
+                    </Button>
+                  )}
+                  {canManage && (
                     <Button variant="outline" onClick={() => void toggle(r)}>
                       {r.isActive ? 'Suspend' : 'Resume'}
                     </Button>
                   )}
                 </div>
               </div>
+              {editCarrierFor === r.id && (
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+                  <Field label="Carrier" htmlFor={`route-carrier-edit-${r.id}`} hint="Required — the carrier named here is who moves parcels along this route.">
+                    <Input
+                      id={`route-carrier-edit-${r.id}`}
+                      required
+                      value={carrierEdit[r.id] ?? ''}
+                      onChange={(e) => setCarrierEdit({ ...carrierEdit, [r.id]: e.target.value })}
+                    />
+                  </Field>
+                  <Button disabled={savingCarrier || !(carrierEdit[r.id] ?? '').trim()} onClick={() => void saveCarrier(r)}>
+                    {savingCarrier ? 'Saving…' : 'Save carrier'}
+                  </Button>
+                </div>
+              )}
               {scheduleFor === r.id && <RouteScheduleEditor routeId={r.id} canManage={canManage} />}
             </Card>
           ))}
