@@ -68,7 +68,7 @@ flowchart TB
    ever talks to its **own** origin; `/api/*` is proxied server-side to the API,
    so auth cookies stay **first-party** and HttpOnly (never exposed to JS).
 2. **Browser/mobile → API.** Two transports, one identity:
-   - Web/admin: HttpOnly, Secure, SameSite cookies (access 15 min; refresh 30 d,
+   - Web/admin: HttpOnly, Secure, SameSite cookies (access 2h; refresh 30 d,
      path-scoped to `/api/auth`). CSRF via Origin allow-list + double-submit token.
    - Mobile: `Authorization: Bearer` from `expo-secure-store` (Keychain/Keystore);
      exempt from browser CSRF by design.
