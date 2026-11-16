@@ -216,6 +216,14 @@ describe('ShipmentOpsPage — Mark departed can name a carrier (TERM-ROUTE-BLANK
     const departPost = posts.find((p) => p.url.endsWith('/legs/leg_1/depart'));
     expect(departPost?.body).toEqual({});
   });
+
+  it('does not place a real operator name in the Carrier name placeholder (ADMIN-ROUTE-FORM-HIDES-ITS-HUBS-AND-NEVER-SAYS-WHY)', async () => {
+    stubFetch(['logistics.operate']);
+    await mount();
+
+    const carrierInput = document.body.querySelector<HTMLInputElement>('#leg_1-depart-carrier')!;
+    expect(carrierInput.placeholder).not.toMatch(/Tropic Air/);
+  });
 });
 
 /**

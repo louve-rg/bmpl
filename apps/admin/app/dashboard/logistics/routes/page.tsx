@@ -103,6 +103,20 @@ export default function RoutesPage() {
   // Only offer terminals that can physically handle the chosen mode. The API
   // enforces this too — this just stops the operator discovering it via an error.
   const usable = hubs.filter((h) => h.modes.includes(form.mode));
+  // ADMIN-ROUTE-FORM-HIDES-ITS-HUBS-AND-NEVER-SAYS-WHY part 1: with no hub
+  // for the selected mode, From/To fall back to an empty "Choose…" list that
+  // reads exactly like "no hubs exist" — indistinguishable from production's
+  // actual empty hub network. An operator hand-building a route (no other
+  // mode's hubs to compare against) has no way to tell those two apart
+  // without this naming the cause. The hub-to-mode filtering itself is
+  // unchanged; this only explains what it already does.
+  const noHubsForMode = usable.length === 0;
+
+  const missingFields: string[] = [];
+  if (!form.originHubId) missingFields.push('From');
+  if (!form.destinationHubId) missingFields.push('To');
+  if (!form.carrierName.trim()) missingFields.push('Carrier');
+  if (!form.price) missingFields.push('Price');
 
   async function create() {
     setSaving(true);
@@ -185,7 +199,11 @@ export default function RoutesPage() {
               <option value="SEA">Boat</option>
             </Select>
           </Field>
-          <Field label="From" htmlFor="route-from">
+          <Field
+            label="From *"
+            htmlFor="route-from"
+            hint={noHubsForMode ? 'No hubs serve this mode yet — switch Mode, or add a hub for it.' : undefined}
+          >
             <Select id="route-from" value={form.originHubId} onChange={(e) => setForm({ ...form, originHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.map((h) => (
@@ -193,7 +211,11 @@ export default function RoutesPage() {
               ))}
             </Select>
           </Field>
-          <Field label="To" htmlFor="route-to">
+          <Field
+            label="To *"
+            htmlFor="route-to"
+            hint={noHubsForMode ? 'No hubs serve this mode yet — switch Mode, or add a hub for it.' : undefined}
+          >
             <Select id="route-to" value={form.destinationHubId} onChange={(e) => setForm({ ...form, destinationHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.filter((h) => h.id !== form.originHubId).map((h) => (
@@ -201,8 +223,8 @@ export default function RoutesPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Carrier" htmlFor="route-carrier" hint="Required — the carrier named here is who moves parcels along this route.">
-            <Input id="route-carrier" required value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
+          <Field label="Carrier *" htmlFor="route-carrier" hint="Required — the carrier named here is who moves parcels along this route.">
+            <Input id="route-carrier" required value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Enter the carrier's name" />
           </Field>
           <Field label="Carrier phone" htmlFor="route-carrier-phone">
             <Input id="route-carrier-phone" value={form.carrierPhone} onChange={(e) => setForm({ ...form, carrierPhone: e.target.value })} />
@@ -210,7 +232,7 @@ export default function RoutesPage() {
           <Field label="Duration (minutes)" htmlFor="route-duration">
             <Input id="route-duration" value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} inputMode="numeric" />
           </Field>
-          <Field label="Price (BZ$)" htmlFor="route-price">
+          <Field label="Price (BZ$) *" htmlFor="route-price">
             <Input id="route-price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} inputMode="decimal" placeholder="80.00" />
           </Field>
           <Field label="Schedule note" htmlFor="route-schedule" hint="Free text. The planner reports it; it does not parse it.">
@@ -223,11 +245,14 @@ export default function RoutesPage() {
         </label>
         <Button
           onClick={create}
-          disabled={saving || !form.originHubId || !form.destinationHubId || !form.price || !form.carrierName.trim()}
+          disabled={saving || missingFields.length > 0}
           className="mt-3"
         >
           {saving ? 'Adding…' : 'Add route'}
         </Button>
+        {!saving && missingFields.length > 0 && (
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">Still needed: {missingFields.join(', ')}.</p>
+        )}
       </Card>
       )}
 
