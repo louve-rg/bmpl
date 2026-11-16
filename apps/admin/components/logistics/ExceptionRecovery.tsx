@@ -105,8 +105,8 @@ export function ExceptionRecovery({
 
       <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
         {resolution === 'RESUME'
-          ? 'The leg continues from where it stood. If the exception was a PIN lockout, the attempt counter is cleared.'
-          : 'Only possible while the parcel has not yet been collected — the leg goes back to the dispatch pool.'}
+          ? 'One more step: add a note below, then confirm. The leg continues from where it stood; if the exception was a PIN lockout, the attempt counter is cleared.'
+          : 'One more step: add a note below, then confirm. Only possible while the parcel has not yet been collected — the leg goes back to the dispatch pool.'}
       </p>
 
       <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor={`recovery-note-${legId}`}>
@@ -119,6 +119,15 @@ export function ExceptionRecovery({
         onChange={(e) => setNote(e.target.value)}
         placeholder="What was done to resolve this?"
         className="mt-1"
+        // TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: "Resume" is
+        // step one -- it only opens this panel, which looked enough like
+        // the rest of the page's neutral cards that a careful tester
+        // scripted against the page's text missed that anything had
+        // changed. Moving focus here the instant the panel opens is a
+        // second, independent signal (visible caret, screen-reader
+        // announcement of the Note label) that something opened and needs
+        // a further action -- not relying on the copy above alone.
+        autoFocus
       />
 
       {/* TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: the same

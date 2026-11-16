@@ -542,6 +542,24 @@ export default function ShipmentOpsPage() {
                         {leg.exceptionReason && (
                           <p className="mt-1 break-words text-xs font-medium text-[color:var(--bmpl-warning)]">{leg.exceptionReason}</p>
                         )}
+                        {/* TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK:
+                            the reason above names what went wrong but never
+                            where to act on it -- Stanley's own finding. Points
+                            at the recovery controls this leg already renders
+                            below, under the exact condition that gates them
+                            (and the exact leg-kind check ExceptionRecovery
+                            itself uses for "release the driver" -- a
+                            transport leg is worked by a carrier, not a
+                            driver, so never claiming that option exists for
+                            one), so this sentence is never shown when there
+                            is nothing below it to point at. */}
+                        {leg.exceptionReason && canOperate && leg.status === 'EXCEPTION' && s.status !== 'RETURNED' && (
+                          <p className="mt-1 break-words text-xs text-[color:var(--bmpl-text-muted)]">
+                            {leg.kind === 'LINE_HAUL'
+                              ? 'Resume it, or return/reroute it, below.'
+                              : 'Resume it, release the driver, or return/reroute it, below.'}
+                          </p>
+                        )}
                         {leg.pickupPhotoUrls && leg.pickupPhotoUrls.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-2">
                             {leg.pickupPhotoUrls.map((url, i) => (

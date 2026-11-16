@@ -82,6 +82,23 @@ describe('ExceptionRecovery — both resolutions reachable', () => {
     expect(findButton(el, 'Release driver')).toBeFalsy();
   });
 
+  /**
+   * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: "Resume" is step
+   * one — it only opens this panel. Stanley's script clicked it, saw no
+   * visible change in the page's own text, and concluded Resume did
+   * nothing. Moving focus into the note field the instant the panel opens
+   * is a signal independent of the panel's own copy (a visible caret, a
+   * screen reader announcing the Note label) that something opened and a
+   * further action is needed.
+   */
+  it('moves focus into the note field the instant Resume opens the panel, and says a further step is needed', async () => {
+    const el = mount();
+    await clickAndFlush(findButton(el, 'Resume')!);
+
+    expect(document.activeElement).toBe(el.querySelector('textarea'));
+    expect(el.textContent).toContain('One more step');
+  });
+
   it('RESUME calls resolve-exception with the resolution and note, then reports success and reloads', async () => {
     const el = mount();
     await clickAndFlush(findButton(el, 'Resume')!);
