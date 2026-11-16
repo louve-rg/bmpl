@@ -279,7 +279,7 @@ export default function RoutesPage() {
               </div>
               {editCarrierFor === r.id && (
                 <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[color:var(--bmpl-border-soft)] pt-3">
-                  <Field label="Carrier" htmlFor={`route-carrier-edit-${r.id}`} hint="Required — a blank carrier strands this route's next departure.">
+                  <Field label="Carrier" htmlFor={`route-carrier-edit-${r.id}`} hint="Required — the carrier named here is who moves parcels along this route.">
                     <Input
                       id={`route-carrier-edit-${r.id}`}
                       required
