@@ -21,6 +21,21 @@ function withFieldErrors(raw: string, errors: Array<{ path: string; message: str
   return `${raw}: ${errors.map((e) => (e.path ? `${e.path} — ${e.message}` : e.message)).join('; ')}`;
 }
 
+type SessionExpiredListener = () => void;
+let sessionExpiredListener: SessionExpiredListener | null = null;
+
+/**
+ * SESSION-EXPIRY-MID-ACTION (god, 2026-11-16): the one place that notifies
+ * the console a session has genuinely died -- registered once, from the
+ * root layout, not per page, since the 401 this fires on can happen on any
+ * authenticated action anywhere. Fired only AFTER the silent refresh below
+ * has already been tried and failed, never on the first 401 -- by then
+ * re-authentication has actually been attempted, not just guessed at.
+ */
+export function onSessionExpired(listener: SessionExpiredListener | null) {
+  sessionExpiredListener = listener;
+}
+
 function readCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
@@ -59,6 +74,10 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   if (res.status === 401 && retry && path !== '/auth/refresh') {
     const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
     if (refreshed.ok) return request<T>(path, init, false);
+    // Refresh itself failed, not just the original call -- a real expiry, not
+    // a guess. Never for an `/auth/*` call itself (login/register/etc. 401
+    // for their own reasons; there was no session there to have expired).
+    if (!path.startsWith('/auth/')) sessionExpiredListener?.();
   }
 
   const text = await res.text();
