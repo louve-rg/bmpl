@@ -201,7 +201,7 @@ export default function RoutesPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Carrier" htmlFor="route-carrier" hint="Who actually operates it. Required — a route with nobody named strands its first leg at depart with no way to recover it.">
+          <Field label="Carrier" htmlFor="route-carrier" hint="Required — the carrier named here is who moves parcels along this route.">
             <Input id="route-carrier" required value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
           </Field>
           <Field label="Carrier phone" htmlFor="route-carrier-phone">
