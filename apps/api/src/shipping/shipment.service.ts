@@ -1030,7 +1030,7 @@ export class ShipmentService {
           // whether a value exists).
           collectionPin: this.genPin(),
           collectionPinGrandfathered: false,
-          legs: { create: plan.legs.map((l) => this.legData(l, payNow, routeOperators)) },
+          legs: { create: plan.legs.map((l) => this.legData(l, payNow || simulated, routeOperators)) },
         },
         include: SHIPMENT_INCLUDE,
       });
@@ -1113,15 +1113,20 @@ export class ShipmentService {
   /**
    * The first leg is immediately workable; the rest wait their turn.
    *
-   * Unless the shipment has not been paid for, in which case nothing is workable
-   * — a driver must never be sent for a parcel nobody has committed money to.
+   * Unless the shipment has not been paid for, in which case nothing is
+   * workable — a driver must never be sent for a parcel nobody has committed
+   * money to. The one exception is a SIMULATION shipment (the shipment's own
+   * `isTest`, never a request field): a rehearsal must never write a money
+   * row at all, so it cannot wait on payment either — its first leg is
+   * workable on booking, same as a paid one. A real shipment is unaffected:
+   * unpaid still means PENDING, exactly as before.
    */
-  private legData(l: PlannedLeg, paid: boolean, routeOperators?: Map<string, string | null>) {
+  private legData(l: PlannedLeg, workable: boolean, routeOperators?: Map<string, string | null>) {
     return {
       sequence: l.sequence,
       kind: l.kind,
       mode: l.mode,
-      status: (l.sequence === 1 && paid ? 'READY' : 'PENDING') as LegStatus,
+      status: (l.sequence === 1 && workable ? 'READY' : 'PENDING') as LegStatus,
       originHubId: l.originHubId,
       destinationHubId: l.destinationHubId,
       routeId: l.routeId,
