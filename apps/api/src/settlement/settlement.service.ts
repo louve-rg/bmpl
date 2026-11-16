@@ -581,7 +581,10 @@ export class SettlementService {
       pendingDriverLiabilityMinor: money(pendingDriver._sum.netMinor),
       globalLedgerNetMinor: money(globalNet),
       balanced: globalNet === 0n,
-      failedSettlements: await this.prisma.vendorSettlement.count({ where: { status: 'FAILED' } }),
+      // MDF-777 exclusion #3: the same one-hop filter every other figure in
+      // this method already uses — a simulation settlement must not count
+      // toward a real failure the admin console surfaces.
+      failedSettlements: await this.prisma.vendorSettlement.count({ where: { status: 'FAILED', vendorOrder: { order: { isTest: false } } } }),
     };
   }
 

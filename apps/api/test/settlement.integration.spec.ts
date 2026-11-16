@@ -516,6 +516,48 @@ describe('reads, permissions, reconciliation, fee config', () => {
     expect(after.body.pendingDriverLiabilityMinor - before.body.pendingDriverLiabilityMinor).toBe(real.driverEarningMinor);
   });
 
+  /**
+   * MDF-777 exclusion #3, a seventh unfiltered read found in the same
+   * sweep: `reconciliation()`'s own `failedSettlements` count had no
+   * isTest filter — a simulation settlement's FAILED row would inflate the
+   * figure the admin console surfaces as a real failure needing attention.
+   */
+  it('MDF-777 exclusion #3: failedSettlements excludes a simulation settlement, includes a real one', async () => {
+    const before = await get(adminCookies, 'admin/settlements/reconciliation');
+
+    const s = uniq();
+    const vendor = await makeVendor(s, 5000, 300);
+
+    async function failedOrder(isTest: boolean, tag: string) {
+      const buyer = await register(`fail_${tag}_${s}@example.bz`);
+      const order = await ctx.prisma.order.create({
+        data: {
+          orderNumber: `MDF777F-${tag}-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: 1,
+          subtotalMinor: 5000n, deliveryFeeMinor: 300n, totalMinor: 5300n, isTest,
+          vendorOrders: { create: { orderNumber: `MDF777F-${tag}-${s}-1`, vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 5000n, status: 'PICKED_UP', pickedUpAt: new Date() } },
+          payment: { create: { paymentNumber: `MDF777FPAY-${tag}-${s}`, userId: buyer.userId, amountMinor: 5300n, currency: 'BZD', status: 'AUTHORIZED', authorizedAt: new Date() } },
+        },
+        include: { vendorOrders: true, payment: true },
+      });
+      const vo = order.vendorOrders[0]!;
+      await ctx.prisma.vendorSettlement.create({
+        data: {
+          vendorProfileId: vendor.vendorProfileId, vendorOrderId: vo.id, paymentId: order.payment!.id, currency: 'BZD',
+          merchandiseSubtotalMinor: 5000n, deliveryFeeMinor: 300n, commissionMinor: 500n, driverAllocationMinor: 240n,
+          platformFeeMinor: 60n, grossMinor: 5300n, netMinor: 4500n, status: 'FAILED', failureReason: 'Fixture.', snapshot: {},
+        },
+      });
+    }
+
+    // The simulation row exists (proving genuine exclusion, not absence) —
+    // the delta below covers only the real contribution.
+    await failedOrder(true, 'sim');
+    await failedOrder(false, 'real');
+
+    const after = await get(adminCookies, 'admin/settlements/reconciliation');
+    expect(after.body.failedSettlements - before.body.failedSettlements).toBe(1);
+  });
+
   it('customer can read their own order settlement status', async () => {
     const o = await seedDelivered({ subtotal: 2000, deliveryFee: 100 });
     await settle(o.vendorOrderId).expect(201);

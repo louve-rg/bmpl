@@ -71,7 +71,7 @@ describe('operations overview (ops.read)', () => {
 
 describe('automatic dispatch status (BMPL-293)', () => {
   /** A marketplace delivery in exactly the state DispatchEngineService.sweepUndispatched acts on. */
-  async function waitingDelivery(deliveryStatus: 'PENDING_ASSIGNMENT' | 'DRIVER_DECLINED' = 'PENDING_ASSIGNMENT') {
+  async function waitingDelivery(deliveryStatus: 'PENDING_ASSIGNMENT' | 'DRIVER_DECLINED' = 'PENDING_ASSIGNMENT', opts: { isTest?: boolean } = {}) {
     const s = uniq();
     const cat = await ctx.prisma.category.create({ data: { name: `Cat ${s}`, slug: `cat-${s}`, isVisible: true } });
     const { userId: vendorUserId } = await register(`v293_${s}@example.bz`);
@@ -90,7 +90,7 @@ describe('automatic dispatch status (BMPL-293)', () => {
     const order = await ctx.prisma.order.create({
       data: {
         orderNumber: `ORD293-${s}`, userId: customerId, status: 'PENDING', itemCount: 1,
-        subtotalMinor: 1000n, deliveryFeeMinor: 500n, totalMinor: 1500n,
+        subtotalMinor: 1000n, deliveryFeeMinor: 500n, totalMinor: 1500n, isTest: opts.isTest ?? false,
         addresses: { create: { type: 'SHIPPING', fullName: 'Cust Omer', addressLine1: '5 Ave', city: 'Belize City', district: 'BELIZE' } },
         vendorOrders: {
           create: {
@@ -104,6 +104,42 @@ describe('automatic dispatch status (BMPL-293)', () => {
       include: { vendorOrders: { include: { delivery: true } } },
     });
     return order.vendorOrders[0]!.delivery!.id;
+  }
+
+  /** A POSTED-settlement-eligible order whose VendorSettlement is FAILED — exactly the state queues.failedSettlements counts. */
+  async function failedSettlementOrder(opts: { isTest?: boolean } = {}) {
+    const s = uniq();
+    const cat = await ctx.prisma.category.create({ data: { name: `CatFS ${s}`, slug: `catfs-${s}`, isVisible: true } });
+    const { userId: vendorUserId } = await register(`vfs_${s}@example.bz`);
+    const vp = await ctx.prisma.vendorProfile.create({
+      data: { userId: vendorUserId, businessName: `StoreFS ${s}`, slug: `storefs-${s}`, contactEmail: `vfs${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN' },
+    });
+    const product = await ctx.prisma.product.create({
+      data: { vendorProfileId: vp.id, categoryId: cat.id, title: `ProdFS ${s}`, slug: `prodfs-${s}`, sku: `SKUFS-${s}`, status: 'PUBLISHED', priceMinor: 1000n, currency: 'BZD' },
+    });
+    const { userId: customerId } = await register(`cfs_${s}@example.bz`);
+    const order = await ctx.prisma.order.create({
+      data: {
+        orderNumber: `ORDFS-${s}`, userId: customerId, status: 'PENDING', itemCount: 1,
+        subtotalMinor: 1000n, deliveryFeeMinor: 500n, totalMinor: 1500n, isTest: opts.isTest ?? false,
+        vendorOrders: {
+          create: {
+            orderNumber: `ORDFS-${s}-1`, vendorProfileId: vp.id, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n, status: 'PICKED_UP', pickedUpAt: new Date(),
+            items: { create: { productId: product.id, productTitle: 'ProdFS', unitPriceMinor: 1000n, quantity: 1, subtotalMinor: 1000n } },
+          },
+        },
+        payment: { create: { paymentNumber: `PAYFS-${s}`, userId: customerId, amountMinor: 1500n, currency: 'BZD', status: 'SETTLED', authorizedAt: new Date() } },
+      },
+      include: { vendorOrders: true, payment: true },
+    });
+    const vo = order.vendorOrders[0]!;
+    await ctx.prisma.vendorSettlement.create({
+      data: {
+        vendorProfileId: vp.id, vendorOrderId: vo.id, paymentId: order.payment!.id, currency: 'BZD',
+        merchandiseSubtotalMinor: 1000n, deliveryFeeMinor: 500n, commissionMinor: 100n, driverAllocationMinor: 400n,
+        platformFeeMinor: 100n, grossMinor: 1500n, netMinor: 900n, status: 'FAILED', failureReason: 'Fixture.', snapshot: {},
+      },
+    });
   }
 
   /** A shipment leg in exactly the state ShipmentDispatchService.sweepUndispatched acts on. */
@@ -185,6 +221,39 @@ describe('automatic dispatch status (BMPL-293)', () => {
     await waitingLeg();
     const afterReal = await get(adminCookies, 'admin/ops/overview');
     expect(afterReal.body.dispatch.waitingShipmentLegs).toBe(baseLegs + 1);
+  });
+
+  /**
+   * MDF-777 exclusion #3: three more unfiltered counts on the SAME ops
+   * overview page, found by a full sweep — failedSettlements and
+   * deliveriesPendingAssignment (2 hops via vendorOrder.order) and
+   * awaitingPickupCollection (1 hop via order). Same discipline as the
+   * waitingShipmentLegs exclusion above (MDF-777 exclusion #4): a
+   * simulation row must not inflate a tile an operator reads as real
+   * outstanding work.
+   */
+  it('excludes a simulation order from failedSettlements, deliveriesPendingAssignment and awaitingPickupCollection', async () => {
+    const before = await get(adminCookies, 'admin/ops/overview');
+    const baseFailed = before.body.queues.failedSettlements;
+    const basePending = before.body.queues.deliveriesPendingAssignment;
+    const baseAwaiting = before.body.queues.awaitingPickupCollection;
+
+    await failedSettlementOrder({ isTest: true });
+    await waitingDelivery('PENDING_ASSIGNMENT', { isTest: true });
+
+    const afterTest = await get(adminCookies, 'admin/ops/overview');
+    expect(afterTest.body.queues.failedSettlements).toBe(baseFailed);
+    expect(afterTest.body.queues.deliveriesPendingAssignment).toBe(basePending);
+    expect(afterTest.body.queues.awaitingPickupCollection).toBe(baseAwaiting);
+
+    // Real rows right after prove every count still works at all — this is
+    // an exclusion, not a count that silently stopped incrementing.
+    await failedSettlementOrder();
+    await waitingDelivery('PENDING_ASSIGNMENT');
+    const afterReal = await get(adminCookies, 'admin/ops/overview');
+    expect(afterReal.body.queues.failedSettlements).toBe(baseFailed + 1);
+    expect(afterReal.body.queues.deliveriesPendingAssignment).toBe(basePending + 1);
+    expect(afterReal.body.queues.awaitingPickupCollection).toBe(baseAwaiting + 1);
   });
 });
 
