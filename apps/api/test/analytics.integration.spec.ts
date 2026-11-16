@@ -169,6 +169,59 @@ describe('admin platform analytics (analytics.read)', () => {
     expect(ov.body.vendorNetMinor - before.body.vendorNetMinor).toBe(real.net);
   });
 
+  /**
+   * MDF-777 exclusion #3 (raw-SQL group, read #1 of 5): `adminSales` summed
+   * ALL payments via a raw query with NO join to orders at all — there was
+   * no hop to isTest in existence. Fixed by adding the join
+   * (payments."orderId" -> orders."isTest"), a structural change to the
+   * query rather than a WHERE-only addition like the other four reads in
+   * this group. Delta against today's bucket, same discipline as the first
+   * test in this file: a simulation order existing in the same window must
+   * not move it.
+   */
+  it('MDF-777 exclusion #3: adminSales (gross/orders time series) excludes a simulation order from today\'s bucket', async () => {
+    const salesBefore = await get(adminCookies, 'admin/analytics/sales?days=7');
+    const todayBefore = salesBefore.body.series[salesBefore.body.series.length - 1];
+
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const sales = await get(adminCookies, 'admin/analytics/sales?days=7');
+    const today = sales.body.series[sales.body.series.length - 1];
+    expect(today.orders - todayBefore.orders).toBe(1);
+    expect(today.grossMinor - todayBefore.grossMinor).toBe(real.total);
+  });
+
+  /**
+   * MDF-777 exclusion #3 (raw-SQL group, read #2 of 5): `adminTopProducts`
+   * already joined orders but never filtered on it. A fresh vendor/product
+   * pair isolates this test's own entry in a platform-wide ranking.
+   */
+  it('MDF-777 exclusion #3: adminTopProducts excludes a simulation order\'s units/revenue', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const topP = await get(adminCookies, 'admin/analytics/top-products');
+    const entry = topP.body.find((p: { productId: string }) => p.productId === v.productId);
+    expect(entry).toMatchObject({ productId: v.productId, unitsSold: real.qty, revenueMinor: real.subtotal });
+  });
+
+  /**
+   * MDF-777 exclusion #3 (raw-SQL group, read #3 of 5): `adminTopVendors`,
+   * same gap as adminTopProducts, same fresh-vendor isolation.
+   */
+  it('MDF-777 exclusion #3: adminTopVendors excludes a simulation order\'s revenue/order count', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const topV = await get(adminCookies, 'admin/analytics/top-vendors');
+    const entry = topV.body.find((x: { vendorProfileId: string }) => x.vendorProfileId === v.vendorProfileId);
+    expect(entry).toMatchObject({ vendorProfileId: v.vendorProfileId, orders: 1, revenueMinor: real.subtotal });
+  });
+
   it('gates analytics behind analytics.read (customer 403, guest 401, limited admin 403)', async () => {
     const cust = await register(`c_${uniq()}@example.bz`);
     expect((await get(cust.cookies, 'admin/analytics/overview')).status).toBe(403);
@@ -245,6 +298,36 @@ describe('vendor own-storefront analytics (ownership-scoped)', () => {
     const ov = await get(v.vendorCookies, 'vendor/analytics/overview');
     expect(ov.body.paidOrders).toBe(1);
     expect(ov.body.grossSalesMinor).toBe(real.subtotal);
+  });
+
+  /**
+   * MDF-777 exclusion #3 (raw-SQL group, read #4 of 5): `vendorSales`
+   * already joined orders but never filtered on it. Brand-new vendor starts
+   * at zero, so the simulation order's own contribution would show up
+   * directly if the filter were missing.
+   */
+  it('MDF-777 exclusion #3: vendorSales excludes a simulation order from today\'s bucket', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const sales = await get(v.vendorCookies, 'vendor/analytics/sales?days=7');
+    const today = sales.body.series[sales.body.series.length - 1];
+    expect(today.orders).toBe(1);
+    expect(today.grossMinor).toBe(real.subtotal);
+  });
+
+  /**
+   * MDF-777 exclusion #3 (raw-SQL group, read #5 of 5): `vendorTopProducts`,
+   * same gap, same brand-new-vendor isolation.
+   */
+  it('MDF-777 exclusion #3: vendorTopProducts excludes a simulation order\'s units/revenue', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const topP = await get(v.vendorCookies, 'vendor/analytics/top-products');
+    expect(topP.body[0]).toMatchObject({ productId: v.productId, unitsSold: real.qty, revenueMinor: real.subtotal });
   });
 
   it('rejects non-vendors from the vendor analytics surface', async () => {
