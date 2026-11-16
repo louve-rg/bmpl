@@ -657,6 +657,64 @@ describe('DriverShippingJobPage — the courier sees his own handoff code at a t
   });
 });
 
+/**
+ * MDF-717 follow-up (god/Stanley): the Release queue's own window
+ * (`kind: LAST_MILE, courierStatus: DRIVER_ACCEPTED`, shipment.service.ts:
+ * 5489) is when a courier collecting FROM a terminal needs to present his
+ * own pickup code — TERM-5's reveal already covers this leg kind, this
+ * screen just never asked for it here. These tests use a synthetic
+ * fixture code, never a value from a live system.
+ */
+describe('DriverShippingJobPage — the courier sees his own pickup code collecting from a terminal (MDF-717 follow-up)', () => {
+  const FIXTURE_CODE = 'TEST-CODE-0091';
+
+  it('fetches and shows the courier his own code on a LAST_MILE leg at DRIVER_ACCEPTED, with release-specific copy', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm pickup' })),
+    );
+    const el = await mount();
+
+    expect(apiGet).toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
+    expect(el.textContent).toContain('Present your code to terminal staff');
+    expect(el.textContent).toContain('Show this code to the terminal staff. They will enter it to release the parcel to you.');
+    expect(el.textContent).toContain(FIXTURE_CODE);
+    // The wrong-direction sentence must be gone for this exact case.
+    expect(el.textContent).not.toContain('Ask the sender for the collection code');
+  });
+
+  it('offers no code-entry field for this moment — the courier presents, he does not type', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm pickup' })),
+    );
+    const el = await mount();
+
+    expect(el.querySelector('#code')).toBeNull();
+    expect(el.querySelector('#who')).toBeNull();
+    expect(el.textContent).not.toContain('Collection code');
+    expect(el.textContent).not.toContain('Who took it');
+  });
+
+  it('does not fetch the courier code before DRIVER_ACCEPTED on a LAST_MILE leg — nothing to present yet', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'ASSIGNED', jobKind: 'LAST_MILE', nextActionLabel: 'Accept' }));
+    await mount();
+
+    expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
+  });
+
+  it('a FIRST_MILE leg at DRIVER_ACCEPTED is unaffected — still the plain pickup-at-a-door screen', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'FIRST_MILE', requiresPickupPin: false }));
+    const el = await mount();
+
+    expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
+    expect(el.textContent).not.toContain('Present your code to terminal staff');
+    expect(el.textContent).not.toContain('Collection code');
+  });
+});
+
 describe('DriverShippingJobPage — report-issue is itself blocked during an open exception', () => {
   it('hides "Report an issue" once legStatus is EXCEPTION, even while courierStatus is still reportable', async () => {
     apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));

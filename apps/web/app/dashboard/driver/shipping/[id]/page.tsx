@@ -308,7 +308,8 @@ export default function DriverShippingJobPage() {
   // the one that should show it, never otherwise. Keyed on id/jobKind/
   // status (primitives), not the `job` object itself, which gets a new
   // identity on every reload -- this must fire once per transition INTO
-  // ARRIVING on a FIRST_MILE leg, not once per reload while it stays there.
+  // ARRIVING on a FIRST_MILE leg, or into DRIVER_ACCEPTED on a LAST_MILE
+  // leg, not once per reload while either stays there.
   useEffect(() => {
     if (!job || !showsOwnHandoffCode(job.jobKind, job.status)) {
       setOwnCode(null);
@@ -590,25 +591,32 @@ export default function DriverShippingJobPage() {
               has its own, separate counter the job payload does not expose,
               so that line is shown only for handoff rather than reporting a
               number that belongs to the other code. */}
-          {action?.needsCode && (
+          {(action?.needsCode || showsOwnHandoffCode(job.jobKind, job.status)) && (
             <Card className="mt-3 p-4 sm:p-5">
               <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">
-                {action.needsReceivedBy ? 'Finish the handover' : 'Confirm the collection code'}
+                {action?.needsReceivedBy
+                  ? 'Finish the handover'
+                  : action?.needsCode
+                    ? 'Confirm the collection code'
+                    : 'Present your code to terminal staff'}
               </p>
-              {/* MDF-717: a FIRST_MILE leg at ARRIVING is the courier handing a
-                  parcel TO the terminal -- he already HOLDS the code (TERM-5's
-                  reveal, fetched above) and must SHOW it, never go ask someone
-                  else for it. The old "Ask {handoffCodeHeldBy} for the code"
-                  sentence had both directions backwards for exactly this case.
-                  Every other needsCode case (LAST_MILE/DIRECT handoff, where
-                  the RECIPIENT holds their own delivery code; pickup, where
-                  the SENDER holds theirs) is unchanged -- the driver really is
-                  asking someone else there. */}
+              {/* MDF-717: a FIRST_MILE leg at ARRIVING (handing a parcel TO the
+                  terminal) and a LAST_MILE leg at DRIVER_ACCEPTED (collecting
+                  one FROM the terminal, for release-to-courier) are both
+                  moments the courier already HOLDS his own code for (TERM-5's
+                  reveal, fetched above) and must SHOW, never go ask someone
+                  else for. The old "Ask {handoffCodeHeldBy} for the code"
+                  sentence had both directions backwards for exactly these two
+                  cases. Every other needsCode case (LAST_MILE/DIRECT handoff,
+                  where the RECIPIENT holds their own delivery code; pickup at
+                  a SENDER's door) is unchanged -- the driver really is asking
+                  someone else there. */}
               {showsOwnHandoffCode(job.jobKind, job.status) ? (
                 <>
                   <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
-                    Show this code to the terminal staff. They will enter it, and who is receiving the parcel, to confirm the
-                    handoff.
+                    {job.jobKind === 'FIRST_MILE'
+                      ? 'Show this code to the terminal staff. They will enter it, and who is receiving the parcel, to confirm the handoff.'
+                      : 'Show this code to the terminal staff. They will enter it to release the parcel to you.'}
                   </p>
                   <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
                     Your code to present
@@ -619,40 +627,44 @@ export default function DriverShippingJobPage() {
                 </>
               ) : (
                 <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
-                  {action.needsReceivedBy
+                  {action?.needsReceivedBy
                     ? `Ask ${job.handoffCodeHeldBy} for the code and enter it here.`
                     : 'Ask the sender for the collection code and enter it here.'}
                 </p>
               )}
-              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
-                {action.needsReceivedBy ? 'Handover code' : 'Collection code'}
-              </label>
-              <input
-                id="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-lg tracking-[0.3em] text-slate-900"
-                placeholder="0000"
-              />
-              {action.needsReceivedBy && (
+              {action?.needsCode && (
                 <>
-                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
-                    Who took it
+                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
+                    {action.needsReceivedBy ? 'Handover code' : 'Collection code'}
                   </label>
                   <input
-                    id="who"
-                    value={receivedBy}
-                    onChange={(e) => setReceivedBy(e.target.value)}
-                    className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base text-slate-900"
-                    placeholder="Name of the person receiving it"
+                    id="code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-lg tracking-[0.3em] text-slate-900"
+                    placeholder="0000"
                   />
-                  {job.pinAttemptsRemaining < 5 && (
-                    <p className="mt-2 text-xs text-amber-700">
-                      {job.pinAttemptsRemaining} {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs an
-                      administrator.
-                    </p>
+                  {action.needsReceivedBy && (
+                    <>
+                      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
+                        Who took it
+                      </label>
+                      <input
+                        id="who"
+                        value={receivedBy}
+                        onChange={(e) => setReceivedBy(e.target.value)}
+                        className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base text-slate-900"
+                        placeholder="Name of the person receiving it"
+                      />
+                      {job.pinAttemptsRemaining < 5 && (
+                        <p className="mt-2 text-xs text-amber-700">
+                          {job.pinAttemptsRemaining} {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs an
+                          administrator.
+                        </p>
+                      )}
+                    </>
                   )}
                 </>
               )}
