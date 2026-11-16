@@ -601,7 +601,16 @@ function MembersCard({
     }
   }
 
-  async function revokeLocation(userId: string, locationId: string) {
+  // ADMIN-LOCATION-X-STRIPS-A-MANAGER-WITH-NO-CONFIRMATION: this one-click
+  // "x" is the only destructive control on this card with no confirmation
+  // step at all -- unlike "End membership" (recoverable by Reactivate) and
+  // the invite "Revoke" button (recoverable by re-inviting), there is no
+  // undo for stripping an ACTIVE member's access to a hub. Naming both the
+  // hub and the member in the prompt, rather than a generic "are you sure",
+  // is the point: it is the one piece of information that makes it obvious
+  // what is about to happen on a card listing several members at once.
+  async function revokeLocation(userId: string, locationId: string, hubName: string, memberName: string) {
+    if (!window.confirm(`Remove ${memberName}'s access to ${hubName}? They will no longer be able to work there.`)) return;
     setLocationActionBusy(`${userId}:${locationId}`);
     setErr(null);
     try {
@@ -671,7 +680,7 @@ function MembersCard({
                         <button
                           type="button"
                           disabled={locationActionBusy === `${m.userId}:${l.id}`}
-                          onClick={() => void revokeLocation(m.userId, l.id)}
+                          onClick={() => void revokeLocation(m.userId, l.id, l.hub.name, m.name)}
                           aria-label={`Revoke ${l.hub.name} from ${m.name}`}
                           className="font-semibold text-[color:var(--bmpl-text-muted)] hover:text-amber-800 disabled:opacity-50"
                         >
