@@ -37,7 +37,7 @@ async function makeVendor() {
 }
 
 /** Seed a fully paid, settled single-vendor order (subtotal 1000 × qty). */
-async function seedPaidOrder(v: { vendorProfileId: string; productId: string; productTitle: string }, qty = 2) {
+async function seedPaidOrder(v: { vendorProfileId: string; productId: string; productTitle: string }, qty = 2, opts: { isTest?: boolean } = {}) {
   const s = uniq();
   const buyer = await register(`buy_${s}@example.bz`);
   const subtotal = BigInt(1000 * qty);
@@ -45,7 +45,7 @@ async function seedPaidOrder(v: { vendorProfileId: string; productId: string; pr
   const total = subtotal + delivery;
   const order = await ctx.prisma.order.create({
     data: {
-      orderNumber: `ORD-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: qty, subtotalMinor: subtotal, deliveryFeeMinor: delivery, totalMinor: total,
+      orderNumber: `ORD-${s}`, userId: buyer.userId, status: 'PENDING', itemCount: qty, subtotalMinor: subtotal, deliveryFeeMinor: delivery, totalMinor: total, isTest: opts.isTest ?? false,
       vendorOrders: {
         create: {
           orderNumber: `ORD-${s}-1`, vendorProfileId: v.vendorProfileId, deliveryMethod: 'DELIVERY', itemCount: qty, subtotalMinor: subtotal, status: 'PICKED_UP', pickedUpAt: new Date(),
@@ -149,6 +149,26 @@ describe('admin platform analytics (analytics.read)', () => {
     expect(res.text).toContain('SETTLED');
   });
 
+  /**
+   * MDF-777 exclusion #3: `adminOverview`'s `vendorSettlement.aggregate`
+   * (analytics.service.ts:72) had no isTest filter at all — the one
+   * aggregate in this method missing the `NOT_TEST` pattern every sibling
+   * here already uses (gmvAgg, order counts, unitsAgg). Same delta
+   * discipline as the first test in this file (BMPL-249): snapshot before
+   * seeding, assert only this test's own real contribution.
+   */
+  it('MDF-777 exclusion #3: platformRevenueMinor/vendorNetMinor exclude a simulation settlement, include a real one', async () => {
+    const before = await get(adminCookies, 'admin/analytics/overview');
+    const v = await makeVendor();
+    // The simulation order exists (proving genuine exclusion, not absence)
+    // — only the real order's numbers are asserted below.
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+    const ov = await get(adminCookies, 'admin/analytics/overview');
+    expect(ov.body.platformRevenueMinor - before.body.platformRevenueMinor).toBe(real.platform);
+    expect(ov.body.vendorNetMinor - before.body.vendorNetMinor).toBe(real.net);
+  });
+
   it('gates analytics behind analytics.read (customer 403, guest 401, limited admin 403)', async () => {
     const cust = await register(`c_${uniq()}@example.bz`);
     expect((await get(cust.cookies, 'admin/analytics/overview')).status).toBe(403);
@@ -187,6 +207,27 @@ describe('vendor own-storefront analytics (ownership-scoped)', () => {
     expect(csv.headers['content-type']).toContain('text/csv');
     expect(csv.headers['content-disposition']).toContain('my-orders-report.csv');
     expect(csv.text.split('\r\n')[0]).toContain('vendorOrderNumber');
+  });
+
+  /**
+   * MDF-777 exclusion #3, vendor-scoped: `vendorOverview`'s own
+   * `vendorSettlement.aggregate` (analytics.service.ts:176) had the same gap
+   * as adminOverview's above. A brand-new vendor starts at absolute zero, so
+   * no delta is needed here — unlike `paidOrders`/`grossSalesMinor` (the
+   * `vendorOrder.aggregate` at :173, a pre-existing unfiltered read outside
+   * this fix's authorized scope — not asserted here), `netRevenueMinor`/
+   * `commissionPaidMinor` come from the aggregate this fix touched and must
+   * reflect only the real order.
+   */
+  it('MDF-777 exclusion #3: a vendor\'s own netRevenueMinor/commissionPaidMinor exclude a simulation settlement', async () => {
+    const v = await makeVendor();
+    await seedPaidOrder(v, 2, { isTest: true });
+    const real = await seedPaidOrder(v, 3, { isTest: false });
+
+    const ov = await get(v.vendorCookies, 'vendor/analytics/overview');
+    expect(ov.body.netRevenueMinor).toBe(real.net);
+    expect(ov.body.commissionPaidMinor).toBe(real.commission);
+    expect(ov.body.settledGrossMinor).toBe(real.total);
   });
 
   it('rejects non-vendors from the vendor analytics surface', async () => {
