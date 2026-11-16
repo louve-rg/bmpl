@@ -208,9 +208,29 @@ describe('the link exists and works', () => {
     expect(r.body.statusLabel).toBe('Waiting to be collected');
     expect(r.body.destination).toEqual({ city: 'San Pedro', district: 'BELIZE' });
     expect(r.body.collectionHub).toBeNull();
+    // TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: a door-to-door booking has a
+    // LAST_MILE leg, so a delivery code can eventually exist for it.
+    expect(r.body.deliveryCodeEligible).toBe(true);
     expect(Array.isArray(r.body.steps)).toBe(true);
     expect(r.body.steps.length).toBeGreaterThanOrEqual(3);
     expect(r.body.steps[0].completed).toBe(false);
+  });
+
+  it('TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: a hub-to-hub journey is never eligible for a delivery code — it has no LAST_MILE or DIRECT leg for a driver to hand one off on', async () => {
+    const r = await post(customer, 'shipping', {
+      service: 'HUB_TO_HUB',
+      origin: { hubId: hub.PLA, name: 'Sender Sentinelname', phone: '501-2223333' },
+      destination: { hubId: hub.SPA, name: 'Recipient Sentinelname', phone: '501-4445555' },
+      preferredMode: 'AIR',
+      description: 'One box',
+      payWithWallet: true,
+    });
+    expect(r.status).toBe(201);
+    expect((await legs(r.body.id)).every((l) => l.kind === 'LINE_HAUL')).toBe(true);
+
+    const track = await publicTrack(r.body.recipientTrackingToken);
+    expect(track.status).toBe(200);
+    expect(track.body.deliveryCodeEligible).toBe(false);
   });
 
   it('progress flows through: a completed first mile reads as completed, and the current step moves on', async () => {

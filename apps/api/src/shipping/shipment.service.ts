@@ -1352,6 +1352,16 @@ export class ShipmentService {
               instructions: s.destinationHub.instructions,
             }
           : null,
+      // TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: the SAME leg condition
+      // `revealDeliveryCode` checks before it will ever return a code,
+      // mirrored here so the public page can stop asserting "your driver
+      // will ask for this code" on a parcel that structurally has no
+      // LAST_MILE/DIRECT leg to be handed off on. Read straight from the
+      // legs rather than re-derived from `service`/`needsLastMile`, so the
+      // two can never drift as the planner changes. Deliberately not
+      // `collectionHub` either — that is null until AWAITING_COLLECTION,
+      // which would hide this card during transit instead of showing it.
+      deliveryCodeEligible: live.some((l) => l.kind === 'LAST_MILE' || l.kind === 'DIRECT'),
       steps: live.map((l) => ({
         sequence: l.sequence,
         kindLabel: LEG_KIND_LABELS[l.kind],

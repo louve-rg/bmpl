@@ -265,6 +265,14 @@ export interface RecipientTrackingView {
   destination: { city: string | null; district: string | null };
   /** Present only while the shipment is AWAITING_COLLECTION at a terminal. */
   collectionHub: { name: string; city: string; address: string | null; instructions: string | null } | null;
+  /**
+   * TRACK-PUBLIC-PAGE-DELIVERY-CODE-HEADING: whether this shipment has a
+   * LAST_MILE or DIRECT leg at all, so a delivery code could ever exist for
+   * it — true/false at every status, unlike `collectionHub` which is only
+   * ever populated at one particular status. Gate the "driver will ask for
+   * this code" card on this, not on `collectionHub` or a `steps` label.
+   */
+  deliveryCodeEligible: boolean;
   steps: RecipientTrackingStep[];
   /**
    * BMPL-340 (Edward req 12): the journey's own overall ETA — confidence and
