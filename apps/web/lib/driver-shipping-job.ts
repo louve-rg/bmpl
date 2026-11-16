@@ -98,26 +98,30 @@ export function isExceptionBlocked(job: { legStatus?: string | null }): boolean 
 
 /**
  * MDF-717: whether this screen should fetch and show the courier's OWN
- * code to present at the hub counter, instead of telling him to go ask
+ * code to present at a hub counter, instead of telling him to go ask
  * someone else for it.
  *
- * ARRIVING + FIRST_MILE only. `ShipmentService.revealCourierCode` (TERM-5)
- * only ever returns a courier's OWN code for FIRST_MILE (handoffPin, the
- * code he presents when handing a parcel TO a hub) and LAST_MILE
- * (pickupPin, the code he presents when COLLECTING a parcel FROM a hub) —
- * never for a door end, where the code belongs to whoever is physically
- * there (the sender at pickup, the recipient at delivery), not the driver.
- * The LAST_MILE/pickupPin moment has no existing screen at all yet
- * (`requiresPickupPin`, the only pin field pickup already renders, is
- * scoped to a SENDER's door code on FIRST_MILE/DIRECT — see its own doc —
- * so a LAST_MILE driver collecting from a hub has nothing to key off of
- * today) — out of scope here, which only covers the ARRIVING/handoff
- * screen Stanley actually hit a dead end on.
+ * Two moments, both already served by the same `ShipmentService.
+ * revealCourierCode` (TERM-5) — it returns a courier's OWN code for
+ * FIRST_MILE (handoffPin, presented when handing a parcel TO a hub, at
+ * ARRIVING) and for LAST_MILE (pickupPin, presented when COLLECTING a
+ * parcel FROM a hub, at DRIVER_ACCEPTED — the window the terminal's own
+ * Release queue itself filters on, `kind: 'LAST_MILE', courierStatus:
+ * 'DRIVER_ACCEPTED'`, shipment.service.ts:5489). Never for a door end,
+ * where the code belongs to whoever is physically there (the sender at
+ * pickup, the recipient at delivery), not the driver.
+ *
+ * The LAST_MILE/DRIVER_ACCEPTED case was added after the original FIRST_MILE
+ * fix (MDF-717 follow-up, god/Stanley): the backend reveal already covered
+ * it, but this gate — and the screen's own `requiresPickupPin`, which is
+ * deliberately scoped to a SENDER's door code on FIRST_MILE/DIRECT only and
+ * says nothing about this case — left the terminal's Release panel telling
+ * the operator to ask for a code the courier's screen never showed him.
  *
  * A LAST_MILE or DIRECT leg's own ARRIVING/handoff screen stays exactly as
  * it was: that is the final door delivery, where the RECIPIENT holds
  * their own delivery code and asking them for it is correct.
  */
 export function showsOwnHandoffCode(jobKind: string, status: string): boolean {
-  return jobKind === 'FIRST_MILE' && status === 'ARRIVING';
+  return (jobKind === 'FIRST_MILE' && status === 'ARRIVING') || (jobKind === 'LAST_MILE' && status === 'DRIVER_ACCEPTED');
 }

@@ -80,4 +80,17 @@ describe('showsOwnHandoffCode (MDF-717)', () => {
   it('is false for a DIRECT leg at ARRIVING, for the same reason as LAST_MILE', () => {
     expect(showsOwnHandoffCode('DIRECT', 'ARRIVING')).toBe(false);
   });
+
+  it('is true for a LAST_MILE leg at DRIVER_ACCEPTED — the hub collection where the courier holds his own pickup code (follow-up)', () => {
+    expect(showsOwnHandoffCode('LAST_MILE', 'DRIVER_ACCEPTED')).toBe(true);
+  });
+
+  it('is false for a LAST_MILE leg at any other status — nothing to present once the parcel is already his', () => {
+    expect(showsOwnHandoffCode('LAST_MILE', 'PICKUP_CONFIRMED')).toBe(false);
+    expect(showsOwnHandoffCode('LAST_MILE', 'IN_TRANSIT')).toBe(false);
+  });
+
+  it('is false for a DIRECT leg at DRIVER_ACCEPTED — DIRECT never reaches a hub counter', () => {
+    expect(showsOwnHandoffCode('DIRECT', 'DRIVER_ACCEPTED')).toBe(false);
+  });
 });
