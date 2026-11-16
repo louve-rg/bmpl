@@ -131,6 +131,30 @@ describe('ExceptionRecovery — both resolutions reachable', () => {
     expect(apiPost).not.toHaveBeenCalled();
   });
 
+  /**
+   * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: a disabled submit
+   * button cannot run submit()'s own err-setting branch, since a disabled
+   * button cannot be clicked -- so before this fix, the note-too-short case
+   * had NO explanation anywhere, on screen or in the DOM. "Resume sends
+   * nothing" is exactly what that reads as to an operator with the parcel
+   * in hand.
+   */
+  it('says why the submit button is disabled before any click is possible, not only after one', async () => {
+    const el = mount();
+    await clickAndFlush(findButton(el, 'Resume')!);
+
+    // Nothing typed yet.
+    expect(el.textContent).toContain('Say how it was resolved.');
+
+    setValue(el.querySelector('textarea')!, 'ok');
+    expect(el.textContent).toContain('Say how it was resolved.');
+    expect(findButton(el, 'Resume leg')!.hasAttribute('disabled')).toBe(true);
+
+    setValue(el.querySelector('textarea')!, 'Cleared the lockout.');
+    expect(el.textContent).not.toContain('Say how it was resolved.');
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
   it('surfaces the server refusal verbatim, never a hardcoded sentence, and does not report success', async () => {
     const el = mount();
     await clickAndFlush(findButton(el, 'Release driver')!);

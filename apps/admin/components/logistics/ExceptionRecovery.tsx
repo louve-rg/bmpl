@@ -121,6 +121,18 @@ export function ExceptionRecovery({
         className="mt-1"
       />
 
+      {/* TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: the same
+          defect class as #745 -- a disabled submit with no explanation is a
+          literal zero-effect click, not a working control the operator
+          simply hasn't finished filling in. `submit()`'s own err-setting
+          branch below never runs while the button stays disabled, so that
+          message alone could never reach an operator who left the note too
+          short. Shown unconditionally while the note is invalid, not only
+          after a submit attempt. */}
+      {check && !check.success && (
+        <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">{check.error.issues[0]?.message ?? 'Say how it was resolved.'}</p>
+      )}
+
       {err && <p className="mt-2 text-sm font-medium text-red-600">{err}</p>}
 
       <Button size="sm" className="mt-3" onClick={() => void submit()} disabled={submitting || !check?.success}>
