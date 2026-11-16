@@ -176,7 +176,7 @@ export class AnalyticsService {
   async vendorOverview(userId: string) {
     const vp = await this.ownership.vendorProfileId(userId); // throws if not a vendor
     const [paidAgg, unitsAgg, settlementAgg, pendingSettlements, publishedProducts, profile] = await Promise.all([
-      this.prisma.vendorOrder.aggregate({ where: { vendorProfileId: vp, order: { payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } }, _sum: { subtotalMinor: true }, _count: true }),
+      this.prisma.vendorOrder.aggregate({ where: { vendorProfileId: vp, order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } }, _sum: { subtotalMinor: true }, _count: true }),
       this.prisma.orderItem.aggregate({ where: { vendorOrder: { vendorProfileId: vp, order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
       // MDF-777 exclusion #3: same one-hop filter as adminOverview above.
       this.prisma.vendorSettlement.aggregate({
