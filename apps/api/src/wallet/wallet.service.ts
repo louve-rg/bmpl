@@ -677,10 +677,30 @@ export class WalletService {
     return { userId: targetUserId, status: to, walletAccountsChanged: result };
   }
 
-  /** Escrow + system account balances (read-only). */
+  /**
+   * Escrow + system account balances (read-only).
+   *
+   * MDF-777 exclusion #3: each SYSTEM_* type is a single pooled row per
+   * currency (`ensureSystemAccount` above never creates a second one), shared
+   * by every transaction regardless of `isTest` — `cachedBalanceMinor` is
+   * incremented unconditionally on every posted transaction, real or test.
+   * The admin reconciliation tiles already hit this same gap and close it by
+   * reading `realBalanceMinor` instead of the raw cached column
+   * (`settlement.service.ts`'s `reconciliation()`); this list reuses the same
+   * method so it agrees with those tiles rather than showing simulation
+   * money unlabeled next to real.
+   */
   async adminAccounts() {
     const rows = await this.prisma.walletAccount.findMany({ where: { userId: null }, orderBy: { type: 'asc' } });
-    return rows.map((a) => ({ id: a.id, type: a.type, currency: a.currency, status: a.status, cachedBalanceMinor: money(a.cachedBalanceMinor) }));
+    return Promise.all(
+      rows.map(async (a) => ({
+        id: a.id,
+        type: a.type,
+        currency: a.currency,
+        status: a.status,
+        cachedBalanceMinor: money(await this.realBalanceMinor(a.id)),
+      })),
+    );
   }
 
   /**
