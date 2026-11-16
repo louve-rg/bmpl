@@ -118,6 +118,29 @@ describe('deriveShipmentStatus', () => {
     const shuffled = [leg(3, 'LAST_MILE', 'PENDING'), leg(1, 'FIRST_MILE', 'COMPLETED'), leg(2, 'LINE_HAUL', 'IN_PROGRESS')];
     expect(deriveShipmentStatus(shuffled, false)).toBe('IN_TRANSIT');
   });
+
+  describe('a hub-start journey (HUB_TO_HUB/HUB_TO_DOOR) has no FIRST_MILE leg at all (TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD)', () => {
+    it('never claims the parcel reached the origin hub before anyone dropped it off', () => {
+      // `[].every(...)` is vacuously true, so "no leg exists before this one"
+      // must never be read as "the leg before this one finished" — there was
+      // no prior leg to finish. A LINE_HAUL leg with nothing ahead of it in
+      // the sequence is the shipment's very first leg: still unpaid-and-PENDING
+      // here, the least-advanced a leg can be.
+      expect(deriveShipmentStatus([leg(1, 'LINE_HAUL', 'PENDING')], false)).toBe('AWAITING_PICKUP');
+      // Same claim once paid and workable (READY), before it has departed.
+      expect(deriveShipmentStatus([leg(1, 'LINE_HAUL', 'READY')], false)).toBe('AWAITING_PICKUP');
+    });
+
+    it('still reports IN_TRANSIT once that same first leg actually departs', () => {
+      expect(deriveShipmentStatus([leg(1, 'LINE_HAUL', 'IN_PROGRESS')], false)).toBe('IN_TRANSIT');
+    });
+  });
+
+  it('a FIRST_MILE-bearing journey is bit-for-bit unchanged: AT_ORIGIN_HUB still requires an actually-completed prior leg, not merely an absent one', () => {
+    // Pins the exact two cases this card must not regress.
+    expect(deriveShipmentStatus(d2d('COMPLETED', 'READY', 'PENDING'), false)).toBe('AT_ORIGIN_HUB');
+    expect(deriveShipmentStatus(d2d('IN_PROGRESS', 'READY', 'PENDING'), false)).toBe('FIRST_MILE');
+  });
 });
 
 describe('isLegActionable', () => {
