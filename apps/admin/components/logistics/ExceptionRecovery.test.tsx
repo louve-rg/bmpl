@@ -82,6 +82,23 @@ describe('ExceptionRecovery — both resolutions reachable', () => {
     expect(findButton(el, 'Release driver')).toBeFalsy();
   });
 
+  /**
+   * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: "Resume" is step
+   * one — it only opens this panel. Stanley's script clicked it, saw no
+   * visible change in the page's own text, and concluded Resume did
+   * nothing. Moving focus into the note field the instant the panel opens
+   * is a signal independent of the panel's own copy (a visible caret, a
+   * screen reader announcing the Note label) that something opened and a
+   * further action is needed.
+   */
+  it('moves focus into the note field the instant Resume opens the panel, and says a further step is needed', async () => {
+    const el = mount();
+    await clickAndFlush(findButton(el, 'Resume')!);
+
+    expect(document.activeElement).toBe(el.querySelector('textarea'));
+    expect(el.textContent).toContain('One more step');
+  });
+
   it('RESUME calls resolve-exception with the resolution and note, then reports success and reloads', async () => {
     const el = mount();
     await clickAndFlush(findButton(el, 'Resume')!);
@@ -128,6 +145,30 @@ describe('ExceptionRecovery — both resolutions reachable', () => {
 
     setValue(el.querySelector('textarea')!, 'Cleared the lockout.');
     expect(findButton(el, 'Resume leg')!.hasAttribute('disabled')).toBe(false);
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  /**
+   * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: a disabled submit
+   * button cannot run submit()'s own err-setting branch, since a disabled
+   * button cannot be clicked -- so before this fix, the note-too-short case
+   * had NO explanation anywhere, on screen or in the DOM. "Resume sends
+   * nothing" is exactly what that reads as to an operator with the parcel
+   * in hand.
+   */
+  it('says why the submit button is disabled before any click is possible, not only after one', async () => {
+    const el = mount();
+    await clickAndFlush(findButton(el, 'Resume')!);
+
+    // Nothing typed yet.
+    expect(el.textContent).toContain('Say how it was resolved.');
+
+    setValue(el.querySelector('textarea')!, 'ok');
+    expect(el.textContent).toContain('Say how it was resolved.');
+    expect(findButton(el, 'Resume leg')!.hasAttribute('disabled')).toBe(true);
+
+    setValue(el.querySelector('textarea')!, 'Cleared the lockout.');
+    expect(el.textContent).not.toContain('Say how it was resolved.');
     expect(apiPost).not.toHaveBeenCalled();
   });
 

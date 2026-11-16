@@ -439,6 +439,95 @@ describe('ShipmentOpsPage — exception recovery wiring (MDF-318, requirement 10
 });
 
 /**
+ * TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK: the exception reason
+ * named WHAT went wrong but never WHERE to act on it — Stanley's own finding.
+ * Only the pointer sentence's own wiring is asserted here (shown/hidden under
+ * the same gate as the recovery panels, and never claiming "release the
+ * driver" exists for a leg kind that never offers it).
+ */
+describe('ShipmentOpsPage — the exception reason points at its own recovery (TERM-HANDOFF-LOCK-STRANDS-THE-PARCEL-WITH-NO-UNLOCK)', () => {
+  function exceptionShipment(overrides: Partial<typeof SHIPMENT> = {}) {
+    return {
+      ...SHIPMENT,
+      status: 'EXCEPTION',
+      statusLabel: 'Needs attention',
+      exceptionReason: 'Recipient refused delivery.',
+      legs: [{ ...SHIPMENT.legs[0], status: 'EXCEPTION', exceptionReason: 'Recipient refused delivery.' }],
+      ...overrides,
+    };
+  }
+
+  it('points at Resume and return/reroute, but not Release driver, for a LINE_HAUL leg', async () => {
+    stubFetch(['logistics.operate']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, exceptionShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Resume it, or return\/reroute it, below\./);
+  });
+
+  it('also points at Release driver for a LAST_MILE leg', async () => {
+    stubFetch(['logistics.operate']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, {
+            ...exceptionShipment(),
+            legs: [{ ...SHIPMENT.legs[0], kind: 'LAST_MILE' as const, status: 'EXCEPTION', exceptionReason: 'Recipient refused delivery.' }],
+          });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Resume it, release the driver, or return\/reroute it, below\./);
+  });
+
+  it('never shown to a read-only viewer, who has no recovery controls to point at', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, exceptionShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/return\/reroute it, below/);
+  });
+
+  it('never shown once the shipment already reads RETURNED, same gate as the recovery panels', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, exceptionShipment({ status: 'RETURNED', statusLabel: 'Returned to sender' }));
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/return\/reroute it, below/);
+  });
+});
+
+/**
  * MDF-318 (Edward requirement 12): `scheduleLeg()` (POST legs/:id/schedule)
  * had zero UI callers anywhere. This screen is its first caller, for a
  * LINE_HAUL leg in one of the server's own SCHEDULABLE_LEG_STATUSES.
