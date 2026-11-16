@@ -188,6 +188,25 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   CANCELLED: 'Cancelled',
 };
 
+/**
+ * The label for a given status, worded for the service it belongs to.
+ *
+ * TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: `SHIPMENT_STATUS_LABELS`
+ * on its own says AWAITING_PICKUP is "Waiting to be collected" — true for
+ * DOOR_TO_DOOR/DOOR_TO_HUB, where a courier is dispatched to go get it, but
+ * HUB_TO_HUB/HUB_TO_DOOR have no FIRST_MILE leg at all: the sender walks the
+ * parcel into the terminal themselves, and nobody has been or will be sent to
+ * collect it. Every audience that reads a shipment's status label — sender,
+ * recipient, staff — must go through this function, not the raw table, or
+ * the correction only reaches whichever one call site remembered to apply it.
+ */
+export function shipmentStatusLabel(status: ShipmentStatus, service: ShippingService): string {
+  if (status === 'AWAITING_PICKUP' && !needsFirstMile(service)) {
+    return 'Awaiting drop-off at the departure terminal';
+  }
+  return SHIPMENT_STATUS_LABELS[status] ?? status;
+}
+
 /* ------------------------------------------------------- exception copy */
 
 /**

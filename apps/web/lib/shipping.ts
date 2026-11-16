@@ -677,13 +677,5 @@ export function headlineFor(s: ShipmentView): string {
     const hub = [...s.legs].reverse().find((l) => l.destinationHub)?.destinationHub;
     return hub ? `Ready to collect at ${hub.name}` : 'Ready to collect';
   }
-  // TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: the server's own
-  // AWAITING_PICKUP label, "Waiting to be collected", says a courier is on
-  // the way — true for DOOR_TO_DOOR/DOOR_TO_HUB, but HUB_TO_HUB/HUB_TO_DOOR
-  // start with the sender walking the parcel in themselves; nobody has been
-  // or will be dispatched to go get it.
-  if (s.status === 'AWAITING_PICKUP' && (s.service === 'HUB_TO_HUB' || s.service === 'HUB_TO_DOOR')) {
-    return 'Awaiting drop-off at the departure terminal';
-  }
   return s.statusLabel;
 }

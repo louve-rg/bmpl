@@ -163,28 +163,13 @@ describe('headlineFor', () => {
     expect(headlineFor(s)).toBe('Cancelled');
   });
 
-  describe('TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD', () => {
-    it('never tells a hub-start sender a courier is coming for a parcel nobody dispatched one for', () => {
-      const s = shipment({ service: 'HUB_TO_HUB', status: 'AWAITING_PICKUP', statusLabel: 'Waiting to be collected' });
-      expect(headlineFor(s)).toBe('Awaiting drop-off at the departure terminal');
-    });
-
-    it('applies the same correction to HUB_TO_DOOR, which also has no FIRST_MILE leg', () => {
-      const s = shipment({ service: 'HUB_TO_DOOR', status: 'AWAITING_PICKUP', statusLabel: 'Waiting to be collected' });
-      expect(headlineFor(s)).toBe('Awaiting drop-off at the departure terminal');
-    });
-
-    it('leaves a real courier pickup (DOOR_TO_DOOR/DOOR_TO_HUB) exactly as it reads today', () => {
-      const doorToDoor = shipment({ service: 'DOOR_TO_DOOR', status: 'AWAITING_PICKUP', statusLabel: 'Waiting to be collected' });
-      const doorToHub = shipment({ service: 'DOOR_TO_HUB', status: 'AWAITING_PICKUP', statusLabel: 'Waiting to be collected' });
-      expect(headlineFor(doorToDoor)).toBe('Waiting to be collected');
-      expect(headlineFor(doorToHub)).toBe('Waiting to be collected');
-    });
-
-    it('only touches AWAITING_PICKUP — a hub-start shipment in any other status still reads its real statusLabel', () => {
-      const s = shipment({ service: 'HUB_TO_HUB', status: 'IN_TRANSIT', statusLabel: 'In transit' });
-      expect(headlineFor(s)).toBe('In transit');
-    });
+  // TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD: the hub-start wording
+  // correction now lives server-side in shipmentStatusLabel() (packages/shared),
+  // so every audience — not just this one web render — reads the true string.
+  // headlineFor has nothing left to override here; it trusts statusLabel as-is.
+  it('trusts the server label as-is for a hub-start AWAITING_PICKUP shipment — the correction is server-side now', () => {
+    const s = shipment({ service: 'HUB_TO_HUB', status: 'AWAITING_PICKUP', statusLabel: 'Awaiting drop-off at the departure terminal' });
+    expect(headlineFor(s)).toBe('Awaiting drop-off at the departure terminal');
   });
 });
 

@@ -19,6 +19,7 @@ import {
   customerFacingExceptionReason,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
+  shipmentStatusLabel,
   SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
   TRANSPORT_MODE_LABELS,
@@ -1331,7 +1332,7 @@ export class ShipmentService {
     return {
       reference: s.reference,
       status: s.status,
-      statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+      statusLabel: shipmentStatusLabel(s.status, s.service),
       serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
       bookedAt: s.bookedAt,
       deliveredAt: s.deliveredAt,
@@ -1684,7 +1685,7 @@ export class ShipmentService {
         service: s.service,
         serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
         status: s.status,
-        statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+        statusLabel: shipmentStatusLabel(s.status, s.service),
         isTest: s.isTest,
         customer: s.customer ? `${s.customer.firstName} ${s.customer.lastName}`.trim() || s.customer.email : null,
         origin: [s.originCity, s.originDistrict?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
@@ -2551,6 +2552,7 @@ export class ShipmentService {
             select: {
               id: true,
               reference: true,
+              service: true,
               customerUserId: true,
               recipientUserId: true,
               destinationEmail: true,
@@ -2706,6 +2708,7 @@ export class ShipmentService {
         destinationEmail: leg.shipment.destinationEmail,
         recipientToken: leg.shipment.recipientToken,
         reference: leg.shipment.reference,
+        service: leg.shipment.service,
         status,
         restored,
         releasedDriverProfileId,
@@ -3509,6 +3512,7 @@ export class ShipmentService {
         destinationEmail: shipment.destinationEmail,
         recipientToken: shipment.recipientToken,
         reference: shipment.reference,
+        service: shipment.service,
         status,
       };
     });
@@ -3638,7 +3642,13 @@ export class ShipmentService {
     });
   }
 
-  private async notifyCustomer(r: { customerUserId: string | null; reference: string; status: ShipmentStatus; shipmentId: string }) {
+  private async notifyCustomer(r: {
+    customerUserId: string | null;
+    reference: string;
+    status: ShipmentStatus;
+    service: ShippingService;
+    shipmentId: string;
+  }) {
     if (!r.customerUserId) return;
     await this.notifications.notifyUsers(
       [r.customerUserId],
@@ -3647,7 +3657,7 @@ export class ShipmentService {
         category: 'DELIVERY',
         event: 'SHIPMENT_STATUS',
         title: `Shipment ${r.reference}`,
-        body: SHIPMENT_STATUS_LABELS[r.status] ?? r.status,
+        body: shipmentStatusLabel(r.status, r.service),
         data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
       },
     );
@@ -3956,6 +3966,7 @@ export class ShipmentService {
       customerUserId: shipment.customerUserId,
       reference: shipment.reference,
       status: shipment.status,
+      service: shipment.service,
       shipmentId: shipment.id,
     });
     return this.serialize(shipment, { audience: 'STAFF' });
@@ -4876,7 +4887,7 @@ export class ShipmentService {
       service: s.service,
       serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
       status: s.status,
-      statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+      statusLabel: shipmentStatusLabel(s.status, s.service),
       // BMPL-367: null unless this shipment's fate was settled by one of
       // these — a caller deciding whether to still offer "return" or
       // "reroute" on an exception needs this, not just the status string,

@@ -6,6 +6,8 @@ import {
   isLegActionable,
   needsFirstMile,
   needsLastMile,
+  shipmentStatusLabel,
+  SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICES,
   SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
@@ -140,6 +142,30 @@ describe('deriveShipmentStatus', () => {
     // Pins the exact two cases this card must not regress.
     expect(deriveShipmentStatus(d2d('COMPLETED', 'READY', 'PENDING'), false)).toBe('AT_ORIGIN_HUB');
     expect(deriveShipmentStatus(d2d('IN_PROGRESS', 'READY', 'PENDING'), false)).toBe('FIRST_MILE');
+  });
+});
+
+describe('shipmentStatusLabel (TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD)', () => {
+  it('never tells a hub-start sender a courier is coming for a parcel nobody dispatched one for', () => {
+    expect(shipmentStatusLabel('AWAITING_PICKUP', 'HUB_TO_HUB')).toBe('Awaiting drop-off at the departure terminal');
+  });
+
+  it('applies the same correction to HUB_TO_DOOR, which also has no FIRST_MILE leg', () => {
+    expect(shipmentStatusLabel('AWAITING_PICKUP', 'HUB_TO_DOOR')).toBe('Awaiting drop-off at the departure terminal');
+  });
+
+  it('leaves a real courier pickup (DOOR_TO_DOOR/DOOR_TO_HUB) exactly as it reads today', () => {
+    expect(shipmentStatusLabel('AWAITING_PICKUP', 'DOOR_TO_DOOR')).toBe('Waiting to be collected');
+    expect(shipmentStatusLabel('AWAITING_PICKUP', 'DOOR_TO_HUB')).toBe('Waiting to be collected');
+  });
+
+  it('only touches AWAITING_PICKUP — every other status reads SHIPMENT_STATUS_LABELS unchanged, for every service', () => {
+    for (const service of SHIPPING_SERVICES) {
+      for (const status of Object.keys(SHIPMENT_STATUS_LABELS) as Array<keyof typeof SHIPMENT_STATUS_LABELS>) {
+        if (status === 'AWAITING_PICKUP') continue;
+        expect(shipmentStatusLabel(status, service)).toBe(SHIPMENT_STATUS_LABELS[status]);
+      }
+    }
   });
 });
 
