@@ -639,6 +639,60 @@ describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () =
     expect(custody?.actorUserId).toBe(lastCourier.userId);
   });
 
+  it('7b · MIGRATION DAY (owner ruling): a grandfathered LAST_MILE leg is released by staff with no matching pin, and the exemption is recorded (see 7c for the other half: a non-grandfathered leg still cannot)', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+
+    // Simulate exactly what the migration's own default-flip produces for a
+    // row that already existed: pickupPin stays NULL forever and
+    // pickupPinGrandfathered is true. This is TERM-LAST-MILE's own stranding
+    // risk — once self-submit is refused (test 6 above), staff release was
+    // this leg's only remaining route, and it must still work.
+    await ctx.prisma.shipmentLeg.update({ where: { id: lastMile.id }, data: { pickupPinGrandfathered: true } });
+
+    const ops = await makeOperator(['logistics.operate']);
+    // No correct code exists to send — pickupPin is null — so this proves
+    // the release does NOT depend on matching one. The value just has to
+    // satisfy the schema's own shape.
+    const released = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
+      pin: '000000',
+      presentedCourierUserId: lastCourier.userId,
+    });
+    expect(released.status).toBe(201);
+    const after = await legRow(lastMile.id);
+    expect(after.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(after.status).toBe('IN_PROGRESS');
+    expect(after.pickedUpAt).not.toBeNull();
+    // Never backdated to VERIFIED — the code was never actually checked.
+    expect(after.pickupVerificationStatus).toBe('PENDING');
+    expect(after.pickupVerifiedAt).toBeNull();
+
+    const audit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_PICKED_UP' } })).find(
+      (a) => (a.newValue as { legId?: string }).legId === lastMile.id,
+    );
+    expect((audit!.newValue as { pickupPinGrandfathered?: boolean }).pickupPinGrandfathered).toBe(true);
+  });
+
+  it('7c · the other half of the proof: a NON-grandfathered LAST_MILE leg still cannot be released without the matching pin — the gate is not softened in general', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+    expect((await legRow(lastMile.id)).pickupPinGrandfathered).toBe(false);
+
+    const ops = await makeOperator(['logistics.operate']);
+    const stillRefused = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
+      pin: '000000',
+      presentedCourierUserId: lastCourier.userId,
+    });
+    expect(stillRefused.status).toBe(400);
+    expect((await legRow(lastMile.id)).courierStatus).toBe('DRIVER_ACCEPTED');
+  });
+
   it('8 · a courier presenting a code for a leg that is not theirs is refused, and the attempt counts (lockout engaging)', async () => {
     const sender = await fundedSender();
     const firstCourier = await makeCourier('STANN_CREEK');
