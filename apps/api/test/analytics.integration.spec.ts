@@ -15,6 +15,9 @@ let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
+const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 async function login(email: string, password: string) {
   const r = await request(ctx.server).post('/api/auth/login').send({ email, password });
@@ -34,6 +37,17 @@ async function makeVendor() {
   const vp = await ctx.prisma.vendorProfile.create({ data: { userId: v.userId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN' } });
   const product = await ctx.prisma.product.create({ data: { vendorProfileId: vp.id, categoryId, title: `Prod ${s}`, slug: `prod-${s}`, sku: `SKU-${s}`, status: 'PUBLISHED', priceMinor: 1000n, currency: 'BZD' } });
   return { vendorCookies, vendorProfileId: vp.id, productId: product.id, productTitle: product.title };
+}
+
+/** An approved DELIVERY_DRIVER, real by default — flip to simulation via the admin test-mode endpoint, same as production would. */
+async function makeApprovedDriver() {
+  const s = uniq();
+  const d = await register(`drv_${s}@example.bz`);
+  await ctx.prisma.userRole.create({ data: { userId: d.userId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() } });
+  const dp = await ctx.prisma.driverProfile.create({
+    data: { userId: d.userId, legalName: 'D', displayName: `Drv${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL-${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED' },
+  });
+  return { driverProfileId: dp.id };
 }
 
 /** Seed a fully paid, settled single-vendor order (subtotal 1000 × qty). */
@@ -197,6 +211,76 @@ describe('admin platform analytics (analytics.read)', () => {
     const ov = await get(adminCookies, 'admin/analytics/overview');
     expect(ov.body.platformRevenueMinor - before.body.platformRevenueMinor).toBe(real.platform);
     expect(ov.body.vendorNetMinor - before.body.vendorNetMinor).toBe(real.net);
+  });
+
+  /**
+   * MDF-777 exclusion #3 (tenth-class read, closed alongside #761):
+   * `approvedDrivers` (analytics.service.ts:80) counted every APPROVED
+   * DELIVERY_DRIVER UserRole with no isTest filter at all. `UserRole` has no
+   * isTest column of its own, so the fix joins `DriverProfile.isTest` — the
+   * SAME flag `DriverService.assignmentEligibility`/`eligibleDriversForDistrict`
+   * already trust for the real-dispatch exclusion (Q1, driver.service.ts),
+   * not the separate `User.isTest`, so this count agrees with the mechanism
+   * that actually governs who gets offered work. Checked both directions,
+   * on the delta, same discipline as every other test in this file: a test
+   * driver must move it by nothing, a real one right after by exactly one.
+   */
+  it('MDF-777 exclusion #3: approvedDrivers excludes a simulation driver and still includes a real one', async () => {
+    const before = await get(adminCookies, 'admin/analytics/overview');
+
+    const sim = await makeApprovedDriver();
+    expect((await patch(adminCookies, `admin/drivers/${sim.driverProfileId}/test-mode`, { isTest: true, reason: 'MDF-777 analytics isolation test.' })).status).toBe(200);
+    const midSim = await get(adminCookies, 'admin/analytics/overview');
+    expect(midSim.body.approvedDrivers - before.body.approvedDrivers).toBe(0);
+
+    await makeApprovedDriver();
+    const after = await get(adminCookies, 'admin/analytics/overview');
+    expect(after.body.approvedDrivers - before.body.approvedDrivers).toBe(1);
+  });
+
+  /**
+   * MDF-777 exclusion #3: `publishedProducts` (analytics.service.ts:82)
+   * counted every PUBLISHED product with no join to its vendor at all.
+   * `Product` has no isTest of its own (confirmed against the UAT Walk
+   * Widget fixture, which is why that count is not visibly wrong today —
+   * its vendor is deliberately isTest:false), so the fix joins
+   * `vendorProfile.isTest`. Same both-directions delta discipline.
+   */
+  it('MDF-777 exclusion #3: publishedProducts excludes a simulation vendor\'s product and still includes a real one', async () => {
+    const before = await get(adminCookies, 'admin/analytics/overview');
+
+    const sim = await makeVendor();
+    expect((await patch(adminCookies, `admin/vendors/${sim.vendorProfileId}/test-mode`, { isTest: true, reason: 'MDF-777 analytics isolation test.' })).status).toBe(200);
+    const midSim = await get(adminCookies, 'admin/analytics/overview');
+    expect(midSim.body.publishedProducts - before.body.publishedProducts).toBe(0);
+
+    await makeVendor();
+    const after = await get(adminCookies, 'admin/analytics/overview');
+    expect(after.body.publishedProducts - before.body.publishedProducts).toBe(1);
+  });
+
+  /**
+   * MDF-777 exclusion #3: `totalCustomers` (analytics.service.ts:81) was
+   * `user.count()` with no `where` at all — wrong on two axes at once, not
+   * filtered for isTest AND not scoped to the customer role, so it counted
+   * every user of every role (admins, vendors, drivers, UAT fixtures) as a
+   * "customer". The owner's decision: count non-test users holding the
+   * CUSTOMER role specifically — every registration creates an APPROVED
+   * CUSTOMER UserRole (`auth.service.ts`), so this is not ambiguous even
+   * though the same user may also hold other roles (a vendor is a customer
+   * too, and correctly still counted as one). Same both-directions delta.
+   */
+  it('MDF-777 exclusion #3: totalCustomers excludes a simulation user and still includes a real one', async () => {
+    const before = await get(adminCookies, 'admin/analytics/overview');
+
+    const sim = await register(`cust_sim_${uniq()}@example.bz`);
+    expect((await post(adminCookies, 'admin/users/test-flag', { userId: sim.userId, isTest: true, reason: 'MDF-777 analytics isolation test.' })).status).toBe(201);
+    const midSim = await get(adminCookies, 'admin/analytics/overview');
+    expect(midSim.body.totalCustomers - before.body.totalCustomers).toBe(0);
+
+    await register(`cust_real_${uniq()}@example.bz`);
+    const after = await get(adminCookies, 'admin/analytics/overview');
+    expect(after.body.totalCustomers - before.body.totalCustomers).toBe(1);
   });
 
   /**

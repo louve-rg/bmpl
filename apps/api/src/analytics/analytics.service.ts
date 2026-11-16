@@ -77,9 +77,32 @@ export class AnalyticsService {
         }),
         this.prisma.orderItem.aggregate({ where: { vendorOrder: { order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
         this.prisma.userRole.count({ where: { roleCode: 'VENDOR', status: 'APPROVED' } }),
-        this.prisma.userRole.count({ where: { roleCode: 'DELIVERY_DRIVER', status: 'APPROVED' } }),
-        this.prisma.user.count(),
-        this.prisma.product.count({ where: { status: 'PUBLISHED' } }),
+        // MDF-777 exclusion #3: UserRole has no isTest of its own. Joined to
+        // DriverProfile.isTest specifically (not the separate User.isTest) —
+        // that is the exact flag DriverService's assignmentEligibility /
+        // eligibleDriversForDistrict already trust for the real-dispatch
+        // exclusion, so this count agrees with the mechanism that actually
+        // decides who gets offered work rather than a second, independent
+        // source that could disagree with it. `isNot` (not `is`) so an
+        // approved driver who somehow has no profile row yet is still
+        // counted — only a driver POSITIVELY confirmed as isTest:true is
+        // excluded; absence of a profile is never treated as a test signal.
+        this.prisma.userRole.count({ where: { roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', user: { driverProfile: { isNot: { isTest: true } } } } }),
+        // MDF-777 exclusion #3: was `user.count()` with no `where` at all —
+        // wrong on two axes, not isTest-filtered AND not scoped to the
+        // customer role, so it counted admins/vendors/drivers/UAT fixtures
+        // as customers. Every registration creates an APPROVED CUSTOMER
+        // UserRole (auth.service.ts), so "customer" is an explicit row, not
+        // an implicit or ambiguous definition — a vendor who is also a
+        // customer is correctly still counted once, here, as one.
+        this.prisma.userRole.count({ where: { roleCode: 'CUSTOMER', status: 'APPROVED', user: NOT_TEST } }),
+        // MDF-777 exclusion #3: Product has no isTest of its own (confirmed
+        // against the UAT Walk Widget fixture — its vendor is deliberately
+        // isTest:false, which is why this count is not visibly wrong today;
+        // the gap is real but unexposed). vendorProfile is a required
+        // relation on Product, so a plain filter is safe with no `isNot`
+        // needed.
+        this.prisma.product.count({ where: { status: 'PUBLISHED', vendorProfile: NOT_TEST } }),
         this.prisma.review.aggregate({ where: { status: 'PUBLISHED' }, _count: true, _avg: { rating: true } }),
       ]);
     const gmvMinor = n(gmvAgg._sum.amountMinor);
