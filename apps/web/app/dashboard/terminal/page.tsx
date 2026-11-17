@@ -103,6 +103,26 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * eagerly once the workspace resolves. `GET /terminal/outbound` is the
  * one MDF-700 endpoint deliberately NOT surfaced -- the owner never named
  * departures, and god was explicit it stays out.
+ *
+ * MDF-777 (history): the History tab, consuming `GET /terminal/history`
+ * (Pam's #768, built against the exact contract god relayed -- that
+ * contract, not Pam's source, is what this reads; #768 is not merged at
+ * the time this lands, so this calls a route that does not exist on
+ * `main` yet). MANAGER-only and location-scoped -- same gate as Staff,
+ * and for the same reason: an OPERATOR gets a 403 from the server, so the
+ * tab is hidden on `workspace.memberRole`, never on a failed fetch (a
+ * fetch this screen never makes for an OPERATOR in the first place).
+ * Cursor-paginated (`{ items, nextCursor }`, limit 20 per page) rather
+ * than the single-shot/200-cap shape Inbound and Custody use, so unlike
+ * those two this is loaded lazily on first open of the tab, not eagerly
+ * with the workspace -- a MANAGER who never looks at history should not
+ * cost a request for it on every page load. No live count badge, for the
+ * same reason Lookup has none: a loaded-page length is not an honest
+ * answer to "how many", and this is a browsable log, not a worklist.
+ * `touchedHubs`' own item shape was not specified in the relayed
+ * contract -- `hubLabel` below reads a plain string or an object carrying
+ * `name`/`code`, whichever Pam's branch actually returns, rather than
+ * guessing one and rendering "[object Object]" if it's the other.
  */
 
 interface HubRef {
@@ -201,6 +221,18 @@ interface CustodyRow {
   isTest: boolean;
 }
 
+interface HistoryRow {
+  shipmentId: string;
+  reference: string;
+  status: string;
+  parcel: string;
+  isTest: boolean;
+  createdAt: string;
+  senderName: string;
+  recipientName: string;
+  touchedHubs: unknown[];
+}
+
 /**
  * T-7/MDF-736: `terminalQueue` (shipment.service.ts:5385) stamps `isTest` on
  * every one of its five row shapes -- added here, on each variant, rather
@@ -260,7 +292,7 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
   COLLECT: 'Collect',
 };
 
-type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' | 'LOOKUP';
+type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' | 'HISTORY' | 'LOOKUP';
 
 function errMessage(e: unknown, fallback: string): string {
   return (e as ApiError)?.message ?? fallback;
@@ -268,6 +300,17 @@ function errMessage(e: unknown, fallback: string): string {
 
 const when = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' }) : null;
+
+/** See the MDF-777 (history) header comment above -- `touchedHubs`' item shape wasn't specified. */
+function hubLabel(h: unknown): string {
+  if (typeof h === 'string') return h;
+  if (h && typeof h === 'object') {
+    const o = h as Record<string, unknown>;
+    if (typeof o.name === 'string') return o.name;
+    if (typeof o.code === 'string') return o.code;
+  }
+  return '';
+}
 
 export default function TerminalWorkspacePage() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -299,6 +342,12 @@ export default function TerminalWorkspacePage() {
   const [custodyErr, setCustodyErr] = useState<string | null>(null);
   const [custodyLoading, setCustodyLoading] = useState(false);
   const [custodyHasMore, setCustodyHasMore] = useState(false);
+
+  const [history, setHistory] = useState<HistoryRow[] | null>(null);
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
@@ -411,6 +460,43 @@ export default function TerminalWorkspacePage() {
   useEffect(() => {
     if (workspace) void loadCustody();
   }, [workspace, loadCustody]);
+
+  const loadHistory = useCallback(
+    async (opts?: { more?: boolean }) => {
+      const more = opts?.more ?? false;
+      if (more) setHistoryLoadingMore(true);
+      else setHistoryLoading(true);
+      setHistoryErr(null);
+      try {
+        const qs = more && historyCursor ? `?cursor=${encodeURIComponent(historyCursor)}&limit=20` : '?limit=20';
+        const { items, nextCursor } = await api.get<{ items: HistoryRow[]; nextCursor: string | null }>(`/terminal/history${qs}`);
+        setHistory((prev) => (more ? [...(prev ?? []), ...items] : items));
+        setHistoryCursor(nextCursor ?? null);
+      } catch (e) {
+        setHistoryErr(errMessage(e, 'Could not load shipment history.'));
+      } finally {
+        if (more) setHistoryLoadingMore(false);
+        else setHistoryLoading(false);
+      }
+    },
+    [historyCursor],
+  );
+
+  // MANAGER-only, same as Staff, and gated the same way: on the member role
+  // already read from `workspace`, never on a failed fetch -- an OPERATOR
+  // never triggers this request at all. Lazy, unlike Inbound/Custody: this
+  // is cursor-paginated, not a single capped fetch, so loading it eagerly
+  // on every page view would cost a request a MANAGER who never opens this
+  // tab gets no value from.
+  useEffect(() => {
+    // `!historyErr` matters: without it, a failed load (which never sets
+    // `history`, by design -- same as every other error path in this file)
+    // would re-fire itself on every render this effect re-runs, forever.
+    // A failed load is retried only by the explicit "Try again" button below.
+    if (tab === 'HISTORY' && workspace?.memberRole === 'MANAGER' && history === null && !historyLoading && !historyErr) {
+      void loadHistory();
+    }
+  }, [tab, workspace, history, historyLoading, historyErr, loadHistory]);
 
   function clearRowState(id: string) {
     setRowErr((prev) => {
@@ -697,7 +783,7 @@ export default function TerminalWorkspacePage() {
               'INBOUND',
               'CUSTODY',
               ...SECTION_ORDER.map((s) => s.action),
-              ...(workspace!.memberRole === 'MANAGER' ? (['STAFF'] as const) : []),
+              ...(workspace!.memberRole === 'MANAGER' ? (['STAFF', 'HISTORY'] as const) : []),
               'LOOKUP',
             ] as TabKey[]
           ).map((key, i) => {
@@ -711,9 +797,11 @@ export default function TerminalWorkspacePage() {
                     ? 'On Hand'
                     : key === 'STAFF'
                       ? 'Staff'
-                      : key === 'LOOKUP'
-                        ? 'Lookup'
-                        : TAB_LABELS[key];
+                      : key === 'HISTORY'
+                        ? 'History'
+                        : key === 'LOOKUP'
+                          ? 'Lookup'
+                          : TAB_LABELS[key];
             const count =
               key === 'OVERVIEW'
                 ? totalCount
@@ -723,7 +811,7 @@ export default function TerminalWorkspacePage() {
                     ? (custody ?? []).length
                     : key === 'STAFF'
                       ? activeStaffCount
-                      : key === 'LOOKUP'
+                      : key === 'HISTORY' || key === 'LOOKUP'
                         ? 0
                         : counts[key];
             return (
@@ -761,6 +849,16 @@ export default function TerminalWorkspacePage() {
           <CustodyPanel rows={custody} loading={custodyLoading} error={custodyErr} hasMore={custodyHasMore} onRetry={() => void loadCustody()} />
         ) : tab === 'STAFF' ? (
           <StaffRosterPanel staff={staff} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
+        ) : tab === 'HISTORY' ? (
+          <HistoryPanel
+            rows={history}
+            loading={historyLoading}
+            loadingMore={historyLoadingMore}
+            error={historyErr}
+            hasMore={historyCursor !== null}
+            onRetry={() => void loadHistory()}
+            onLoadMore={() => void loadHistory({ more: true })}
+          />
         ) : tab === 'LOOKUP' ? (
           <LookupPanel
             value={lookupInput}
@@ -1116,6 +1214,89 @@ function CustodyPanel({
           <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">Held since {when(row.heldSince)}</p>
         </Card>
       ))}
+    </div>
+  );
+}
+
+/**
+ * MDF-777 (history): read-only, cursor-paginated past shipments that
+ * touched this MANAGER's locations. No action button -- everything here
+ * is already complete; what a MANAGER can still do about an item is
+ * already covered by Overview/Lookup, not this screen.
+ */
+function HistoryPanel({
+  rows,
+  loading,
+  loadingMore,
+  error,
+  hasMore,
+  onRetry,
+  onLoadMore,
+}: {
+  rows: HistoryRow[] | null;
+  loading: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  hasMore: boolean;
+  onRetry: () => void;
+  onLoadMore: () => void;
+}) {
+  if (loading && !rows) {
+    return <LoadingRow label="Loading shipment history…" />;
+  }
+
+  if (error && !rows) {
+    return (
+      <div className="space-y-3">
+        <Alert tone="error">{error}</Alert>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <EmptyState
+        title="No shipment history yet"
+        description="Completed and past shipments that touched your locations will appear here."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => {
+        const hubs = row.touchedHubs.map(hubLabel).filter(Boolean);
+        return (
+          <Card key={row.shipmentId} className="p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-mono text-sm font-semibold text-[color:var(--bmpl-text)]">{row.reference}</p>
+                <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-secondary)]">{row.parcel}</p>
+                <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted-strong)]">
+                  {row.senderName} → {row.recipientName}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {row.isTest && <Badge tone="neutral">Demo</Badge>}
+                <StatusBadge status={row.status} />
+              </div>
+            </div>
+            {hubs.length > 0 && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">{hubs.join(' → ')}</p>}
+            <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">{when(row.createdAt)}</p>
+          </Card>
+        );
+      })}
+
+      {error && <Alert tone="error">{error}</Alert>}
+
+      {hasMore && (
+        <Button variant="outline" onClick={onLoadMore} disabled={loadingMore} className="w-full">
+          {loadingMore ? 'Loading more…' : 'Load more'}
+        </Button>
+      )}
     </div>
   );
 }
