@@ -1123,6 +1123,15 @@ describe('handoff PIN access', () => {
     const staffAttempt = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
     expect(staffAttempt.status).toBe(400);
 
+    // MDF-777: the self-reveal now has its own stage gate, mirroring
+    // showsOwnHandoffCode — ARRIVING for a FIRST_MILE leg — so this drives
+    // the leg there first, same sequence driveCourierLeg uses up to (but not
+    // through) the handoff itself.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) })).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`)).status).toBe(201);
+
     const selfReveal = await get(driver.cookies, `driver/shipping-jobs/${first.id}/code`);
     expect(selfReveal.status).toBe(200);
     expect(selfReveal.body.code).toBe(await pinOf(first.id));

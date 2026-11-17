@@ -5297,6 +5297,7 @@ export class ShipmentService {
         shipmentId: true,
         kind: true,
         status: true,
+        courierStatus: true,
         assignedDriverProfileId: true,
         handoffPin: true,
         handoffPinAttempts: true,
@@ -5335,6 +5336,22 @@ export class ShipmentService {
       // side (DIRECT has none at all; LINE_HAUL has no courier at all) — no
       // code for either belongs to a courier to present.
       throw new BadRequestException('This leg has no terminal code for a courier to present.');
+    }
+
+    // MDF-777: the driver app's own page effect (`showsOwnHandoffCode`,
+    // apps/web/lib/driver-shipping-job.ts) already refuses to SHOW this
+    // button outside FIRST_MILE/ARRIVING and LAST_MILE/DRIVER_ACCEPTED — but
+    // until this check existed, the endpoint behind that button had no stage
+    // gate of its own and would serve the code at any courierStatus a probe
+    // asked for, before the courier had even accepted the job or after the
+    // leg had already been released. This condition is additive: it never
+    // widens or replaces the kind gate above or the ownership/status checks
+    // below it, and it mirrors the frontend's two eligible pairs exactly, so
+    // a legitimate courier is never refused inside the window the page
+    // already trusts.
+    const eligible = (leg.kind === 'FIRST_MILE' && leg.courierStatus === 'ARRIVING') || (leg.kind === 'LAST_MILE' && leg.courierStatus === 'DRIVER_ACCEPTED');
+    if (!eligible) {
+      throw new BadRequestException('This code is not available right now.');
     }
 
     await this.audit.record({

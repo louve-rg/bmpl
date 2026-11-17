@@ -303,6 +303,78 @@ describe('the courier self-reveal (TERM-5)', () => {
   });
 });
 
+/**
+ * MDF-777: `showsOwnHandoffCode` (apps/web/lib/driver-shipping-job.ts) already
+ * refuses to SHOW the "reveal my code" button outside FIRST_MILE/ARRIVING and
+ * LAST_MILE/DRIVER_ACCEPTED — but until now `revealCourierCode` itself had no
+ * matching stage check, so the endpoint behind that button served the code at
+ * ANY courierStatus. A browser probe (Stanley) confirmed this calling the
+ * route directly: before the courier had even accepted the job, and again
+ * after the terminal had already released the parcel to them. Test 9 and 11
+ * below are those exact two probes; test 10 is the mid-flight state the card
+ * also asked to be covered. The eligible windows themselves are NOT
+ * re-proven here — tests 1 and 3 above already do, on the identical fixture
+ * helpers, and continue to pass unchanged. The UNAUTHORIZED case (a
+ * different driver refused) is also not re-proven here — test 2 above
+ * already proves it, through `ownedLeg`'s 404, which runs before this gate
+ * is ever reached and is untouched by this change.
+ */
+describe('the courier own-code reveal stage gate (MDF-777)', () => {
+  it('9 · refuses the assigned FIRST_MILE courier before they have accepted the job — Stanley\'s own "before accept" probe', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await dispatch.dispatchLeg(firstMile.id);
+    expect((await legRow(firstMile.id)).courierStatus).toBe('ASSIGNED');
+
+    const r = await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBeUndefined();
+    expect(String(r.body.message)).not.toMatch(/ASSIGNED|ARRIVING/);
+  });
+
+  it('10 · refuses the assigned FIRST_MILE courier mid-flight, after pickup but before arriving at the hub', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await dispatch.dispatchLeg(firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    const pickupPin = (await legRow(firstMile.id)).pickupPin!;
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: pickupPin })).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
+    expect((await legRow(firstMile.id)).courierStatus).toBe('IN_TRANSIT');
+
+    const r = await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBeUndefined();
+  });
+
+  it('11 · refuses the LAST_MILE courier after the terminal has already released the parcel to them — Stanley\'s own "after release" probe', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+
+    // The eligible window (DRIVER_ACCEPTED) still works — same proof shape as
+    // test 3 above — and is what the terminal release itself consumes below.
+    const eligible = await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`);
+    expect(eligible.status).toBe(200);
+    const code = eligible.body.code;
+
+    const ops = await makeOperator(['logistics.operate']);
+    expect((await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: code, presentedCourierUserId: lastCourier.userId })).status).toBe(201);
+    expect((await legRow(lastMile.id)).courierStatus).toBe('PICKUP_CONFIRMED');
+
+    const r = await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBeUndefined();
+    expect(String(r.body.message)).not.toMatch(/PICKUP_CONFIRMED|DRIVER_ACCEPTED/);
+  });
+});
+
 describe('staff submit the presented courier\'s code (TERM-5)', () => {
   it('5 · an ops account submits the right code AND the right presented courier — now succeeds where it used to be structurally impossible', async () => {
     const sender = await fundedSender();
