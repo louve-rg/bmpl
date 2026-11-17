@@ -424,6 +424,27 @@ paths:
               schema: { $ref: "#/components/schemas/TerminalPagedCustody" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/history:
+    get:
+      tags: [TerminalStaff]
+      summary: Past shipments that touched any of my granted locations — MANAGER role only
+      description: >-
+        MDF-701. Same hub-touch predicate `lookupForTerminal` already uses
+        (either end of any leg), scoped to `myActiveHubIds`. MANAGER-only,
+        same enforcement and same two distinguishable 403s as `GET
+        /terminal/staff` (`assertActiveMemberRole`, checked before the hub
+        lookup). Cursor-paginated newest-first: `cursor` (a shipment id from
+        a previous page's `nextCursor`) and `limit` (1-100, default 20) are
+        both optional query strings, same convention `inbound`/`outbound`/
+        `custody` already use for `limit`.
+      responses:
+        "200":
+          description: Up to `limit` rows, newest-created first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPagedHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---- Leg custody actions (location-scoped) ----
   /terminal/legs/{id}/depart:
@@ -867,6 +888,27 @@ components:
         parcel: { type: string }
         heldSince: { type: string, format: date-time, description: When the custody event that currently places this shipment at this hub occurred. }
         isTest: { type: boolean }
+    TerminalPagedHistory:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TerminalHistoryItem" } }
+        nextCursor: { type: string, nullable: true, description: "Pass as `cursor` to fetch the next page; null once there is no more." }
+    TerminalHistoryItem:
+      type: object
+      description: Same fact-only shape `TerminalLookupResult` already settled on — no PIN/code/token, no money, no linked account's email/phone/address.
+      properties:
+        shipmentId: { type: string }
+        reference: { type: string }
+        status: { type: string }
+        parcel: { type: string }
+        isTest: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        senderName: { type: string, nullable: true, description: The shipment's own typed origin-name snapshot, never the linked account's own name/contact. }
+        recipientName: { type: string, nullable: true, description: The shipment's own typed destination-name snapshot. }
+        touchedHubs:
+          type: array
+          items: { type: string }
+          description: Names of the CALLER's own hubs this shipment touched — never a hub the caller does not hold.
     TerminalLookupResult:
       type: object
       description: A hand-built allowlist — never the full shipment graph admin's own ops staff see. No PIN/code/token, no money, no linked account's email/phone/address.
