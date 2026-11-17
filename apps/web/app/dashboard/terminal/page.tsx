@@ -76,6 +76,22 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * false -- text, not color or icon alone, per the doc's own accessibility
  * rule. The workspace-header and per-queue-row labelling this same
  * requirement calls for remain blocked on MDF-700, unchanged by this step.
+ *
+ * MDF-777: the Incoming tab, consuming `GET /terminal/inbound`
+ * (terminal.controller.ts, MDF-700/TERM-INBOUND). This endpoint shipped
+ * long before this card but was never read anywhere in apps/web -- Queue's
+ * own ARRIVE section only ever shows a LINE_HAUL leg once it is already
+ * IN_PROGRESS (actionable now); a leg still READY (scheduled, not yet
+ * departed its origin) was invisible anywhere, which was the owner's exact
+ * complaint behind this tab. View-only, same as Lookup and Staff: there is
+ * no action route for an inbound leg a terminal member can take before it
+ * actually arrives, so this tab has no buttons, only the real schedule.
+ * Loaded eagerly once the workspace resolves (same timing as Staff),
+ * rather than lazily on first tab click, so the tab bar's own badge is a
+ * live count from the moment the page is useful, matching every other tab
+ * here. `{ items, hasMore }` is this endpoint's own real shape (unlike
+ * `/terminal/queue`'s header-carried truncation signal) -- read directly
+ * from the body, nothing adapted.
  */
 
 interface HubRef {
@@ -154,6 +170,17 @@ interface LookupResult {
   legs: LookupLeg[];
 }
 
+interface InboundRow {
+  legId: string;
+  hubId: string;
+  reference: string;
+  parcel: string;
+  from: string;
+  scheduledArrivalAt: string | null;
+  departed: boolean;
+  isTest: boolean;
+}
+
 /**
  * T-7/MDF-736: `terminalQueue` (shipment.service.ts:5385) stamps `isTest` on
  * every one of its five row shapes -- added here, on each variant, rather
@@ -213,7 +240,7 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
   COLLECT: 'Collect',
 };
 
-type TabKey = 'OVERVIEW' | QueueRow['action'] | 'STAFF' | 'LOOKUP';
+type TabKey = 'OVERVIEW' | 'INBOUND' | QueueRow['action'] | 'STAFF' | 'LOOKUP';
 
 function errMessage(e: unknown, fallback: string): string {
   return (e as ApiError)?.message ?? fallback;
@@ -242,6 +269,11 @@ export default function TerminalWorkspacePage() {
   const [staff, setStaff] = useState<StaffRoster | null>(null);
   const [staffErr, setStaffErr] = useState<string | null>(null);
   const [staffLoading, setStaffLoading] = useState(false);
+
+  const [inbound, setInbound] = useState<InboundRow[] | null>(null);
+  const [inboundErr, setInboundErr] = useState<string | null>(null);
+  const [inboundLoading, setInboundLoading] = useState(false);
+  const [inboundHasMore, setInboundHasMore] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
@@ -315,6 +347,26 @@ export default function TerminalWorkspacePage() {
   useEffect(() => {
     if (workspace?.memberRole === 'MANAGER') void loadStaff();
   }, [workspace, loadStaff]);
+
+  const loadInbound = useCallback(async () => {
+    setInboundLoading(true);
+    setInboundErr(null);
+    try {
+      const { items, hasMore } = await api.get<{ items: InboundRow[]; hasMore: boolean }>('/terminal/inbound');
+      setInbound(items);
+      setInboundHasMore(hasMore);
+    } catch (e) {
+      setInboundErr(errMessage(e, 'Could not load what is inbound.'));
+    } finally {
+      setInboundLoading(false);
+    }
+  }, []);
+
+  // Every member regardless of role -- inbound visibility is hub-scoped,
+  // not role-scoped, same as the five queue action routes.
+  useEffect(() => {
+    if (workspace) void loadInbound();
+  }, [workspace, loadInbound]);
 
   function clearRowState(id: string) {
     setRowErr((prev) => {
@@ -598,14 +650,17 @@ export default function TerminalWorkspacePage() {
           {(
             [
               'OVERVIEW',
+              'INBOUND',
               ...SECTION_ORDER.map((s) => s.action),
               ...(workspace!.memberRole === 'MANAGER' ? (['STAFF'] as const) : []),
               'LOOKUP',
             ] as TabKey[]
           ).map((key, i) => {
             const active = tab === key;
-            const label = key === 'OVERVIEW' ? 'Overview' : key === 'STAFF' ? 'Staff' : key === 'LOOKUP' ? 'Lookup' : TAB_LABELS[key];
-            const count = key === 'OVERVIEW' ? totalCount : key === 'STAFF' ? activeStaffCount : key === 'LOOKUP' ? 0 : counts[key];
+            const label =
+              key === 'OVERVIEW' ? 'Overview' : key === 'INBOUND' ? 'Incoming' : key === 'STAFF' ? 'Staff' : key === 'LOOKUP' ? 'Lookup' : TAB_LABELS[key];
+            const count =
+              key === 'OVERVIEW' ? totalCount : key === 'INBOUND' ? (inbound ?? []).length : key === 'STAFF' ? activeStaffCount : key === 'LOOKUP' ? 0 : counts[key];
             return (
               <button
                 key={key}
@@ -635,7 +690,9 @@ export default function TerminalWorkspacePage() {
       </div>
 
       <div id="terminal-workspace-panel" role="tabpanel">
-        {tab === 'STAFF' ? (
+        {tab === 'INBOUND' ? (
+          <InboundPanel rows={inbound} loading={inboundLoading} error={inboundErr} hasMore={inboundHasMore} onRetry={() => void loadInbound()} />
+        ) : tab === 'STAFF' ? (
           <StaffRosterPanel staff={staff} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
         ) : tab === 'LOOKUP' ? (
           <LookupPanel
@@ -853,6 +910,78 @@ function QueueRowCard({
         {error && <p className="mt-2 break-words text-xs font-medium text-amber-800">{error}</p>}
       </div>
     </Card>
+  );
+}
+
+/**
+ * MDF-777: view-only -- a LINE_HAUL leg scheduled or already in motion
+ * toward one of this member's hubs, not yet arrived. No action button: the
+ * only thing a terminal member can do about an inbound leg is wait for it,
+ * then act on it once Overview/Arrive picks it up for real.
+ */
+function InboundPanel({
+  rows,
+  loading,
+  error,
+  hasMore,
+  onRetry,
+}: {
+  rows: InboundRow[] | null;
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
+  onRetry: () => void;
+}) {
+  if (loading && !rows) {
+    return <LoadingRow label="Loading what is inbound…" />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <Alert tone="error">{error}</Alert>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <EmptyState
+        title="Nothing inbound"
+        description="No LINE_HAUL leg is currently scheduled or on its way to any of your locations."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {hasMore && (
+        <Alert tone="neutral">
+          There are more inbound parcels than the list below shows. Use Lookup to find a specific one by its reference.
+        </Alert>
+      )}
+      {rows.map((row) => (
+        <Card key={row.legId} className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-mono text-sm font-semibold text-[color:var(--bmpl-text)]">{row.reference}</p>
+              <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-secondary)]">{row.parcel}</p>
+              <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted-strong)]">From {row.from}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {row.isTest && <Badge tone="neutral">Demo</Badge>}
+              <Badge tone={row.departed ? 'brand' : 'neutral'}>{row.departed ? 'In transit' : 'Scheduled'}</Badge>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">
+            {row.scheduledArrivalAt ? `Expected ${when(row.scheduledArrivalAt)}` : 'No scheduled arrival time yet.'}
+          </p>
+        </Card>
+      ))}
+    </div>
   );
 }
 

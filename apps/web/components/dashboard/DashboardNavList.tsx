@@ -36,6 +36,20 @@ function groupHasActiveItem(items: NavItem[], pathname: string, hrefs: string[])
  * before, and nothing here depends on an "active" role. A group containing
  * the page you're currently on starts expanded, so your own location is
  * never hidden behind a click.
+ *
+ * MDF-777: for a terminal company member specifically, this flat/always-open
+ * BASE_NAV *is* the owner's complaint ("sees the generic marketplace
+ * sidebar") -- a live Terminal Company MANAGER's own workspace was one
+ * link buried below 14 un-collapsible customer items. Only for a member
+ * (`terminalForcedVisible`), BASE_NAV is wrapped under its own collapsed-
+ * by-default "Marketplace" heading (same collapse rule every other group
+ * already follows -- open if the current page is inside it, closed
+ * otherwise) and Terminal moves to the front. No item is removed from
+ * either list and no route changes -- marketplace access stays exactly as
+ * reachable as it always was, just not the default view any more. Every
+ * other user's nav (including a terminal member's own OTHER role groups,
+ * e.g. Vendor) is completely unaffected -- this only touches BASE_NAV's
+ * own collapsibility and position, and only when `terminalForcedVisible`.
  */
 export function DashboardNavList({
   me,
@@ -81,10 +95,18 @@ export function DashboardNavList({
     return s;
   }, [carrierForcedVisible, terminalForcedVisible]);
 
-  const groups: Array<{ heading?: string; items: NavItem[] }> = useMemo(
-    () => [{ items: BASE_NAV }, ...visibleRoleGroupsWithOverrides(ROLE_GROUPS, me.roles, forceVisible)],
-    [me.roles, forceVisible],
-  );
+  const groups: Array<{ heading?: string; items: NavItem[] }> = useMemo(() => {
+    const roleGroups = visibleRoleGroupsWithOverrides(ROLE_GROUPS, me.roles, forceVisible);
+    if (!terminalForcedVisible) {
+      return [{ items: BASE_NAV }, ...roleGroups];
+    }
+    // MDF-777: Terminal leads, and BASE_NAV becomes a collapsed-by-default
+    // "Marketplace" group rather than the always-open default -- see the
+    // header comment above for why this is scoped to membership only.
+    const terminalGroup = roleGroups.find((g) => g.heading === 'Terminal');
+    const otherGroups = roleGroups.filter((g) => g.heading !== 'Terminal');
+    return [...(terminalGroup ? [terminalGroup] : []), { heading: 'Marketplace', items: BASE_NAV }, ...otherGroups];
+  }, [me.roles, forceVisible, terminalForcedVisible]);
   const hrefs = useMemo(() => allNavHrefs(groups), [groups]);
 
   // Open-by-default: a group containing the current page. Collapsed-by-default

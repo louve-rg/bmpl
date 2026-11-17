@@ -83,6 +83,17 @@ const RELEASE_ROW = {
 };
 const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels', isTest: false };
 
+const INBOUND_ROW = {
+  legId: 'leg_in1',
+  hubId: HUB.id,
+  reference: 'BML-20',
+  parcel: '1 parcel',
+  from: 'San Pedro Hub',
+  scheduledArrivalAt: '2026-12-01T10:00:00.000Z',
+  departed: false,
+  isTest: false,
+};
+
 const MANAGER_WORKSPACE = { ...WORKSPACE, memberRole: 'MANAGER' };
 const STAFF_ROSTER = {
   members: [
@@ -172,6 +183,10 @@ type StubOpts = {
   staffBody?: unknown;
   lookupStatus?: number;
   lookupBody?: unknown;
+  inboundStatus?: number;
+  inboundItems?: unknown[];
+  inboundHasMore?: boolean;
+  inboundErrorBody?: unknown;
 };
 
 function stubFetch(opts: StubOpts = {}) {
@@ -187,6 +202,12 @@ function stubFetch(opts: StubOpts = {}) {
       }
       if (url.includes('/api/terminal/staff')) {
         return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
+      }
+      if (url.includes('/api/terminal/inbound')) {
+        if (opts.inboundStatus && opts.inboundStatus !== 200) {
+          return jsonResponse(opts.inboundStatus, opts.inboundErrorBody ?? { message: 'Could not load what is inbound.' });
+        }
+        return jsonResponse(200, { items: opts.inboundItems ?? [], hasMore: opts.inboundHasMore ?? false });
       }
       if (url.includes('/api/terminal/shipments/') && method === 'GET') {
         calls.push({ url, method, body: null });
@@ -694,6 +715,79 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('This action requires the terminal manager role.');
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+    });
+  });
+
+  // MDF-777: the Incoming tab, GET /terminal/inbound -- real and deployed
+  // since MDF-700, never read anywhere in apps/web until this card. View
+  // only: there is no action a terminal member can take on a leg that has
+  // not arrived yet, so this tab has no buttons, just the real schedule.
+  describe('MDF-777 — the Incoming tab', () => {
+    it('is visible to every member regardless of role, badged with the real item count', async () => {
+      stubFetch({ queueRows: [], inboundItems: [INBOUND_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(findTab('Incoming').textContent).toBe('Incoming1');
+    });
+
+    it('lists each inbound leg with its reference, parcel, origin and scheduled arrival, with no action button', async () => {
+      stubFetch({ queueRows: [], inboundItems: [INBOUND_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('BML-20');
+      expect(container!.textContent).toContain('1 parcel');
+      expect(container!.textContent).toContain('From San Pedro Hub');
+      expect(container!.textContent).toContain('Scheduled');
+      // No action button anywhere in the panel itself (excludes the tab bar,
+      // whose buttons are always labelled Depart/Arrive/etc. regardless of
+      // which tab is selected).
+      const panel = container!.querySelector('#terminal-workspace-panel')!;
+      expect(panel.querySelectorAll('button').length).toBe(0);
+    });
+
+    it('labels an already-departed leg "In transit" rather than "Scheduled"', async () => {
+      stubFetch({ queueRows: [], inboundItems: [{ ...INBOUND_ROW, departed: true }] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('In transit');
+      expect(container!.textContent).not.toContain('Scheduled');
+    });
+
+    it('shows an honest empty state when nothing is inbound', async () => {
+      stubFetch({ queueRows: [], inboundItems: [] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('Nothing inbound');
+    });
+
+    it('surfaces a real refusal if /terminal/inbound fails, with a retry, without taking down the rest of the page', async () => {
+      stubFetch({ queueRows: [DEPART_ROW], inboundStatus: 500, inboundErrorBody: { message: 'Something went wrong loading your inbound list.' } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('Something went wrong loading your inbound list.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+      // The Depart tab's own data, loaded independently, is unaffected.
+      await clickTab('Depart');
+      expect(container!.textContent).toContain('BML-1');
     });
   });
 
