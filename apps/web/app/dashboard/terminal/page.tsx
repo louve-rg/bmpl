@@ -92,6 +92,17 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * here. `{ items, hasMore }` is this endpoint's own real shape (unlike
  * `/terminal/queue`'s header-carried truncation signal) -- read directly
  * from the body, nothing adapted.
+ *
+ * MDF-777 (god's addition, not scope creep -- the owner's demo names
+ * "confirming custody" explicitly, and this is the one view that makes the
+ * dashboard operational rather than a set of action tabs): the On Hand
+ * tab, consuming `GET /terminal/custody`. Same shape and timing as
+ * Incoming -- real, deployed since MDF-700, never read anywhere in
+ * apps/web before this; view-only (there is no "release from custody"
+ * action distinct from the ones Queue's own tabs already offer); loaded
+ * eagerly once the workspace resolves. `GET /terminal/outbound` is the
+ * one MDF-700 endpoint deliberately NOT surfaced -- the owner never named
+ * departures, and god was explicit it stays out.
  */
 
 interface HubRef {
@@ -181,6 +192,15 @@ interface InboundRow {
   isTest: boolean;
 }
 
+interface CustodyRow {
+  shipmentId: string;
+  hubId: string;
+  reference: string;
+  parcel: string;
+  heldSince: string;
+  isTest: boolean;
+}
+
 /**
  * T-7/MDF-736: `terminalQueue` (shipment.service.ts:5385) stamps `isTest` on
  * every one of its five row shapes -- added here, on each variant, rather
@@ -240,7 +260,7 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
   COLLECT: 'Collect',
 };
 
-type TabKey = 'OVERVIEW' | 'INBOUND' | QueueRow['action'] | 'STAFF' | 'LOOKUP';
+type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' | 'LOOKUP';
 
 function errMessage(e: unknown, fallback: string): string {
   return (e as ApiError)?.message ?? fallback;
@@ -274,6 +294,11 @@ export default function TerminalWorkspacePage() {
   const [inboundErr, setInboundErr] = useState<string | null>(null);
   const [inboundLoading, setInboundLoading] = useState(false);
   const [inboundHasMore, setInboundHasMore] = useState(false);
+
+  const [custody, setCustody] = useState<CustodyRow[] | null>(null);
+  const [custodyErr, setCustodyErr] = useState<string | null>(null);
+  const [custodyLoading, setCustodyLoading] = useState(false);
+  const [custodyHasMore, setCustodyHasMore] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
@@ -367,6 +392,25 @@ export default function TerminalWorkspacePage() {
   useEffect(() => {
     if (workspace) void loadInbound();
   }, [workspace, loadInbound]);
+
+  const loadCustody = useCallback(async () => {
+    setCustodyLoading(true);
+    setCustodyErr(null);
+    try {
+      const { items, hasMore } = await api.get<{ items: CustodyRow[]; hasMore: boolean }>('/terminal/custody');
+      setCustody(items);
+      setCustodyHasMore(hasMore);
+    } catch (e) {
+      setCustodyErr(errMessage(e, 'Could not load what you are holding.'));
+    } finally {
+      setCustodyLoading(false);
+    }
+  }, []);
+
+  // Same visibility rule as Inbound -- hub-scoped, not role-scoped.
+  useEffect(() => {
+    if (workspace) void loadCustody();
+  }, [workspace, loadCustody]);
 
   function clearRowState(id: string) {
     setRowErr((prev) => {
@@ -651,6 +695,7 @@ export default function TerminalWorkspacePage() {
             [
               'OVERVIEW',
               'INBOUND',
+              'CUSTODY',
               ...SECTION_ORDER.map((s) => s.action),
               ...(workspace!.memberRole === 'MANAGER' ? (['STAFF'] as const) : []),
               'LOOKUP',
@@ -658,9 +703,29 @@ export default function TerminalWorkspacePage() {
           ).map((key, i) => {
             const active = tab === key;
             const label =
-              key === 'OVERVIEW' ? 'Overview' : key === 'INBOUND' ? 'Incoming' : key === 'STAFF' ? 'Staff' : key === 'LOOKUP' ? 'Lookup' : TAB_LABELS[key];
+              key === 'OVERVIEW'
+                ? 'Overview'
+                : key === 'INBOUND'
+                  ? 'Incoming'
+                  : key === 'CUSTODY'
+                    ? 'On Hand'
+                    : key === 'STAFF'
+                      ? 'Staff'
+                      : key === 'LOOKUP'
+                        ? 'Lookup'
+                        : TAB_LABELS[key];
             const count =
-              key === 'OVERVIEW' ? totalCount : key === 'INBOUND' ? (inbound ?? []).length : key === 'STAFF' ? activeStaffCount : key === 'LOOKUP' ? 0 : counts[key];
+              key === 'OVERVIEW'
+                ? totalCount
+                : key === 'INBOUND'
+                  ? (inbound ?? []).length
+                  : key === 'CUSTODY'
+                    ? (custody ?? []).length
+                    : key === 'STAFF'
+                      ? activeStaffCount
+                      : key === 'LOOKUP'
+                        ? 0
+                        : counts[key];
             return (
               <button
                 key={key}
@@ -692,6 +757,8 @@ export default function TerminalWorkspacePage() {
       <div id="terminal-workspace-panel" role="tabpanel">
         {tab === 'INBOUND' ? (
           <InboundPanel rows={inbound} loading={inboundLoading} error={inboundErr} hasMore={inboundHasMore} onRetry={() => void loadInbound()} />
+        ) : tab === 'CUSTODY' ? (
+          <CustodyPanel rows={custody} loading={custodyLoading} error={custodyErr} hasMore={custodyHasMore} onRetry={() => void loadCustody()} />
         ) : tab === 'STAFF' ? (
           <StaffRosterPanel staff={staff} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
         ) : tab === 'LOOKUP' ? (
@@ -979,6 +1046,74 @@ function InboundPanel({
           <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">
             {row.scheduledArrivalAt ? `Expected ${when(row.scheduledArrivalAt)}` : 'No scheduled arrival time yet.'}
           </p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * MDF-777: view-only -- what this terminal physically holds right now,
+ * derived from the shipment's own latest custody event (never inferred
+ * from status). No action button: whatever happens to a held parcel next
+ * (hand off, release, collect) is already covered by Queue's own tabs --
+ * this exists to answer "what's on the counter", not to duplicate an
+ * action surface that already exists.
+ */
+function CustodyPanel({
+  rows,
+  loading,
+  error,
+  hasMore,
+  onRetry,
+}: {
+  rows: CustodyRow[] | null;
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
+  onRetry: () => void;
+}) {
+  if (loading && !rows) {
+    return <LoadingRow label="Loading what you are holding…" />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <Alert tone="error">{error}</Alert>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <EmptyState
+        title="Nothing on hand"
+        description="Your locations are not currently holding custody of any shipment."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {hasMore && (
+        <Alert tone="neutral">
+          There is more on hand than the list below shows. Use Lookup to find a specific one by its reference.
+        </Alert>
+      )}
+      {rows.map((row) => (
+        <Card key={row.shipmentId} className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-mono text-sm font-semibold text-[color:var(--bmpl-text)]">{row.reference}</p>
+              <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-secondary)]">{row.parcel}</p>
+            </div>
+            {row.isTest && <Badge tone="neutral">Demo</Badge>}
+          </div>
+          <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">Held since {when(row.heldSince)}</p>
         </Card>
       ))}
     </div>

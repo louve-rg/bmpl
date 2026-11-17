@@ -94,6 +94,15 @@ const INBOUND_ROW = {
   isTest: false,
 };
 
+const CUSTODY_ROW = {
+  shipmentId: 'ship_30',
+  hubId: HUB.id,
+  reference: 'BML-30',
+  parcel: '1 parcel',
+  heldSince: '2026-11-15T09:00:00.000Z',
+  isTest: false,
+};
+
 const MANAGER_WORKSPACE = { ...WORKSPACE, memberRole: 'MANAGER' };
 const STAFF_ROSTER = {
   members: [
@@ -187,6 +196,10 @@ type StubOpts = {
   inboundItems?: unknown[];
   inboundHasMore?: boolean;
   inboundErrorBody?: unknown;
+  custodyStatus?: number;
+  custodyItems?: unknown[];
+  custodyHasMore?: boolean;
+  custodyErrorBody?: unknown;
 };
 
 function stubFetch(opts: StubOpts = {}) {
@@ -208,6 +221,12 @@ function stubFetch(opts: StubOpts = {}) {
           return jsonResponse(opts.inboundStatus, opts.inboundErrorBody ?? { message: 'Could not load what is inbound.' });
         }
         return jsonResponse(200, { items: opts.inboundItems ?? [], hasMore: opts.inboundHasMore ?? false });
+      }
+      if (url.includes('/api/terminal/custody')) {
+        if (opts.custodyStatus && opts.custodyStatus !== 200) {
+          return jsonResponse(opts.custodyStatus, opts.custodyErrorBody ?? { message: 'Could not load what you are holding.' });
+        }
+        return jsonResponse(200, { items: opts.custodyItems ?? [], hasMore: opts.custodyHasMore ?? false });
       }
       if (url.includes('/api/terminal/shipments/') && method === 'GET') {
         calls.push({ url, method, body: null });
@@ -786,6 +805,61 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('Something went wrong loading your inbound list.');
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
       // The Depart tab's own data, loaded independently, is unaffected.
+      await clickTab('Depart');
+      expect(container!.textContent).toContain('BML-1');
+    });
+  });
+
+  // MDF-777 (god's addition): the On Hand tab, GET /terminal/custody --
+  // what this terminal physically holds right now. Same shape as Incoming:
+  // view-only, lazy badge from a real count, no action button.
+  describe('MDF-777 — the On Hand tab', () => {
+    it('is visible to every member regardless of role, badged with the real item count', async () => {
+      stubFetch({ queueRows: [], custodyItems: [CUSTODY_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(findTab('On Hand').textContent).toBe('On Hand1');
+    });
+
+    it('lists each held shipment with its reference, parcel and how long it has been held, with no action button', async () => {
+      stubFetch({ queueRows: [], custodyItems: [CUSTODY_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('BML-30');
+      expect(container!.textContent).toContain('1 parcel');
+      expect(container!.textContent).toContain('Held since');
+      const panel = container!.querySelector('#terminal-workspace-panel')!;
+      expect(panel.querySelectorAll('button').length).toBe(0);
+    });
+
+    it('shows an honest empty state when nothing is on hand', async () => {
+      stubFetch({ queueRows: [], custodyItems: [] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('Nothing on hand');
+    });
+
+    it('surfaces a real refusal if /terminal/custody fails, with a retry, without taking down the rest of the page', async () => {
+      stubFetch({ queueRows: [DEPART_ROW], custodyStatus: 500, custodyErrorBody: { message: 'Something went wrong loading what you hold.' } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('Something went wrong loading what you hold.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
       await clickTab('Depart');
       expect(container!.textContent).toContain('BML-1');
     });
