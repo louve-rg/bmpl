@@ -5800,6 +5800,92 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-701 (TERM-HISTORY): the owner's required section list names
+   * "Shipment lookup, tracking, and history" and bans a placeholder — this
+   * is the missing third. `terminalQueue`/`terminalInbound`/
+   * `terminalOutbound`/`terminalCustody` above all answer "what needs my
+   * attention right now"; nothing anywhere answered "what has already
+   * passed through my counter," so this is a genuinely new read, not a
+   * widened existing one.
+   *
+   * Same hub-scoping discipline as every other terminal-facing read on this
+   * service: `hubIds` is handed in by the caller (`TerminalController`,
+   * from `TerminalService.myActiveHubIds`, re-read at call time) and this
+   * method never trusts a hub id it was not explicitly given. The "touches
+   * one of my hubs" predicate is the exact one `lookupForTerminal` already
+   * uses (either end of any leg) — reused, not reinvented, so a shipment
+   * this method lists is always one `lookupForTerminal` could also find for
+   * the same caller.
+   *
+   * Cursor-paginated on `Shipment.id`, ordered newest-created-first — the
+   * same shape `NotificationsService.listForUser` already established
+   * (`take: limit + 1`, `cursor`/`skip: 1`, `nextCursor` from the last row
+   * kept), reused rather than inventing a second pagination convention for
+   * this codebase. No schema change: both the hub-touch filter and the
+   * ordering key already exist on `Shipment`/`ShipmentLeg`.
+   *
+   * `touchedHubs` names which of the CALLER's own hubs this shipment
+   * touched (never a hub the caller does not hold) — useful the moment a
+   * caller holds more than one location, and impossible to get wrong since
+   * it is derived from the same `hubIds` the filter itself used, not
+   * re-queried.
+   *
+   * Same minimal, fact-only shape `lookupForTerminal` already settled on:
+   * no pin, code, token, money, or the counterparty's contact details —
+   * only what a terminal clerk reviewing their own counter's past work
+   * needs to see.
+   */
+  async terminalHistory(hubIds: string[], opts: { cursor?: string; limit?: number } = {}) {
+    if (hubIds.length === 0) return { items: [], nextCursor: null };
+    const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+    const rows = await this.prisma.shipment.findMany({
+      where: { legs: { some: { OR: [{ originHubId: { in: hubIds } }, { destinationHubId: { in: hubIds } }] } } },
+      orderBy: { createdAt: 'desc' },
+      take: limit + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        description: true,
+        pieces: true,
+        isTest: true,
+        createdAt: true,
+        originName: true,
+        destinationName: true,
+        legs: {
+          select: {
+            originHubId: true,
+            destinationHubId: true,
+            originHub: { select: { name: true } },
+            destinationHub: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit).map((s) => {
+      const touchedHubs = new Set<string>();
+      for (const l of s.legs) {
+        if (l.originHubId != null && hubIds.includes(l.originHubId) && l.originHub) touchedHubs.add(l.originHub.name);
+        if (l.destinationHubId != null && hubIds.includes(l.destinationHubId) && l.destinationHub) touchedHubs.add(l.destinationHub.name);
+      }
+      return {
+        shipmentId: s.id,
+        reference: s.reference,
+        status: s.status,
+        parcel: this.parcelLabel(s),
+        isTest: s.isTest,
+        createdAt: s.createdAt,
+        senderName: s.originName,
+        recipientName: s.destinationName,
+        touchedHubs: [...touchedHubs],
+      };
+    });
+    return { items, nextCursor: hasMore ? items[items.length - 1]!.shipmentId : null };
+  }
+
+  /**
    * MDF-699 (TERM-LOOKUP): the search `terminal-feature-inventory.md` row 5
    * named as "the most basic counter task" and genuinely missing — no query
    * parameter existed anywhere, so a counter clerk could not look up a

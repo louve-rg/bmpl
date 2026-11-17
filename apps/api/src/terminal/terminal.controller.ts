@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   acceptTerminalInviteSchema,
@@ -229,6 +229,25 @@ export class TerminalController {
   async custody(@CurrentUser() u: AuthContext) {
     const hubIds = await this.terminal.myActiveHubIds(u.userId);
     return this.shipments.terminalCustody(hubIds);
+  }
+
+  /**
+   * MDF-701 (TERM-HISTORY): the owner's required "Shipment lookup,
+   * tracking, and history" section has no placeholder allowed, and no
+   * past-shipments list existed anywhere for a terminal. MANAGER-only,
+   * same as `staff` above and for the same reason — `myStaff`'s own doc
+   * comment already names "history/reporting" as one of the owner's
+   * MANAGER-only capabilities, alongside staff view; this is the first of
+   * those to get an endpoint. `assertActiveMemberRole` is checked FIRST,
+   * before `myActiveHubIds`, so an OPERATOR (or a non-member) gets the
+   * same two distinguishable 403s `staff` already gives, never a hub list
+   * computed for a role that cannot use it.
+   */
+  @Get('history')
+  async history(@CurrentUser() u: AuthContext, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
+    await this.terminal.assertActiveMemberRole(u.userId, ['MANAGER']);
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.terminalHistory(hubIds, { cursor, limit: limit ? Number(limit) : undefined });
   }
 }
 

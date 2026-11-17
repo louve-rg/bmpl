@@ -304,6 +304,9 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     { controller: 'TerminalController', route: 'GET /terminal/inbound', roles: 'ANY', throttled: false },
     { controller: 'TerminalController', route: 'GET /terminal/outbound', roles: 'ANY', throttled: false },
     { controller: 'TerminalController', route: 'GET /terminal/custody', roles: 'ANY', throttled: false },
+    // MDF-701: history/reporting is the owner's own MANAGER-only split,
+    // named in TerminalService.myStaff's doc comment — same role as /staff.
+    { controller: 'TerminalController', route: 'GET /terminal/history', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },
