@@ -49,9 +49,17 @@ export class OpsService {
     ] = await Promise.all([
       this.prisma.vendorProfile.count({ where: { approvalStatus: 'PENDING' } }),
       this.prisma.product.count({ where: { status: 'PENDING_REVIEW' } }),
-      this.prisma.driverVehicle.count({ where: { approvalStatus: 'PENDING' } }),
-      this.prisma.roleApplication.count({ where: { status: 'PENDING' } }),
-      this.prisma.roleApplication.count({ where: { status: 'MORE_INFO_REQUIRED' } }),
+      // MDF-777 exclusion #3: DriverVehicle.driverProfile is a REQUIRED
+      // relation (never absent), so a direct filter is safe — no isNot
+      // needed, unlike the optional profile relations elsewhere in this fix.
+      this.prisma.driverVehicle.count({ where: { approvalStatus: 'PENDING', driverProfile: { isTest: false } } }),
+      // MDF-777 exclusion #3: RoleApplication.roleCode spans all 14 RoleCode
+      // values (vendor, passenger driver, etc.), so DriverProfile.isTest
+      // would not even exist for most rows. User.isTest is the only
+      // generically-correct source here. RoleApplication.user is a REQUIRED
+      // relation, so a direct filter needs no isNot.
+      this.prisma.roleApplication.count({ where: { status: 'PENDING', user: { isTest: false } } }),
+      this.prisma.roleApplication.count({ where: { status: 'MORE_INFO_REQUIRED', user: { isTest: false } } }),
       this.prisma.reviewReport.count({ where: { status: 'OPEN' } }),
       this.prisma.conversation.count({ where: { contextType: 'SUPPORT_CASE', status: 'OPEN' } }),
       // MDF-777 exclusion #3: a simulation settlement/order must not inflate
