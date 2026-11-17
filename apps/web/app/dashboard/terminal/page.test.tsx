@@ -83,6 +83,39 @@ const RELEASE_ROW = {
 };
 const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels', isTest: false };
 
+const INBOUND_ROW = {
+  legId: 'leg_in1',
+  hubId: HUB.id,
+  reference: 'BML-20',
+  parcel: '1 parcel',
+  from: 'San Pedro Hub',
+  scheduledArrivalAt: '2026-12-01T10:00:00.000Z',
+  departed: false,
+  isTest: false,
+};
+
+const CUSTODY_ROW = {
+  shipmentId: 'ship_30',
+  hubId: HUB.id,
+  reference: 'BML-30',
+  parcel: '1 parcel',
+  heldSince: '2026-11-15T09:00:00.000Z',
+  isTest: false,
+};
+
+const HISTORY_ROW = {
+  shipmentId: 'ship_40',
+  reference: 'BML-40',
+  status: 'DELIVERED',
+  parcel: '1 parcel',
+  isTest: false,
+  createdAt: '2026-11-10T08:00:00.000Z',
+  senderName: 'Ana Cruz',
+  recipientName: 'Luis Tun',
+  touchedHubs: ['Belize City Hub', 'San Pedro Hub'],
+};
+const HISTORY_ROW_2 = { ...HISTORY_ROW, shipmentId: 'ship_41', reference: 'BML-41' };
+
 const MANAGER_WORKSPACE = { ...WORKSPACE, memberRole: 'MANAGER' };
 const STAFF_ROSTER = {
   members: [
@@ -172,6 +205,20 @@ type StubOpts = {
   staffBody?: unknown;
   lookupStatus?: number;
   lookupBody?: unknown;
+  inboundStatus?: number;
+  inboundItems?: unknown[];
+  inboundHasMore?: boolean;
+  inboundErrorBody?: unknown;
+  custodyStatus?: number;
+  custodyItems?: unknown[];
+  custodyHasMore?: boolean;
+  custodyErrorBody?: unknown;
+  historyStatus?: number;
+  historyErrorBody?: unknown;
+  historyItems?: unknown[];
+  historyNextCursor?: string | null;
+  historyMoreItems?: unknown[];
+  historyMoreNextCursor?: string | null;
 };
 
 function stubFetch(opts: StubOpts = {}) {
@@ -187,6 +234,28 @@ function stubFetch(opts: StubOpts = {}) {
       }
       if (url.includes('/api/terminal/staff')) {
         return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
+      }
+      if (url.includes('/api/terminal/inbound')) {
+        if (opts.inboundStatus && opts.inboundStatus !== 200) {
+          return jsonResponse(opts.inboundStatus, opts.inboundErrorBody ?? { message: 'Could not load what is inbound.' });
+        }
+        return jsonResponse(200, { items: opts.inboundItems ?? [], hasMore: opts.inboundHasMore ?? false });
+      }
+      if (url.includes('/api/terminal/custody')) {
+        if (opts.custodyStatus && opts.custodyStatus !== 200) {
+          return jsonResponse(opts.custodyStatus, opts.custodyErrorBody ?? { message: 'Could not load what you are holding.' });
+        }
+        return jsonResponse(200, { items: opts.custodyItems ?? [], hasMore: opts.custodyHasMore ?? false });
+      }
+      if (url.includes('/api/terminal/history')) {
+        calls.push({ url, method, body: null });
+        if (opts.historyStatus && opts.historyStatus !== 200) {
+          return jsonResponse(opts.historyStatus, opts.historyErrorBody ?? { message: 'Could not load shipment history.' });
+        }
+        if (/cursor=/.test(url)) {
+          return jsonResponse(200, { items: opts.historyMoreItems ?? [], nextCursor: opts.historyMoreNextCursor ?? null });
+        }
+        return jsonResponse(200, { items: opts.historyItems ?? [], nextCursor: opts.historyNextCursor ?? null });
       }
       if (url.includes('/api/terminal/shipments/') && method === 'GET') {
         calls.push({ url, method, body: null });
@@ -694,6 +763,246 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('This action requires the terminal manager role.');
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+    });
+  });
+
+  // MDF-777 (history): the MANAGER-only History tab, GET /terminal/history
+  // (Pam's #768, built against the contract god relayed). Gated on
+  // workspace.memberRole, never on a failed fetch -- an OPERATOR never
+  // triggers this request at all. Lazy (loaded on first tab open), unlike
+  // Inbound/Custody, since it is cursor-paginated rather than a single
+  // capped fetch.
+  describe('MDF-777 — the MANAGER-only History tab', () => {
+    it('never renders a History tab for an OPERATOR, and never calls /terminal/history', async () => {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          calls.push(url);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, WORKSPACE);
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, []);
+          if (url.includes('/api/terminal/inbound')) return jsonResponse(200, { items: [], hasMore: false });
+          if (url.includes('/api/terminal/custody')) return jsonResponse(200, { items: [], hasMore: false });
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+
+      expect(() => findTab('History')).toThrow();
+      expect(calls.some((u) => u.includes('/terminal/history'))).toBe(false);
+    });
+
+    it('shows a History tab for a MANAGER with no live count badge, and does not fetch until it is opened', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [HISTORY_ROW] });
+      await mount();
+
+      expect(findTab('History').textContent).toBe('History');
+      expect(calls.some((c) => c.url.includes('/terminal/history'))).toBe(false);
+
+      await clickTab('History');
+      expect(calls.some((c) => c.url.includes('/terminal/history'))).toBe(true);
+    });
+
+    it("renders each row's reference, parcel, sender, recipient, status, touched hubs and Demo badge when isTest", async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [{ ...HISTORY_ROW, isTest: true }] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('BML-40');
+      expect(container!.textContent).toContain('1 parcel');
+      expect(container!.textContent).toContain('Ana Cruz');
+      expect(container!.textContent).toContain('Luis Tun');
+      expect(container!.textContent).toContain('DELIVERED');
+      expect(container!.textContent).toContain('Belize City Hub');
+      expect(container!.textContent).toContain('San Pedro Hub');
+      expect(container!.textContent).toContain('Demo');
+    });
+
+    it('shows an honest empty state when there is no history yet', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('No shipment history yet');
+    });
+
+    it('surfaces a real refusal with a retry, without taking down the rest of the page', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [DEPART_ROW],
+        historyStatus: 500,
+        historyErrorBody: { message: 'Something went wrong loading history.' },
+      });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('Something went wrong loading history.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+      await clickTab('Depart');
+      expect(container!.textContent).toContain('BML-1');
+    });
+
+    it('offers a Load more button when a next cursor is returned, and fetches the next page on click', async () => {
+      const calls = stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        historyItems: [HISTORY_ROW],
+        historyNextCursor: 'ship_40',
+        historyMoreItems: [HISTORY_ROW_2],
+        historyMoreNextCursor: null,
+      });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('BML-40');
+      const loadMore = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Load more')!;
+      expect(loadMore).toBeDefined();
+      await act(async () => {
+        loadMore.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(calls.some((c) => c.url.includes('/terminal/history') && c.url.includes('cursor=ship_40'))).toBe(true);
+      expect(container!.textContent).toContain('BML-40');
+      expect(container!.textContent).toContain('BML-41');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Load more')).toBe(false);
+    });
+
+    it('shows no Load more button when there is no next cursor', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [HISTORY_ROW], historyNextCursor: null });
+      await mount();
+      await clickTab('History');
+
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Load more')).toBe(false);
+    });
+  });
+
+  // MDF-777: the Incoming tab, GET /terminal/inbound -- real and deployed
+  // since MDF-700, never read anywhere in apps/web until this card. View
+  // only: there is no action a terminal member can take on a leg that has
+  // not arrived yet, so this tab has no buttons, just the real schedule.
+  describe('MDF-777 — the Incoming tab', () => {
+    it('is visible to every member regardless of role, badged with the real item count', async () => {
+      stubFetch({ queueRows: [], inboundItems: [INBOUND_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(findTab('Incoming').textContent).toBe('Incoming1');
+    });
+
+    it('lists each inbound leg with its reference, parcel, origin and scheduled arrival, with no action button', async () => {
+      stubFetch({ queueRows: [], inboundItems: [INBOUND_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('BML-20');
+      expect(container!.textContent).toContain('1 parcel');
+      expect(container!.textContent).toContain('From San Pedro Hub');
+      expect(container!.textContent).toContain('Scheduled');
+      // No action button anywhere in the panel itself (excludes the tab bar,
+      // whose buttons are always labelled Depart/Arrive/etc. regardless of
+      // which tab is selected).
+      const panel = container!.querySelector('#terminal-workspace-panel')!;
+      expect(panel.querySelectorAll('button').length).toBe(0);
+    });
+
+    it('labels an already-departed leg "In transit" rather than "Scheduled"', async () => {
+      stubFetch({ queueRows: [], inboundItems: [{ ...INBOUND_ROW, departed: true }] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('In transit');
+      expect(container!.textContent).not.toContain('Scheduled');
+    });
+
+    it('shows an honest empty state when nothing is inbound', async () => {
+      stubFetch({ queueRows: [], inboundItems: [] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('Nothing inbound');
+    });
+
+    it('surfaces a real refusal if /terminal/inbound fails, with a retry, without taking down the rest of the page', async () => {
+      stubFetch({ queueRows: [DEPART_ROW], inboundStatus: 500, inboundErrorBody: { message: 'Something went wrong loading your inbound list.' } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('Something went wrong loading your inbound list.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+      // The Depart tab's own data, loaded independently, is unaffected.
+      await clickTab('Depart');
+      expect(container!.textContent).toContain('BML-1');
+    });
+  });
+
+  // MDF-777 (god's addition): the On Hand tab, GET /terminal/custody --
+  // what this terminal physically holds right now. Same shape as Incoming:
+  // view-only, lazy badge from a real count, no action button.
+  describe('MDF-777 — the On Hand tab', () => {
+    it('is visible to every member regardless of role, badged with the real item count', async () => {
+      stubFetch({ queueRows: [], custodyItems: [CUSTODY_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(findTab('On Hand').textContent).toBe('On Hand1');
+    });
+
+    it('lists each held shipment with its reference, parcel and how long it has been held, with no action button', async () => {
+      stubFetch({ queueRows: [], custodyItems: [CUSTODY_ROW] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('BML-30');
+      expect(container!.textContent).toContain('1 parcel');
+      expect(container!.textContent).toContain('Held since');
+      const panel = container!.querySelector('#terminal-workspace-panel')!;
+      expect(panel.querySelectorAll('button').length).toBe(0);
+    });
+
+    it('shows an honest empty state when nothing is on hand', async () => {
+      stubFetch({ queueRows: [], custodyItems: [] });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('Nothing on hand');
+    });
+
+    it('surfaces a real refusal if /terminal/custody fails, with a retry, without taking down the rest of the page', async () => {
+      stubFetch({ queueRows: [DEPART_ROW], custodyStatus: 500, custodyErrorBody: { message: 'Something went wrong loading what you hold.' } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('On Hand');
+
+      expect(container!.textContent).toContain('Something went wrong loading what you hold.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+      await clickTab('Depart');
+      expect(container!.textContent).toContain('BML-1');
     });
   });
 

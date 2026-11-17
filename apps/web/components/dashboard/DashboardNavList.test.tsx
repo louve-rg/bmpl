@@ -19,7 +19,11 @@ import type { MeView } from '../../lib/types';
 // on every call would make the hook's effect (deps include `router`) look
 // like it changed every render and re-run forever (BMPL-380's own hazard).
 const router = { push: vi.fn() };
-vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard', useRouter: () => router }));
+// MDF-777: a mutable mock so a test can simulate being on a page outside
+// BASE_NAV -- every existing test keeps today's unchanged default ('/dashboard',
+// BASE_NAV's own Overview href) unless it explicitly overrides this.
+const pathname = vi.fn(() => '/dashboard');
+vi.mock('next/navigation', () => ({ usePathname: () => pathname(), useRouter: () => router }));
 
 const apiGet = vi.fn();
 vi.mock('../../lib/api', () => ({
@@ -55,6 +59,7 @@ let container: HTMLDivElement | null = null;
 beforeEach(() => {
   apiGet.mockReset();
   router.push.mockReset();
+  pathname.mockReturnValue('/dashboard');
 });
 
 afterEach(() => {
@@ -461,6 +466,61 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       });
 
       expect(container.querySelector('[data-testid="terminal-membership-error"]')).not.toBeNull();
+    });
+  });
+
+  /**
+   * MDF-777: the owner's complaint was a live Terminal Company MANAGER
+   * seeing the generic marketplace sidebar -- BASE_NAV rendered flat and
+   * un-collapsible above a single buried "Terminal" link. For a member
+   * only, BASE_NAV now wraps under its own collapsed-by-default
+   * "Marketplace" heading and Terminal leads. Every other user's nav
+   * (asserted by the TERM-11/MDF-720/TERM-NAV-401 tests above, none of
+   * which this touches) is unchanged.
+   */
+  describe('Marketplace reshaping for a terminal member (MDF-777)', () => {
+    function mockMember(memberRole: 'MANAGER' | 'OPERATOR' = 'MANAGER') {
+      apiGet.mockImplementation((path: string) =>
+        path === '/terminal/me' ? Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole, locations: [] }) : Promise.resolve([]),
+      );
+    }
+
+    it('wraps BASE_NAV under a collapsed-by-default "Marketplace" heading when the current page is not inside it', async () => {
+      mockMember();
+      pathname.mockReturnValue('/dashboard/terminal'); // inside Terminal, not BASE_NAV
+      const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+      expect(c.textContent).toMatch(/Marketplace/);
+      const overviewLink = Array.from(c.querySelectorAll('a')).find((a) => a.textContent === 'Overview');
+      expect(overviewLink).toBeDefined();
+      expect(overviewLink!.closest('div')!.className).toMatch(/hidden/);
+    });
+
+    it('Marketplace stays fully reachable -- its own toggle expands it, same as any other collapsible group', async () => {
+      mockMember();
+      pathname.mockReturnValue('/dashboard/terminal');
+      const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+      const heading = Array.from(c.querySelectorAll('button')).find((b) => b.textContent?.includes('Marketplace'))!;
+      expect(heading).toBeDefined();
+      await act(async () => {
+        heading.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      const overviewLink = Array.from(c.querySelectorAll('a')).find((a) => a.textContent === 'Overview')!;
+      expect(overviewLink.closest('div')!.className).not.toMatch(/hidden/);
+      // Nothing was removed -- every BASE_NAV item, e.g. Wallet, is still there.
+      expect(c.textContent).toMatch(/Wallet/);
+    });
+
+    it('does not reshape the nav for a non-member -- BASE_NAV stays flat and un-collapsible, exactly as before', async () => {
+      apiGet.mockImplementation((path: string) => (path === '/terminal/me' ? Promise.reject({ status: 403 }) : Promise.resolve([])));
+      pathname.mockReturnValue('/wallet'); // not a BASE_NAV href prefix match target either
+      const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+      expect(c.textContent).not.toMatch(/Marketplace/);
+      const overviewLink = Array.from(c.querySelectorAll('a')).find((a) => a.textContent === 'Overview')!;
+      expect(overviewLink.closest('div')!.className).not.toMatch(/hidden/);
     });
   });
 });
