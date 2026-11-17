@@ -198,8 +198,29 @@ describe('MDF-701 (TERM-HISTORY): GET /terminal/history', () => {
     await addLocation(company.id, net.destinationHubId); // same company, second location — never granted below
     const manager = await inviteAndAccept(company.id, [locGranted.id], 'MANAGER');
 
-    // Touches ONLY the ungranted hub (destination) — no leg at the granted (origin) hub at all.
-    const ungranted = await bookDoorToHub(await fundedSender(), net, 'At the hub I do not hold');
+    // Touches ONLY the ungranted hub. A THIRD hub, routed only to the
+    // ungranted one, is required to get this right:
+    //   - Picking up from the GRANTED hub's own city would route the
+    //     FIRST_MILE leg straight to the granted hub before line-hauling on
+    //     — a real touch, correctly surfaced (this was an earlier, wrong
+    //     version of this fixture, caught by the CI failure it produced).
+    //   - Picking up from the UNGRANTED hub's own city collapses origin and
+    //     destination onto the SAME hub, which planRoute (packages/shared/
+    //     src/route-planner.ts:241-248) refuses outright as LOCAL_DELIVERY
+    //     ("no transport leg is needed") — not a usable fixture either.
+    const tag = uniq().slice(-9);
+    const thirdCity = `TH ${tag}`;
+    const third = await post(admin, 'admin/logistics/hubs', {
+      code: `${tag}T`, name: `Third Hub ${tag}`, type: 'WATER_TAXI_TERMINAL',
+      district: 'BELIZE', city: thirdCity, modes: ['LAND', 'SEA'], courierFeeMinor: 1200,
+    });
+    expect(third.status).toBe(201);
+    const thirdRoute = await post(admin, 'admin/logistics/routes', {
+      originHubId: third.body.id, destinationHubId: net.destinationHubId, mode: 'SEA',
+      durationMinutes: 60, priceMinor: 2000, carrierName: 'UAT Water Taxi',
+    });
+    expect(thirdRoute.status).toBe(201);
+    const ungranted = await bookDoorToHub(await fundedSender(), { originCity: thirdCity, destinationHubId: net.destinationHubId }, 'At the hub I do not hold');
 
     const res = await get(manager.cookies, 'terminal/history');
     expect(res.status).toBe(200);
