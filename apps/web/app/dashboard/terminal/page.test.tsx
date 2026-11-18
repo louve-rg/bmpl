@@ -1216,4 +1216,95 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(arriveCard.textContent).not.toContain('Demo');
     });
   });
+
+  // DEMO-UI-AUDIT (god's pre-launch sweep of the deployed workspace): the
+  // header's reload button, and the queue loading/error/has-more banners
+  // above the tab bar, used to fire for every tab -- including the five
+  // that never read /terminal/queue at all. A queue failure could sit as a
+  // banner over an unrelated tab while that tab's own panel went blank
+  // (every Overview/action-tab render branch is gated on `rows`, which a
+  // failed queue load never sets). Each tab now reloads its own data; the
+  // queue's own status is scoped to the tabs that actually depend on it.
+  describe('DEMO-UI-AUDIT — a context-aware reload control, and queue status scoped to the tabs that depend on it', () => {
+    it("reloads the active tab's own data on click, not always /terminal/queue", async () => {
+      let queueCalls = 0;
+      let historyCalls = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, MANAGER_WORKSPACE);
+          if (url.includes('/api/terminal/queue')) {
+            queueCalls += 1;
+            return jsonResponse(200, [], { 'X-BMPL-Queue-Has-More': 'false' });
+          }
+          if (url.includes('/api/terminal/staff')) return jsonResponse(200, { members: [], pendingInvites: [] });
+          if (url.includes('/api/terminal/inbound')) return jsonResponse(200, { items: [], hasMore: false });
+          if (url.includes('/api/terminal/custody')) return jsonResponse(200, { items: [], hasMore: false });
+          if (url.includes('/api/terminal/history')) {
+            historyCalls += 1;
+            return jsonResponse(200, { items: [HISTORY_ROW], nextCursor: null });
+          }
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+      await clickTab('History');
+
+      const historyCallsAfterOpen = historyCalls;
+      const queueCallsAfterOpen = queueCalls;
+
+      await clickButton('Refresh');
+
+      expect(historyCalls).toBeGreaterThan(historyCallsAfterOpen);
+      expect(queueCalls).toBe(queueCallsAfterOpen);
+    });
+
+    it('offers no reload control on Lookup -- its own Look up button already covers redoing a search', async () => {
+      stubFetch();
+      await mount();
+      await clickTab('Lookup');
+
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Refresh')).toBe(false);
+    });
+
+    it('does not show a queue failure banner over an unrelated tab', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueStatus: 500 });
+      await mount();
+      await clickTab('Staff');
+
+      expect(container!.textContent).not.toContain('Could not load your queue.');
+    });
+
+    it('still shows the queue failure, with a working retry, on Overview', async () => {
+      let queueAttempt = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, WORKSPACE);
+          if (url.includes('/api/terminal/queue')) {
+            queueAttempt += 1;
+            if (queueAttempt === 1) return jsonResponse(500, { message: 'Could not load your queue.' });
+            return jsonResponse(200, [DEPART_ROW], { 'X-BMPL-Queue-Has-More': 'false' });
+          }
+          if (url.includes('/api/terminal/inbound')) return jsonResponse(200, { items: [], hasMore: false });
+          if (url.includes('/api/terminal/custody')) return jsonResponse(200, { items: [], hasMore: false });
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+
+      expect(container!.textContent).toContain('Could not load your queue.');
+
+      const retry = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Try again')!;
+      await act(async () => {
+        retry.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(container!.textContent).toContain('BML-1');
+      expect(container!.textContent).not.toContain('Could not load your queue.');
+    });
+  });
 });

@@ -123,6 +123,19 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * contract -- `hubLabel` below reads a plain string or an object carrying
  * `name`/`code`, whichever Pam's branch actually returns, rather than
  * guessing one and rendering "[object Object]" if it's the other.
+ *
+ * DEMO-UI-AUDIT (god's pre-launch sweep of the deployed workspace): the
+ * header's "Refresh" button and the queue loading/error/has-more banners
+ * above the tab bar predate every tab but Overview and the five action
+ * tabs, and were never revisited as Inbound/On Hand/Staff/History/Lookup
+ * were added -- all three fired off `/terminal/queue` state regardless of
+ * which tab was open, so a queue failure could sit as a banner over an
+ * unrelated tab while that tab's own panel went fully blank (every branch
+ * there is gated on `rows`, which a failed queue load never sets). Fixed
+ * by making the refresh button call the active tab's own loader (null,
+ * not a dead button, on Lookup -- its own Look up button already covers
+ * "redo this" for a search) and giving Overview/the five action tabs the
+ * same in-panel error + retry every other tab already had.
  */
 
 interface HubRef {
@@ -652,6 +665,28 @@ export default function TerminalWorkspacePage() {
   // Counting ENDED members there would read as a live headcount it is not.
   const activeStaffCount = (staff?.members ?? []).filter((m) => m.status === 'ACTIVE').length;
 
+  // DEMO-UI-AUDIT: the header's own reload control predates every tab but
+  // Overview and the five action tabs -- left wired to loadQueue() alone as
+  // Inbound/On Hand/Staff/History/Lookup were added, it called
+  // /terminal/queue from all six of those tabs too, which updates data the
+  // panel the clerk is actually looking at never shows. Each tab now gets
+  // its own real reload; Lookup gets none, since it has no "reload
+  // everything" concept of its own -- its own Look up button already is
+  // that action for the one query on screen.
+  const onQueueTab = tab === 'OVERVIEW' || SECTION_ORDER.some((s) => s.action === tab);
+  const refreshAction =
+    tab === 'INBOUND'
+      ? { label: inboundLoading ? 'Refreshing…' : 'Refresh', busy: inboundLoading, onClick: () => void loadInbound() }
+      : tab === 'CUSTODY'
+        ? { label: custodyLoading ? 'Refreshing…' : 'Refresh', busy: custodyLoading, onClick: () => void loadCustody() }
+        : tab === 'STAFF'
+          ? { label: staffLoading ? 'Refreshing…' : 'Refresh', busy: staffLoading, onClick: () => void loadStaff() }
+          : tab === 'HISTORY'
+            ? { label: historyLoading ? 'Refreshing…' : 'Refresh', busy: historyLoading, onClick: () => void loadHistory() }
+            : tab === 'LOOKUP'
+              ? null
+              : { label: queueLoading ? 'Refreshing…' : 'Refresh', busy: queueLoading, onClick: () => void loadQueue() };
+
   function renderSection(action: QueueRow['action'], title: string) {
     const section = (rows ?? []).filter((r) => r.action === action);
     if (section.length === 0) return null;
@@ -733,27 +768,34 @@ export default function TerminalWorkspacePage() {
           rows ? ` · ${totalCount} item${totalCount === 1 ? '' : 's'} waiting on you` : ''
         }`}
         actions={
-          <Button variant="outline" onClick={() => void loadQueue()} disabled={queueLoading}>
-            {queueLoading ? 'Refreshing…' : 'Refresh'}
-          </Button>
+          refreshAction && (
+            <Button variant="outline" onClick={refreshAction.onClick} disabled={refreshAction.busy}>
+              {refreshAction.label}
+            </Button>
+          )
         }
       />
 
-      {queueErr && <Alert tone="error">{queueErr}</Alert>}
-
+      {/* DEMO-UI-AUDIT: these three used to render for every tab, including
+          the five (Inbound/On Hand/Staff/History/Lookup) that never read
+          `rows`/`queueErr` at all -- a queue failure sat as a banner above,
+          say, the Staff roster with no relation to anything on that tab.
+          Scoped to the tabs that actually depend on the queue; the error
+          itself now also renders inside the panel below (matching every
+          other tab's own in-panel error), not just up here. */}
       {/* TERM-QUEUE-OVERFLOW-UI: each category's own cap can truncate the
           list below without the clerk ever being told -- the header this
           reads exists so that stays honest. No new control is invented
           here; Lookup (below) already finds one specific shipment by its
           reference, which is the one action a clerk can already take on an
           item this page isn't showing. */}
-      {rows && queueHasMore && (
+      {rows && queueHasMore && onQueueTab && (
         <Alert tone="neutral">
           There are more parcels waiting than the list below shows. Use Lookup to find a specific one by its reference or tracking number.
         </Alert>
       )}
 
-      {queueLoading && !rows && <LoadingRow label="Loading your queue…" />}
+      {queueLoading && !rows && onQueueTab && <LoadingRow label="Loading your queue…" />}
 
       {/* Tab bar: both the real-figures dashboard (every badge is a live count
           from the rows above) and the only navigation this step adds -- one
@@ -871,6 +913,25 @@ export default function TerminalWorkspacePage() {
           />
         ) : (
           <>
+            {/* DEMO-UI-AUDIT: a failed /terminal/queue load used to leave
+                this whole area blank -- every branch below is gated on
+                `rows`, which a failed load never sets, and the one error
+                message for it lived above the tab bar, shown (or not) by a
+                condition unrelated to which tab was open. Mirrors every
+                other tab's own in-panel error + retry; when rows already
+                exist from an earlier load and only a refresh failed, the
+                stale rows stay on screen (same as History's own
+                load-more-failure handling) with the error appended below
+                instead of replacing them. */}
+            {queueErr && !rows && (
+              <div className="space-y-3">
+                <Alert tone="error">{queueErr}</Alert>
+                <Button variant="outline" onClick={() => void loadQueue()}>
+                  Try again
+                </Button>
+              </div>
+            )}
+
             {rows && rows.length === 0 && (
               <EmptyState
                 title="Nothing waiting at your locations"
@@ -892,6 +953,8 @@ export default function TerminalWorkspacePage() {
                 renderSection(tab, SECTION_ORDER.find((s) => s.action === tab)!.title)
               )
             )}
+
+            {queueErr && rows && <Alert tone="error">{queueErr}</Alert>}
           </>
         )}
       </div>
