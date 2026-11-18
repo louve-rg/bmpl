@@ -1307,4 +1307,64 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).not.toContain('Could not load your queue.');
     });
   });
+
+  // DEMO-UI-POLISH (Stanley's browser acceptance test against production,
+  // 2026-11-18): three presentation-only defects on an otherwise-passing
+  // Terminal Workspace -- a phone-width tab strip that scrolls with no cue
+  // it does, History's empty state claiming "completed and past" while the
+  // tab itself lists in-flight statuses too (terminalHistory is a hub-touch
+  // history by design, not a completed-only one -- the copy was wrong, not
+  // the endpoint), and the internal LINE_HAUL enum leaking into the Incoming
+  // empty state.
+  describe('DEMO-UI-POLISH — scroll affordance, honest History copy, no raw enum in user-facing text', () => {
+    it('shows a scroll cue on the tab strip only while there is more to scroll to, and clears it once scrolled to the end', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [DEPART_ROW] });
+
+      const scrollWidthDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth');
+      const clientWidthDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+      Object.defineProperty(Element.prototype, 'scrollWidth', { configurable: true, get: () => 600 });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 300 });
+      try {
+        await mount();
+
+        const scrollEl = container!.querySelector('[role="tablist"]')!.parentElement as HTMLElement;
+        expect(container!.querySelector('[aria-hidden="true"]')).not.toBeNull();
+
+        Object.defineProperty(scrollEl, 'scrollLeft', { configurable: true, value: 300 });
+        await act(async () => {
+          scrollEl.dispatchEvent(new Event('scroll'));
+        });
+
+        expect(container!.querySelector('[aria-hidden="true"]')).toBeNull();
+      } finally {
+        if (scrollWidthDesc) Object.defineProperty(Element.prototype, 'scrollWidth', scrollWidthDesc);
+        if (clientWidthDesc) Object.defineProperty(Element.prototype, 'clientWidth', clientWidthDesc);
+      }
+    });
+
+    it('shows no scroll cue when the strip already fits the viewport', async () => {
+      stubFetch({ queueRows: [DEPART_ROW] });
+      await mount();
+
+      expect(container!.querySelector('[aria-hidden="true"]')).toBeNull();
+    });
+
+    it("History's empty state matches what the tab actually lists -- in-progress shipments as well as finished ones, not completed-only", async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, historyItems: [] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).not.toContain('Completed and past shipments');
+      expect(container!.textContent).toContain('in progress or finished');
+    });
+
+    it('never leaks the LINE_HAUL enum into the Incoming empty state', async () => {
+      stubFetch({ inboundItems: [] });
+      await mount();
+      await clickTab('Incoming');
+
+      expect(container!.textContent).toContain('Nothing inbound');
+      expect(container!.textContent).not.toContain('LINE_HAUL');
+    });
+  });
 });
