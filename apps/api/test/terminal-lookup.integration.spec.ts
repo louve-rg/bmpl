@@ -4,10 +4,17 @@
  * up a reference" — the single biggest functional hole the audit found.
  * `GET /terminal/shipments/:reference` is the fix. The point of this file,
  * same as TERM-3/TERM-8 before it: a reference belonging to another
- * terminal is REJECTED (403), never silently returned empty, and nothing
- * in the response ever leaks a pin/code/token or the counterparty's
- * contact details — only the shipment's own typed origin/destination name
- * snapshot.
+ * terminal is REJECTED, never silently returned empty, and nothing in the
+ * response ever leaks a pin/code/token or the counterparty's contact
+ * details — only the shipment's own typed origin/destination name snapshot.
+ *
+ * SEC-SHIPMENT-REF-DISCLOSURE (Stanley): the rejection used to be a
+ * DISTINGUISHABLE 403 ("not at one of your terminal locations") versus a
+ * 404 for a reference that doesn't exist at all — an existence oracle. Now
+ * every case a caller is not entitled to answers with the identical 404
+ * "No shipment with that reference.", so the tests below assert sameness
+ * (status AND text) across the not-mine/zero-grants/non-member/nonexistent
+ * cases, not four separate literals that could quietly drift apart again.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -153,38 +160,52 @@ describe('MDF-699 (TERM-LOOKUP): GET /terminal/shipments/:reference', () => {
     expect(res.body.reference).toBe(shipment.reference);
   });
 
-  it('a shipment that never touches any of my hubs is REJECTED (403), not returned empty', async () => {
+  /**
+   * SEC-SHIPMENT-REF-DISCLOSURE: the whole point is that these three cases —
+   * a real shipment belonging to another company, a real shipment with a
+   * staff member holding zero location grants, and a reference that was
+   * never issued — must be INDISTINGUISHABLE from the response. One
+   * assertion compares them directly rather than three tests each
+   * asserting its own literal, which is exactly the shape that let the
+   * original 403/404 split pass review unnoticed.
+   *
+   * A plain customer with no terminal membership at all is DELIBERATELY not
+   * in this group: `myActiveHubIds` refuses that case with its own 403
+   * ("No active terminal company membership.") before `lookupForTerminal`
+   * is ever reached — identically, regardless of whether the reference is
+   * real or fake — so it is a different, already-content-blind guard, not
+   * an instance of the reference-existence oracle this fix closes. Proven
+   * directly below rather than assumed.
+   */
+  it('not-mine, zero-grants, and nonexistent all answer with the identical refusal', async () => {
     const net = await makeNetwork();
     const otherNet = await makeNetwork();
-    const shipment = await bookDoorToDoor(await fundedSender(), net);
-    const staff = await makeTerminalStaff([otherNet.originHubId, otherNet.destinationHubId]);
+    const realShipment = await bookDoorToDoor(await fundedSender(), net);
 
-    const res = await get(staff.cookies, `terminal/shipments/${shipment.reference}`);
-    expect(res.status).toBe(403);
+    const notMineStaff = await makeTerminalStaff([otherNet.originHubId, otherNet.destinationHubId]);
+    const zeroGrantStaff = await makeTerminalStaff([]); // ACTIVE membership, zero grants
+
+    const notMine = await get(notMineStaff.cookies, `terminal/shipments/${realShipment.reference}`);
+    const zeroGrants = await get(zeroGrantStaff.cookies, `terminal/shipments/${realShipment.reference}`);
+    const nonexistent = await get(notMineStaff.cookies, `terminal/shipments/BML-NOSUCHREF00`);
+
+    for (const res of [notMine, zeroGrants, nonexistent]) {
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe('No shipment with that reference.');
+    }
   });
 
-  it('a reference that does not exist at all gets 404, distinct from the 403 above', async () => {
+  it('a non-member is refused identically for a real reference and a fake one — its guard never reaches the lookup', async () => {
     const net = await makeNetwork();
-    const staff = await makeTerminalStaff([net.originHubId]);
-    const res = await get(staff.cookies, `terminal/shipments/BML-NOSUCHREF00`);
-    expect(res.status).toBe(404);
-  });
+    const realShipment = await bookDoorToDoor(await fundedSender(), net);
+    const nonMemberCustomer = await fundedSender();
 
-  it('a staff member with no location grants anywhere gets 403 for a real shipment, not 404', async () => {
-    const net = await makeNetwork();
-    const shipment = await bookDoorToDoor(await fundedSender(), net);
-    const staff = await makeTerminalStaff([]); // ACTIVE membership, zero grants
+    const real = await get(nonMemberCustomer, `terminal/shipments/${realShipment.reference}`);
+    const fake = await get(nonMemberCustomer, `terminal/shipments/BML-NOSUCHREF00`);
 
-    const res = await get(staff.cookies, `terminal/shipments/${shipment.reference}`);
-    expect(res.status).toBe(403);
-  });
-
-  it('a plain customer with no terminal membership is refused, not shown shipment data', async () => {
-    const net = await makeNetwork();
-    const customerCookies = await fundedSender();
-    const shipment = await bookDoorToDoor(customerCookies, net);
-
-    const res = await get(customerCookies, `terminal/shipments/${shipment.reference}`);
-    expect(res.status).toBe(403);
+    for (const res of [real, fake]) {
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('No active terminal company membership.');
+    }
   });
 });
