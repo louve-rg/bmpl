@@ -20,11 +20,11 @@ we will update this guide and tell you directly once they clear.
 - **Your Terminal Workspace:** https://www.bzemarketplace.com/dashboard/terminal
 
 Your demo access is already set up. You hold the Manager role at your demo
-company's terminal, and there is nothing left for you to activate — you can
-sign in with the email and password you chose when you accepted your
-invitation. If you don't remember your password, use "Forgot password" on the
-login page and reset it yourself from your own mailbox; nobody else can see
-or set a password for you.
+company's terminal, and there is nothing left for you to activate. Sign in
+at the login page above with your own email address. If you don't have a
+password yet, or don't remember it, use "Forgot password" on the login page
+and set it yourself from your own mailbox — nobody else can see or set a
+password for you.
 
 ---
 
@@ -209,6 +209,23 @@ your workspace is where you manage your own team.
 All of the above held up after a page refresh and after signing out and back
 in fresh — it is a real, saved change, not something that looks done and
 then reverts.
+
+### Four people on your Staff list, not three
+
+Open the **Staff** tab and you'll see **"Members (4)"**, not three. Two of
+them — **Qa Manager** and **Qa Operator** — are our own quality-assurance
+accounts. The fourth, **Stanley Fixture**, is a test employee from our own
+verification of this feature, and their access is already **ended**. None
+of these four can be removed from your list without a database change
+nobody has authorised, so they will stay there — please leave all four
+alone.
+
+**Do not click Restore on Stanley Fixture.** Every other warning in this
+guide is about something that merely looks wrong on screen. This is the one
+instruction where getting it wrong actually does something: that row still
+shows a Restore option, and clicking it would hand a working Operator
+account at your terminal to a test identity, not just bring back something
+harmless. Leave that row exactly as it is.
 
 **Still open on the Staff screen — known, and being fixed; none of these are
 a sign that your action failed:**
