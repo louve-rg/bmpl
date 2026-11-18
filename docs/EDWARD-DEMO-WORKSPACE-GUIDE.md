@@ -212,20 +212,34 @@ then reverts.
 
 ### Four people on your Staff list, not three
 
-Open the **Staff** tab and you'll see **"Members (4)"**, not three. Two of
-them — **Qa Manager** and **Qa Operator** — are our own quality-assurance
-accounts. The fourth, **Stanley Fixture**, is a test employee from our own
-verification of this feature, and their access is already **ended**. None
-of these four can be removed from your list without a database change
-nobody has authorised, so they will stay there — please leave all four
-alone.
+Open the **Staff** tab and you'll see **"Members (4)"**, not three. You are
+one of the four. Of the other three, two — **Qa Manager** and **Qa
+Operator** — are our own quality-assurance accounts, and the third,
+**Stanley Fixture**, is a test employee from our own verification of this
+feature, with their access already **ended**. None of those three can be
+removed from your list without a database change nobody has authorised, so
+they will stay there — please leave all three alone.
 
-**Do not click Restore on Stanley Fixture.** Every other warning in this
-guide is about something that merely looks wrong on screen. This is the one
-instruction where getting it wrong actually does something: that row still
-shows a Restore option, and clicking it would hand a working Operator
+**Do not click Restore on Stanley Fixture.** Most warnings in this guide
+are about something that merely looks wrong on screen. This is one of two
+instructions where getting it wrong actually does something: that row
+still shows a Restore option, and clicking it would hand a working Operator
 account at your terminal to a test identity, not just bring back something
 harmless. Leave that row exactly as it is.
+
+**Do not end your own access, and do not change your own role to
+Operator.** This guide earlier told you the system always keeps a company
+with at least one active Manager and refuses to let the last one demote or
+remove themselves. That protection is real, but it only stops you from
+being the *last* active Manager — and because our Qa Manager account is
+also an active Manager on your company right now, the system currently
+sees two of you, so it will **not** stop you from ending your own access or
+demoting yourself today. Doing either would lock you out of staff
+management, and ending your own access would lock you out of the workspace
+entirely — and you would not be able to undo it yourself. If that ever
+happens, contact us and we will restore your access. This is the second of
+the two instructions in this document where getting it wrong does
+something rather than merely looking odd — leave your own row alone.
 
 **Still open on the Staff screen — known, and being fixed; none of these are
 a sign that your action failed:**
