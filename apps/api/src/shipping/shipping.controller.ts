@@ -763,11 +763,12 @@ export class AdminLogisticsController {
   /* ---- legs ---- */
 
   /**
-   * Manual driver assignment — the production dispatch path while
-   * `dispatchAutomatic` is off. Who may be chosen, and every refusal the
-   * automatic engine enforces (payment, parcel location, the simulation
-   * boundary, the sender never couriering their own parcel), is enforced again
-   * in the service.
+   * Manual driver assignment. `dispatchAutomatic`'s current value does not
+   * change when this is needed — assign/reassign exist for leg states
+   * automatic dispatch cannot or has not resolved on its own. Who may be
+   * chosen, and every refusal the automatic engine enforces (payment, parcel
+   * location, the simulation boundary, the sender never couriering their own
+   * parcel), is enforced again in the service.
    */
   @RequirePermission('logistics.operate')
   @Get('legs/:id/eligible-drivers')
