@@ -43,11 +43,13 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  * and `rows` is `/terminal/queue`'s own state. Lookup's data source
  * (`/terminal/shipments/:reference`) has no dependency on the queue at
  * all, so a queue fetch failure hides a capability that never needed it.
- * One more `GAP-PROOF:` test below proves that live, using the same
- * `page.route` intercept technique MDF-720's spec established. Its
- * premise (zero tabs when the queue fails) will expire the moment Oscar's
- * fix lands -- rewrite into a positive test then, never delete, same as
- * every other gap-proof in this batch.
+ * UPDATE (2026-11-18, god's ruling on conv-052cef): Oscar's fix for
+ * MDF-721 has SHIPPED (page.tsx:825-840 carries the fix's own comment,
+ * naming the card directly). The one remaining `GAP-PROOF:` test below --
+ * which used the same `page.route` intercept technique MDF-720's spec
+ * established -- has been rewritten into a positive test proving the fix,
+ * exactly as this comment always said it would, never deleted. Its own
+ * comment carries the gap-proof lineage for a reader who did not read git.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -458,31 +460,69 @@ test('The Lookup tab shows the server\'s own refusal message verbatim, never a p
   await expect(staffPage.getByText('No shipment with that reference.'), 'the OTHER refusal -- a reference that never existed anywhere -- must be a visibly different message').toBeVisible({ timeout: 15_000 });
 });
 
-test('GAP-PROOF (MDF-721, TERM-QUEUE-GATE): the Lookup tab, which has no dependency on the queue, disappears entirely when GET /terminal/queue fails', async ({ browser }) => {
+test('MDF-721 (TERM-QUEUE-GATE) fixed: the Lookup tab, which has no dependency on the queue, stays present, selectable and functional when GET /terminal/queue fails', async ({ browser }) => {
   test.setTimeout(60_000);
+  // GAP-PROOF LINEAGE: this test used to prove the opposite -- that a
+  // failed /terminal/queue hid the entire tab bar, Lookup included, even
+  // though Lookup's own data source (/terminal/shipments/:reference) never
+  // reads the queue. That gap was carded as MDF-721 (TERM-QUEUE-GATE,
+  // Oscar) and is now closed -- page.tsx:825-840 carries the fix's own
+  // comment, naming MDF-721 directly and stating the tab bar's visibility
+  // depends only on `workspace` (guaranteed non-null), never on the
+  // queue's `rows`. god's ruling (2026-11-18, conv-052cef), on the exact
+  // two-line answer ("what does the test ASSERT, and what does the
+  // product DO now") this file's comment at the top anticipated: rewrite
+  // into a positive test, never delete, now that the behaviour to assert
+  // is known precisely rather than guessed. Leaving the inverted
+  // assertion in place would have gone on failing for the best possible
+  // reason and taught the next reader to ignore a red.
   const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'QueueDown', hubA.id);
 
+  const customerPage = await customerPageFromCache(browser);
+  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699QueueDown ${stamp}`, HUBB_COVERAGE_DOOR);
+
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
   await staffPage.route('**/api/terminal/queue', async (route) => {
-    await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    // FIXTURE FIX (god's ruling, 2026-11-18, conv-052cef): an empty `{}`
+    // body is not what a real failure looks like -- the client's
+    // `errMessage` helper reads `.message` before ever reaching the
+    // page's own fallback string, so an empty body was silently testing a
+    // case the real API never produces. This shape is the confirmed
+    // default from this app's installed @nestjs/core (10.4.22):
+    // `BaseExceptionFilter.handleUnknownError` replies with
+    // `{statusCode, message: MESSAGES.UNKNOWN_EXCEPTION_MESSAGE}`, and
+    // that constant is the literal string below -- read from
+    // node_modules, not guessed.
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ statusCode: 500, message: 'Internal server error' }),
+    });
   });
 
   await staffPage.goto(`${WEB}/dashboard/terminal`);
   // Positive control: the workspace itself (independent of the queue)
   // genuinely loaded -- so what follows means something, not "blank page".
   await waitForWorkspaceLoaded(staffPage);
-  await expect(staffPage.getByText('Could not load your queue.'), 'the page must show the queue actually failed, not render nothing at all').toBeVisible({ timeout: 15_000 });
+  // Positive control: the queue genuinely failed, visibly. This is NOT
+  // "Could not load your queue." (page.tsx:422's own fallback) -- with a
+  // realistic failure body, `errMessage` finds the API's own `.message`
+  // first and the fallback is never reached. PRODUCT FINDING, recorded in
+  // the PR description per god's ruling, not fixed here: if every real
+  // failure supplies a `.message`, page.tsx:422's specific fallback string
+  // may be unreachable in practice, and a terminal manager whose queue
+  // fails would see this generic text instead.
+  await expect(staffPage.getByText('Internal server error'), 'the page must show the queue actually failed, not render nothing at all').toBeVisible({ timeout: 15_000 });
 
-  // CONFIRMED GAP, carded as MDF-721 (TERM-QUEUE-GATE, Oscar, same fix
-  // pass as MDF-720 -- same pattern, one fetch failing silently removes
-  // an unrelated capability): the entire tab bar, including Lookup, is
-  // gated behind the queue's own `rows` state (`{rows && (<tablist>...)}`
-  // in page.tsx) -- a capability with NO dependency on the queue vanishes
-  // because of it. Kept as a SEPARATE card from #692 on purpose -- Stanley
-  // already cleared #692 as non-blocking, so folding a fix in would
-  // invalidate that read rather than extend it.
-  await expect(staffPage.getByRole('tab', { name: 'Lookup' }), 'CONFIRMED GAP: a failed queue fetch hides the Lookup tab too, even though Lookup never reads the queue').toHaveCount(0);
+  // THE FIX, stated positively: Lookup never depended on the queue, so it
+  // survives the queue's failure completely intact -- present in the tab
+  // bar, selectable, and able to complete a real lookup end to end. A
+  // regression back to gating the tab bar on `rows` fails this the same
+  // way it would have failed the old gap-proof.
+  await expect(staffPage.getByRole('tab', { name: 'Lookup' }), 'Lookup must stay in the tab bar when the queue fails -- it never depended on the queue').toBeVisible();
+  await lookupViaTab(staffPage, reference);
+  await expect(staffPage.getByText(reference, { exact: false }), 'Lookup must still actually work, not just remain visible, while the queue is down').toBeVisible({ timeout: 15_000 });
 });
