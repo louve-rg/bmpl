@@ -1367,4 +1367,42 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).not.toContain('LINE_HAUL');
     });
   });
+
+  // DEMO-UI-CONTRAST (god's follow-up on Stanley's "small, low-contrast dark
+  // disc on a dark tab bar" note): the cue can sit over either an inactive
+  // tab (bg-white) or the active one (bg-belize-blue, #1e40af), and the
+  // original bg-slate-900/70 fill measured 1.73:1 against belize-blue --
+  // under the WCAG AA 3:1 floor for non-text UI, and no amount of extra
+  // opacity on a single dark fill can ever fix that (even fully opaque
+  // slate-900 only reaches 2.05:1 against belize-blue -- both colours are
+  // dark). Fixed with an opaque fill (already fine against white) plus a
+  // white ring, which alone clears belize-blue. This guards the actual
+  // regression a plain "a chevron renders" test would miss: a CSS-only
+  // revert back to a translucent single-tone fill.
+  describe('DEMO-UI-CONTRAST — the scroll cue reads against both a white and a belize-blue tab', () => {
+    it('uses an opaque fill plus a white ring, not a translucent single-tone fill', async () => {
+      stubFetch({ queueRows: [DEPART_ROW] });
+
+      const scrollWidthDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth');
+      const clientWidthDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+      Object.defineProperty(Element.prototype, 'scrollWidth', { configurable: true, get: () => 600 });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 300 });
+      try {
+        await mount();
+
+        const pill = container!.querySelector('[aria-hidden="true"] span') as HTMLElement;
+        expect(pill).not.toBeNull();
+        // The bug: a translucent fill (bg-slate-900/70) can never clear 3:1
+        // against an already-dark background like belize-blue, no matter the
+        // opacity -- the fill must be opaque, and something else (the ring)
+        // must supply contrast against a dark tab.
+        expect(pill.className).not.toMatch(/bg-slate-900\/\d/);
+        expect(pill.className).toMatch(/\bbg-slate-900\b/);
+        expect(pill.className).toMatch(/ring-white/);
+      } finally {
+        if (scrollWidthDesc) Object.defineProperty(Element.prototype, 'scrollWidth', scrollWidthDesc);
+        if (clientWidthDesc) Object.defineProperty(Element.prototype, 'clientWidth', clientWidthDesc);
+      }
+    });
+  });
 });
