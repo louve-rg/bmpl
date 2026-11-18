@@ -14,10 +14,38 @@ info:
     `terminal.service.ts`, and `ShipmentService` where terminal delegates to
     it) — nothing is described that was not read.
 
-    24 paths, 26 operations (two paths carry two HTTP methods each). Every
+    32 paths, 34 operations (two paths carry two HTTP methods each). Every
     POST on this surface returns 201, not 200 — none of the five controllers
     declares `@HttpCode`, so NestJS's own default for `@Post()` applies
     uniformly.
+
+    UPDATED 2026-11-18 (TERM-STAFF-API, feat/term-staff-management) for eight
+    new self-serve `/terminal/staff/...` routes — a MANAGER-only mirror of
+    six of `AdminTerminalController`'s own doors (invite, change role,
+    grant/revoke one location, deactivate/reactivate a member) plus two the
+    owner added to the same card (revoke/resend a pending invite), all
+    scoped to the CALLER's own company via `assertActiveMemberRole`, never a
+    companyId taken from the request — a userId, inviteId or locationId
+    belonging to another company 404s exactly like one that does not exist
+    at all, never a 403, because every lookup is keyed off the caller's own
+    `terminalCompanyId` by construction. A new `AuditAction`,
+    `TERMINAL_COMPANY_MEMBER_ROLE_CHANGED` (migration
+    `20261118180000_terminal_company_member_role_changed_audit`, additive
+    only), records the one operation this card adds that admin's own door
+    never needed — promoting/demoting an already-ACTIVE member between
+    MANAGER and OPERATOR. Three of the eight guard a company-wide floor no
+    admin-facing door enforces: a write may not leave a company with zero
+    ACTIVE MANAGERs, surfaced as 409, with one of them (revoking a sole
+    manager's last location) carrying its own distinct message rather than
+    the other two's shared one — see each operation below for the exact
+    text. Also added: a `locations` array on `GET /terminal/staff`'s own
+    response (Oscar's finding — a MANAGER with partial location coverage
+    could not otherwise grant a colleague, or invite a new hire to, a
+    location the company holds but the manager does not personally hold).
+    Documented directly from `terminal.controller.ts`/`terminal.service.ts`
+    at `feat/term-staff-management`@11f449575a666a8fe5bfc30d3acf48519bc11136,
+    and the drift script re-run clean (35/35 real routes documented) before
+    this was pushed.
 
     UPDATED 2026-11-13 (TERM-OPENAPI-DRIFT, main@921ed0c7) for five routes
     that went live without a spec update, each confirmed directly against
@@ -331,7 +359,7 @@ paths:
   /terminal/staff:
     get:
       tags: [TerminalStaff]
-      summary: My company's roster and pending invites — MANAGER role only
+      summary: My company's roster, pending invites and own locations — MANAGER role only
       description: >-
         Server-enforced, not merely hidden in the UI: `TerminalService.assertActiveMemberRole`
         rejects any caller whose own ACTIVE membership is not `MANAGER` with
@@ -341,15 +369,251 @@ paths:
         active terminal company membership." (403) instead, same as every
         other route on this controller. Reuses the exact member/invite shape
         `GET /admin/terminal/companies/{id}` already returns, scoped to the
-        caller's own company rather than taken by id.
+        caller's own company rather than taken by id. TERM-STAFF-API/Oscar
+        added the top-level `locations` array (the company's full location
+        set, every one including an inactive one, not pre-filtered) — the
+        `userId`/`locationId` arguments every `/terminal/staff/...` write
+        below takes are validated against this same company, so a MANAGER
+        can see which location ids are theirs to use before calling one of
+        those writes.
       responses:
         "200":
-          description: This MANAGER's own company roster
+          description: This MANAGER's own company roster, locations and pending invites
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TerminalStaffRoster" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---- Terminal staff's own: manager-run staff management (TERM-STAFF-API) ----
+  # Six self-serve mirrors of AdminTerminalController's own doors, plus two
+  # the owner added to this card (invite revoke/resend). Every one of the
+  # eight is MANAGER-only via `assertActiveMemberRole(['MANAGER'])`, scoped
+  # to the CALLER's own company, never a companyId/userId/inviteId/
+  # locationId taken from the request at face value — a target belonging to
+  # another company is unreachable by construction (404, never 403) because
+  # every lookup is keyed off the caller's own terminalCompanyId.
+  /terminal/staff/invite:
+    post:
+      tags: [TerminalStaff]
+      summary: Invite a staff member to MY OWN company (MANAGER or OPERATOR) — the self-serve mirror of the admin invite door
+      description: >-
+        Same shape as `POST /admin/terminal/companies/{id}/invites`, with the
+        company taken from the caller's own ACTIVE MANAGER membership
+        instead of a path id — the owner's explicit YES on
+        manager-creates-manager, so `memberRole` may be MANAGER or OPERATOR.
+        403 pair: "No active terminal company membership." (no active
+        membership anywhere) or "This action requires the terminal manager
+        role." (active, but not MANAGER).
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteTerminalCompanyMemberInput" }
+      responses:
+        "201":
+          description: The invite, plus whether the email actually sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalInviteWithDelivery" }
+        "400":
+          description: 'ValidationError — "One or more selected locations are not active locations of this company."'
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/staff/invites/{inviteId}/revoke:
+    post:
+      tags: [TerminalStaff]
+      summary: "Revoke one of MY OWN company's pending invites — god's own scope addition: undo a mistyped invite without an admin"
+      description: >-
+        Same 403 pair as every route in this section. 404 "Invite not
+        found." for an inviteId that does not exist OR belongs to another
+        company — the lookup is scoped to `{ id: inviteId, terminalCompanyId:
+        <caller's own> }`, so the two cases are indistinguishable by
+        construction, never a 403 that would confirm the invite exists
+        elsewhere. 400 "This invite was already accepted and cannot be
+        revoked." if it was already consumed.
+      parameters:
+        - { name: inviteId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Revoked }
+        "400":
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/staff/invites/{inviteId}/resend:
+    post:
+      tags: [TerminalStaff]
+      summary: Re-send one of MY OWN company's pending invites (rotates its token; the old link stops working the moment this succeeds)
+      description: >-
+        Same 403 pair and same cross-company-unreachable 404 "Invite not
+        found." as the revoke door above. 400 with one of two texts: "This
+        invite was already accepted." or "This invite was revoked. Issue a
+        new one instead."
+      parameters:
+        - { name: inviteId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201":
+          description: The invite (new token issued server-side, never returned), plus whether the email actually sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalInviteWithDelivery" }
+        "400":
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/staff/{userId}/role:
+    patch:
+      tags: [TerminalStaff]
+      summary: "Change an already-ACTIVE member's role between MANAGER and OPERATOR — the one operation admin's own door never needed"
+      description: >-
+        Same 403 pair as every route in this section. 404 "Member not
+        found." for a userId with no ACTIVE membership at the caller's own
+        company — not found at all and found-at-another-company are the same
+        response, by construction. 409 "This company must always have at
+        least one active manager." when this would demote the company's sole
+        ACTIVE MANAGER to OPERATOR — checked against the hypothetical
+        post-write state even on a same-role no-op request, so demoting the
+        last manager to their own current role is refused exactly like a
+        real demote would be. Writes
+        `AuditAction.TERMINAL_COMPANY_MEMBER_ROLE_CHANGED` (additive
+        migration `20261118180000_terminal_company_member_role_changed_audit`),
+        `newValue: { terminalCompanyId, fromRole, toRole }`.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeTerminalCompanyMemberRoleInput" }
+      responses:
+        "200":
+          description: The role after this call (unchanged from the request on a no-op)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roleChanged: { type: boolean, enum: [true] }
+                  memberRole: { type: string, enum: [MANAGER, OPERATOR] }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: '"This company must always have at least one active manager."'
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+  /terminal/staff/{userId}/locations:
+    post:
+      tags: [TerminalStaff]
+      summary: Grant an already-ACTIVE member of MY OWN company one more location — self-serve mirror of the admin grant-location door
+      description: >-
+        Same 403 pair as every route in this section; no manager floor — this
+        door only ever adds. 404 "Member not found." for a userId not
+        ACTIVELY a member of the caller's own company. 400 "That location is
+        not an active location of this company." for a locationId that does
+        not exist, is inactive, or belongs to another company.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GrantTerminalCompanyMemberLocationInput" }
+      responses:
+        "201": { description: Granted }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/staff/{userId}/locations/{locationId}:
+    delete:
+      tags: [TerminalStaff]
+      summary: Revoke one already-ACTIVE member's one location — self-serve mirror of the admin revoke-location door
+      description: >-
+        Same 403 pair as every route in this section. 404 with one of two
+        texts: "Member not found." (userId not an ACTIVE member of the
+        caller's own company) or "This member does not hold that location."
+        (member exists, grant does not). 409 "This would leave the company's
+        only manager without access to any location." — its OWN distinct
+        message, never the role/deactivate doors' "at least one active
+        manager" text, because this write never touches membership or role:
+        refused only when the target holds MANAGER, is the company's sole
+        ACTIVE manager, and this is their last other ACTIVE location. A
+        company with two or more ACTIVE MANAGERs may freely revoke any one
+        manager's last location.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: locationId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "This would leave the company's only manager without access to any location."
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+  /terminal/staff/{userId}/deactivate:
+    post:
+      tags: [TerminalStaff]
+      summary: End an already-ACTIVE member's membership at MY OWN company — self-serve mirror of the admin end-member door
+      description: >-
+        Same 403 pair as every route in this section. 404 "Member not
+        found." for a userId with no ACTIVE membership at the caller's own
+        company. 409 "This company must always have at least one active
+        manager." when the target is the company's sole ACTIVE MANAGER —
+        same floor and same message `PATCH .../role` enforces, whether the
+        caller is ending themself or someone else.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Ended }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: '"This company must always have at least one active manager."'
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+  /terminal/staff/{userId}/reactivate:
+    post:
+      tags: [TerminalStaff]
+      summary: Reactivate an ended member at MY OWN company — self-serve mirror of the admin reactivate door
+      description: >-
+        Same 403 pair as every route in this section. 404 "Member not
+        found." for a userId that is not an ENDED membership at the
+        caller's own company (includes a userId already ACTIVE there). No
+        manager floor — reactivating only ever adds a manager back, never
+        removes one.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Reactivated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /terminal/queue:
     get:
       tags: [TerminalStaff]
@@ -836,8 +1100,19 @@ components:
         isTest: { type: boolean, description: The underlying shipment's own isTest (MDF-700/MDF-707 — every item carries it as of the same card that added inbound/outbound/custody below). }
     TerminalStaffRoster:
       type: object
-      description: Exactly the roster shape `TerminalCompanyDetail` already carries, scoped to the caller's own company.
+      description: Exactly the roster shape `TerminalCompanyDetail` already carries, scoped to the caller's own company. `locations` added by TERM-STAFF-API/Oscar.
       properties:
+        locations:
+          type: array
+          items: { $ref: "#/components/schemas/TerminalCompanyLocation" }
+          description: >-
+            The CALLER's own company's full location set — every one,
+            including an inactive one with `isActive: false`, not
+            pre-filtered, so an invite/grant picker can show one as
+            unselectable instead of it silently vanishing. A MANAGER's
+            authority to invite staff to, or grant a colleague, one of these
+            locations comes from membership and role alone, never from
+            which of them the MANAGER personally holds.
         members: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyMember" } }
         pendingInvites: { type: array, items: { $ref: "#/components/schemas/TerminalInvite" } }
     TerminalPagedInbound:
