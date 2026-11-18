@@ -918,14 +918,34 @@ export default function TerminalWorkspacePage() {
             scrolls -- the row just ended mid-word ("Depar...") with no cue.
             `tabStripScrollable` is real scroll-metric state (not a guess from
             tab count), so this only appears when there truly is more off
-            to the right, and clears itself once scrolled to the end. */}
+            to the right, and clears itself once scrolled to the end.
+
+            DEMO-UI-CONTRAST: the cue can sit over either an inactive tab
+            (bg-white) or the active one (bg-belize-blue) depending on which
+            tab is at the scroll edge -- the ORIGINAL bg-slate-900/70 fill
+            was measured (real compiled colours, not token names): 6.64:1
+            against the disc's own white-tab backdrop (fine) but only
+            1.73:1 against belize-blue (#1e40af) -- both colours are dark,
+            so no amount of extra opacity on a single dark fill can ever
+            clear 3:1 there (even fully opaque slate-900 only reaches
+            2.05:1 against belize-blue -- confirmed by computing the ratio
+            at every opacity step, not assumed). A flat single-colour disc
+            cannot pass 3:1 against both a near-white and an already-dark
+            surface at once; needs different survival strategies for each.
+            Fix: make the fill OPAQUE (was always fine against white,
+            17.85:1 solid) and add a white ring, which alone clears 8.72:1
+            against belize-blue -- the shape stays visible via whichever of
+            fill/ring actually differs from what's behind it. Same shape,
+            same show/hide behaviour; only the fill opacity and the ring are
+            new. Sized up slightly (h-5->h-6, icon h-3->h-3.5) per the
+            explicit "size it so it reads on a phone" ask. */}
         {tabStripScrollable && (
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 sm:hidden"
           >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900/70 text-white shadow-sm">
-              <svg viewBox="0 0 20 20" fill="none" className="h-3 w-3" aria-hidden="true">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm ring-2 ring-white">
+              <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
                 <path d="M7.5 4.5 13 10l-5.5 5.5" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </span>
