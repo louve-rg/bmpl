@@ -44,15 +44,19 @@ const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
 // FIN-SELF-LOCKOUT — each message names WHO can act instead, and the two
-// differ ON PURPOSE: no admin-console endpoint ever writes memberRole
-// (endMember/reactivateMember both leave it untouched), so only the
-// self-END message can truthfully name an administrator. This is NOT the
-// stale pre-b25bae6e wording Dwight's 5bed34b3 restored — it is a SECOND,
-// later correction from god after b25bae6e: the brief symmetric version
-// would have promised a capability ("an administrator can change your
-// role") that exists nowhere, which is the same defect as a dead button
-// expressed as text. See terminal.service.ts's comment on staffChangeRole
-// for the fuller reasoning this constant has to match.
+// differ ON PURPOSE. FINAL state (2026-11-18), after three passes on this
+// one sentence, all the owner's: a role change has no DIRECT admin path,
+// and the INDIRECT one (endMember + a fresh invite at the new role) is not
+// the same action under a different hand — it ends the membership, forces
+// a fresh invite-accept, and does not carry location grants across. A
+// message must not promise a mechanism whose side effects it does not
+// disclose, so this message names no administrator at all, honestly
+// leaving a sole manager with no same-standing role-change route (the
+// workaround and its cost belong in Edward's operating guide, not a
+// one-line refusal). Ending a membership has no such gap — endMember
+// through the admin door does exactly what self-service would have — so
+// SELF_END_MESSAGE correctly keeps both halves. See terminal.service.ts's
+// comment on staffChangeRole for the fuller history of this sentence.
 const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager can do this for you.';
 const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.';
 

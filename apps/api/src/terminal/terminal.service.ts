@@ -765,11 +765,30 @@ export class TerminalService {
    * that is actually theirs — they tried to act on their own standing —
    * never the company-wide floor text, which would be true but tell them
    * nothing about why they were actually stopped. The message says who
-   * CAN do it: ONLY another manager — unlike `staffDeactivateMember`
-   * below, there is no admin-console endpoint that changes a member's
-   * role at all (`endMember`/`reactivateMember` never touch `memberRole`),
-   * so the message must not claim an administrator can. There is no
-   * ownership-transfer workflow in this codebase, so there is no
+   * CAN do it: ONLY another manager — never an administrator, and this
+   * went through two wrong answers before landing here (2026-11-18), both
+   * the owner's, worth recording so the next edit doesn't repeat them.
+   * First: no admin-console endpoint writes `memberRole` at all
+   * (`endMember`/`reactivateMember` never touch it), so naming an
+   * administrator seemed simply false — true, but not the whole
+   * reason. Second (reversed, briefly): an administrator CAN reach a
+   * role change INDIRECTLY, via `endMember` followed by a fresh invite
+   * at the new role — so for a moment the message named one anyway.
+   * THAT WAS ALSO WRONG, and this is the actual principle: a message
+   * must not promise a mechanism whose side effects it does not
+   * disclose. The indirect route is not the same action under a
+   * different hand — it ENDS the member's standing, requires them to
+   * accept a brand-new invitation, and does not carry their existing
+   * `TerminalCompanyMemberLocation` grants across (contrast
+   * `staffDeactivateMember` below: `endMember` through the admin door
+   * does EXACTLY what the self-service door would have done, no hidden
+   * side effect, so that message correctly DOES name an administrator).
+   * A sole manager who hits this message has a genuine dead end for a
+   * same-standing role change — that is honestly stated here, not
+   * hidden behind a workaround with undisclosed consequences; the
+   * workaround belongs in Edward's operating guide, where there's room
+   * to explain what it actually costs, not in a one-line refusal. There
+   * is no ownership-transfer workflow in this codebase, so there is no
    * legitimate case where a manager must be allowed to demote themselves
    * — the refusal has no exception path by design. A MANAGER may still
    * freely promote themselves to MANAGER (a no-op) or be demoted by a
