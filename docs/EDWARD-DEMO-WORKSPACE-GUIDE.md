@@ -77,11 +77,18 @@ safe to ignore. We are telling you plainly so that counting eight does not
 read as something wrong with your demonstration, or as parcels you have
 lost track of.
 
-### Three things worth knowing about these screens
+### Four things worth knowing about these screens
 
 - **You cannot open a History row.** To see a parcel's full leg-by-leg
   timeline, type its reference number into the **Lookup** tab instead —
   clicking a row in History does nothing, and that is not a broken page.
+- **Lookup gives you the same "no shipment with that reference" message
+  either way.** If you type in a reference and Lookup says it can't find
+  one, that means either you mistyped it, or that parcel genuinely belongs
+  to a different terminal — Lookup won't tell you which, on purpose. That's
+  a protection, not a fault: the same rule that stops you from learning
+  anything about another terminal's parcels is what stops anyone else from
+  learning about yours.
 - **A finished parcel disappears from every screen except History and
   Lookup.** The counts on Overview, Incoming, On Hand and Collect only ever
   count parcels still in progress, so seeing two there while History lists
