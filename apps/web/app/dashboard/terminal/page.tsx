@@ -1530,11 +1530,22 @@ function HistoryPanel({
           reliable field to tell a demonstration record apart from a
           verification-team test record (both carry the same "Demo" badge),
           and hardcoding reference numbers into this screen would be an
-          invented rule that breaks the next time test data is regenerated. */}
+          invented rule that breaks the next time test data is regenerated.
+
+          Second sentence is FIN-HIST-LAG's own second defect, caught by
+          Stanley pulling a real record: terminalHistory reports the
+          SHIPMENT's own status, while the working tabs (Hand off, etc.)
+          report one LEG's custody state -- a leg that has arrived but
+          awaits handoff is correctly IN_TRANSIT at the shipment level AND
+          correctly "Arrived" on the Hand off tab, not a staleness bug. No
+          refresh fixes a vocabulary difference, so the label below says
+          plainly which thing each screen is describing, rather than
+          inventing a new status value or asking the API for one. */}
       <p className="text-xs text-[color:var(--bmpl-text-muted)]">
         History lists every shipment that has ever touched your locations, including setup and test records -- in progress or finished, newest
         first. Overview, Incoming, On Hand and the queue tabs only ever count what's still in progress, so a smaller number there is correct, not
-        missing data.
+        missing data. The status shown here describes the whole shipment's journey, not the one step a working tab may be handling right now --
+        trust the tab you're actually working in for what to do next.
       </p>
       {rows.map((row) => {
         const hubs = row.touchedHubs.map(hubLabel).filter(Boolean);
@@ -1548,9 +1559,12 @@ function HistoryPanel({
                   {row.senderName} → {row.recipientName}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                {row.isTest && <Badge tone="neutral">Demo</Badge>}
-                <StatusBadge status={row.status} />
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex items-center gap-1.5">
+                  {row.isTest && <Badge tone="neutral">Demo</Badge>}
+                  <StatusBadge status={row.status} />
+                </div>
+                <p className="text-[10px] uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Shipment status</p>
               </div>
             </div>
             {hubs.length > 0 && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">{hubs.join(' → ')}</p>}
@@ -1912,21 +1926,48 @@ function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: Staff
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge tone={m.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{m.memberRole}</Badge>
                   <Badge tone={m.status === 'ACTIVE' ? 'success' : 'neutral'}>{m.status}</Badge>
-                  {m.status === 'ACTIVE' && m.userId !== currentUserId && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={roleBusy === m.userId}
-                      onClick={() => void changeRole(m.userId, m.memberRole === 'MANAGER' ? 'OPERATOR' : 'MANAGER')}
-                    >
-                      {roleBusy === m.userId ? 'Changing…' : m.memberRole === 'MANAGER' ? 'Set as operator' : 'Appoint as manager'}
-                    </Button>
-                  )}
-                  {m.status === 'ACTIVE' && m.userId !== currentUserId && (
-                    <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId, m.name)}>
-                      {endBusy === m.userId ? 'Ending…' : 'End membership'}
-                    </Button>
-                  )}
+                  {/* FIN-SELF-LOCKOUT: a Manager cannot change their own role
+                      -- Pam confirmed no admin-console endpoint can change a
+                      role AT ALL today (endMember/reactivateMember never
+                      write memberRole), so unlike ending a membership, there
+                      is no administrator to name here. Naming one anyway
+                      would promise a capability that does not exist anywhere
+                      in the product. The note REPLACES the control in place,
+                      not underneath it. Only a MANAGER ever reaches this tab,
+                      so the caller's own row is always memberRole MANAGER --
+                      "manager to operator" is the only direction this note
+                      ever needs to state. */}
+                  {m.status === 'ACTIVE' &&
+                    (m.userId === currentUserId ? (
+                      <span className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        You cannot change your own role from manager to operator. Another manager can do this for you.
+                      </span>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={roleBusy === m.userId}
+                        onClick={() => void changeRole(m.userId, m.memberRole === 'MANAGER' ? 'OPERATOR' : 'MANAGER')}
+                      >
+                        {roleBusy === m.userId ? 'Changing…' : m.memberRole === 'MANAGER' ? 'Set as operator' : 'Appoint as manager'}
+                      </Button>
+                    ))}
+                  {/* FIN-SELF-LOCKOUT: unlike role change, ending a
+                      membership DOES have an admin-console door (an
+                      administrator can end a membership, confirmed by god),
+                      so this half of the asymmetry names one. The two notes
+                      say different true things on purpose -- not a shared
+                      sentence covering both. */}
+                  {m.status === 'ACTIVE' &&
+                    (m.userId === currentUserId ? (
+                      <span className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.
+                      </span>
+                    ) : (
+                      <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId, m.name)}>
+                        {endBusy === m.userId ? 'Ending…' : 'End membership'}
+                      </Button>
+                    ))}
                   {m.status === 'ENDED' && (
                     <Button variant="outline" size="sm" disabled={reactivateBusy === m.userId} onClick={() => void reactivateMember(m.userId)}>
                       {reactivateBusy === m.userId ? 'Reactivating…' : 'Reactivate'}
@@ -1934,21 +1975,6 @@ function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: Staff
                   )}
                 </div>
               </div>
-
-              {/* FIN-COUNTS-HISTORY, item 3 (owner ruling, confirmed by god):
-                  a Manager cannot end their own membership or change their
-                  own role -- Pam is adding the server-side refusal for this.
-                  The note REPLACES both controls on the caller's own row
-                  rather than sitting under a control that would only be
-                  refused ("no dead buttons" is a standing rule here) -- and
-                  it states both halves god required: what you can't do, AND
-                  who still can, so a manager with no visible colleague does
-                  not read this as a dead end. */}
-              {m.status === 'ACTIVE' && m.userId === currentUserId && (
-                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
-                  You can't end your own membership or change your own role here -- another manager or a BML administrator can do that for you.
-                </p>
-              )}
 
               {rowErr[m.userId]?.source === 'top' && (
                 <Alert tone="error" className="mt-2">

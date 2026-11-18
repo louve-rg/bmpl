@@ -872,17 +872,20 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
   // the owner's explicit rule that the API proves the boundary.
   describe('TERM-STAFF-UI — staff self-service: role change, membership, location grants, invite control', () => {
     /**
-     * FIN-COUNTS-HISTORY, item 3 (owner ruling): Pam is adding a
-     * server-side refusal for a Manager ending their own membership or
-     * changing their own role. The owner's standing "no dead buttons" rule
-     * means the UI must not present End membership/role-change on the
-     * caller's OWN row and let it be refused -- it replaces both controls
-     * with a note, on the SAME row, naming what can't be done and who still
-     * can. `meId` matches STAFF_ROSTER.members[0].userId ('user_1') here --
-     * everything else about Edward's own row (badges, locations) is
-     * untouched; only the two destructive/role controls are gone.
+     * FIN-SELF-LOCKOUT (corrected by god after Pam read the admin
+     * endpoints): the two notes say DIFFERENT true things, not one shared
+     * sentence. endMember/reactivateMember never write memberRole, so no
+     * admin-console endpoint can change a role at all today -- the
+     * role-change note names no administrator, only another manager. Ending
+     * a membership genuinely does have an admin door, so that note names
+     * one. Naming an administrator next to role-change would promise a
+     * capability that exists nowhere in the product -- the owner's
+     * no-dead-buttons rule expressed in text instead of a disabled button.
+     * `meId` matches STAFF_ROSTER.members[0].userId ('user_1') -- everything
+     * else about Edward's own row (badges, locations) is untouched; only
+     * the two destructive/role controls are gone.
      */
-    it("replaces End membership and the role-change control with an explanatory note on the signed-in manager's own row", async () => {
+    it("replaces End membership and the role-change control with two different notes -- only ending a membership names an administrator", async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
       await mount();
       await act(async () => {
@@ -895,9 +898,10 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Set as operator')).toBe(false);
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'End membership')).toBe(false);
-      expect(container!.textContent).toContain("You can't end your own membership or change your own role here");
-      // Both halves the owner required: what can't be done, AND who still can.
-      expect(container!.textContent).toContain('another manager or a BML administrator can do that for you');
+      expect(container!.textContent).toContain('You cannot change your own role from manager to operator. Another manager can do this for you.');
+      expect(container!.textContent).toContain(
+        'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.',
+      );
     });
 
     it("still offers End membership and the role-change control on a DIFFERENT manager's row, not just the signed-in one's own", async () => {
@@ -913,7 +917,35 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Set as operator')).toBe(true);
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'End membership')).toBe(true);
-      expect(container!.textContent).not.toContain("You can't end your own membership");
+      expect(container!.textContent).not.toContain('You cannot change your own role');
+      expect(container!.textContent).not.toContain('You cannot end your own terminal company membership');
+    });
+
+    /**
+     * FIN-SELF-LOCKOUT: the asymmetry is the whole point of god's
+     * correction -- an administrator must never be named near the
+     * role-change note, because no admin-console endpoint can change a
+     * role at all today (Pam's finding). Asserted on its own, not just as
+     * part of the combined note test above, so a future edit that
+     * re-merges the two notes back into one shared sentence fails here
+     * specifically.
+     */
+    it('never mentions an administrator in the role-change note -- no admin endpoint can change a role today', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      const roleNote = Array.from(container!.querySelectorAll('span')).find((s) =>
+        s.textContent?.includes('You cannot change your own role'),
+      );
+      expect(roleNote).toBeDefined();
+      expect(roleNote!.textContent).not.toContain('administrator');
     });
 
     it('appoints an ACTIVE operator as manager with one PATCH, body { memberRole: "MANAGER" }', async () => {
@@ -1632,6 +1664,28 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('History lists every shipment that has ever touched your locations, including setup and test records');
       expect(container!.textContent).toContain("Overview, Incoming, On Hand and the queue tabs only ever count what's still in progress");
+    });
+
+    /**
+     * FIN-HIST-LAG, the SECOND defect under that name (god stopped the PR
+     * to flag this -- Stanley pulled BML-FE5WKZQW live: shipment.status =
+     * IN_TRANSIT, its one leg genuinely arrived but not yet handed off).
+     * The refresh fix (tested elsewhere in this file) only kills the
+     * staleness half. This is the vocabulary half: History reports the
+     * SHIPMENT's status, a working tab reports one LEG's custody state,
+     * and both can be true at once and look like a contradiction. No
+     * refresh changes that -- only a label does, which is what this
+     * asserts.
+     */
+    it('labels the History status as the shipment-level status, so it does not read as a bare contradiction of a working tab', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [{ ...HISTORY_ROW, status: 'IN_TRANSIT' }] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('Shipment status');
+      expect(container!.textContent).toContain(
+        "The status shown here describes the whole shipment's journey, not the one step a working tab may be handling right now",
+      );
     });
 
     it('shows an honest empty state when there is no history yet', async () => {
