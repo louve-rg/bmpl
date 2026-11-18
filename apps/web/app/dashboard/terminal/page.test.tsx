@@ -21,6 +21,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  */
 
 const HUB = { id: 'hub_1', code: 'BZE', name: 'Belize City Hub', district: 'Belize', city: 'Belize City' };
+const HUB_2 = { id: 'hub_2', code: 'SPR', name: 'San Pedro Hub', district: 'Belize', city: 'San Pedro' };
+const HUB_3 = { id: 'hub_3', code: 'ORW', name: 'Orange Walk Hub', district: 'Orange Walk', city: 'Orange Walk Town' };
 const WORKSPACE = {
   companyId: 'co_1',
   companyName: 'Tropic Air',
@@ -152,6 +154,16 @@ const STAFF_ROSTER = {
       locationCount: 1,
     },
   ],
+  // TERM-STAFF-UI item 9: every company location, isActive flagged, never
+  // pre-filtered -- loc_1 is Edward's own grant (hub_1); loc_2 (hub_2) is
+  // active but not yet granted to anyone, for the "grant a location"
+  // picker; loc_3 (hub_3) is inactive and must show present-but-
+  // unselectable, never vanish.
+  locations: [
+    { id: 'loc_1', isActive: true, hub: HUB },
+    { id: 'loc_2', isActive: true, hub: HUB_2 },
+    { id: 'loc_3', isActive: false, hub: HUB_3 },
+  ],
 };
 
 const LOOKUP_RESULT = {
@@ -237,7 +249,7 @@ function stubFetch(opts: StubOpts = {}) {
       // etc.) all share this same "/api/terminal/staff" prefix and must NOT
       // be swallowed by the roster read.
       if (url.endsWith('/api/terminal/staff') && method === 'GET') {
-        return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
+        return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [], locations: [] });
       }
       if (url.includes('/api/terminal/inbound')) {
         if (opts.inboundStatus && opts.inboundStatus !== 200) {
@@ -281,6 +293,12 @@ function stubFetch(opts: StubOpts = {}) {
     }),
   );
   return calls;
+}
+
+const nativeSelectValueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+function setSelectValue(el: HTMLSelectElement, value: string) {
+  nativeSelectValueSetter.call(el, value);
+  el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
@@ -680,6 +698,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
             { ...STAFF_ROSTER.members[1], id: 'mem_e3', status: 'ENDED' },
           ],
           pendingInvites: [],
+          locations: [],
         },
       });
       await mount();
@@ -734,8 +753,8 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]')).not.toBeNull();
     });
 
-    it('shows an honest empty state when a manager has no staff yet', async () => {
-      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: { members: [], pendingInvites: [] } });
+    it('shows an honest empty state when a manager has no staff yet, and still offers the invite form', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: { members: [], pendingInvites: [], locations: [] } });
       await mount();
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0));
@@ -745,13 +764,13 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('No staff yet');
       expect(container!.textContent).toContain('No pending invites.');
 
-      // MDF-740: the empty state used to tell a Manager -- who has no
-      // admin-console access at all -- to go invite staff there. The
-      // replacement must name the route that genuinely exists (a BML
-      // administrator does this) and must not promise a console-invite
-      // control this screen has none of.
-      expect(container!.textContent).toContain('A BML administrator adds terminal staff from the admin console.');
-      expect(container!.textContent).not.toContain('Invite a manager or operator from the admin console to see them here.');
+      // TERM-STAFF-UI: MDF-740's old copy pointed a Manager at the admin
+      // console because this screen had no invite control at all -- it does
+      // now, so the empty state must say so instead, and the form itself
+      // must actually be present (not promised and missing).
+      expect(container!.textContent).toContain('Invite your first employee below.');
+      expect(container!.textContent).not.toContain('A BML administrator adds terminal staff from the admin console.');
+      expect(container!.querySelector('#staff-invite-email')).not.toBeNull();
     });
 
     it('does not let the global "nothing waiting" state cover the Staff tab', async () => {
@@ -789,7 +808,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       const calls = stubFetch({
         workspaceBody: MANAGER_WORKSPACE,
         queueRows: [],
-        staffBody: { members: [{ ...STAFF_ROSTER.members[0], memberRole: 'OPERATOR' }], pendingInvites: [] },
+        staffBody: { members: [{ ...STAFF_ROSTER.members[0], memberRole: 'OPERATOR' }], pendingInvites: [], locations: [] },
       });
       await mount();
       await act(async () => {
@@ -981,6 +1000,97 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickButton('Revoke');
 
       expect(calls.some((c) => c.url.includes('/terminal/staff/invites/inv_1/revoke') && c.method === 'POST')).toBe(true);
+    });
+
+    it('shows every company location in the invite checklist, including an inactive one marked unselectable, never vanished', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).toContain('San Pedro Hub');
+      expect(container!.textContent).toContain('Orange Walk Hub');
+      expect(container!.textContent).toContain('-- inactive');
+
+      const checkboxes = Array.from(container!.querySelectorAll('#staff-invite-locations input[type="checkbox"]')) as HTMLInputElement[];
+      const inactiveCheckbox = checkboxes.find((c) => c.closest('label')?.textContent?.includes('Orange Walk Hub'));
+      expect(inactiveCheckbox).toBeDefined();
+      expect(inactiveCheckbox!.disabled).toBe(true);
+    });
+
+    it('sends an invite with the picked active locations, body { email, memberRole, locationIds }', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      act(() => {
+        setValue(container!.querySelector('#staff-invite-email') as HTMLInputElement, 'new-hire@tropicair.bz');
+        setSelectValue(container!.querySelector('#staff-invite-role') as HTMLSelectElement, 'MANAGER');
+      });
+      const checkbox = Array.from(container!.querySelectorAll('#staff-invite-locations input[type="checkbox"]')).find((c) =>
+        (c as HTMLInputElement).closest('label')?.textContent?.includes('San Pedro Hub'),
+      ) as HTMLInputElement;
+      await act(async () => {
+        checkbox.click();
+      });
+      await clickButton('Send invite');
+
+      const call = calls.find((c) => c.url.endsWith('/terminal/staff/invite') && c.method === 'POST');
+      expect(call?.body).toEqual({ email: 'new-hire@tropicair.bz', memberRole: 'MANAGER', locationIds: ['loc_2'] });
+    });
+
+    it('refuses to send an invite with no location picked, before any request -- there is no whole-company grant', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      act(() => {
+        setValue(container!.querySelector('#staff-invite-email') as HTMLInputElement, 'new-hire@tropicair.bz');
+      });
+      await clickButton('Send invite');
+
+      expect(container!.textContent).toContain('Select at least one location -- there is no whole-company grant.');
+      expect(calls.some((c) => c.url.endsWith('/terminal/staff/invite'))).toBe(false);
+    });
+
+    it('grants an existing ACTIVE member a new location via the picker, body { locationId }', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const select = container!.querySelector('select[aria-label="Grant Edward Broaster a location"]') as HTMLSelectElement;
+      act(() => {
+        setSelectValue(select, 'loc_2');
+      });
+      await clickButton('Grant');
+
+      const call = calls.find((c) => c.url.includes('/terminal/staff/user_1/locations') && c.method === 'POST');
+      expect(call?.body).toEqual({ locationId: 'loc_2' });
+    });
+
+    it('shows the inactive company location in the grant picker as a disabled option, never hidden', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const select = container!.querySelector('select[aria-label="Grant Edward Broaster a location"]') as HTMLSelectElement;
+      const option = Array.from(select.options).find((o) => o.textContent?.includes('Orange Walk Hub'));
+      expect(option).toBeDefined();
+      expect(option!.disabled).toBe(true);
     });
   });
 
@@ -1456,7 +1566,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
             queueCalls += 1;
             return jsonResponse(200, [], { 'X-BMPL-Queue-Has-More': 'false' });
           }
-          if (url.includes('/api/terminal/staff')) return jsonResponse(200, { members: [], pendingInvites: [] });
+          if (url.includes('/api/terminal/staff')) return jsonResponse(200, { members: [], pendingInvites: [], locations: [] });
           if (url.includes('/api/terminal/inbound')) return jsonResponse(200, { items: [], hasMore: false });
           if (url.includes('/api/terminal/custody')) return jsonResponse(200, { items: [], hasMore: false });
           if (url.includes('/api/terminal/history')) {

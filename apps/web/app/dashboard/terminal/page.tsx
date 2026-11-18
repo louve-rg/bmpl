@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, StatusBadge } from '../../../components/ui';
+import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select, StatusBadge } from '../../../components/ui';
 
 /**
  * TERM-11: the terminal operator workspace. Contract read from Pam's own
@@ -201,9 +201,24 @@ interface StaffInvite {
   locationCount: number;
 }
 
+/**
+ * TERM-STAFF-UI: the ninth contract item, added after the first eight
+ * shipped a real gap -- no route told a terminal member their company's
+ * full location set, only a member's own grants. God's ruling: the SAME
+ * shape `apps/admin`'s own `getCompany` already returns (every location,
+ * `isActive` flagged, never pre-filtered), so an inactive one can be shown
+ * present-but-unselectable instead of silently vanishing from a picker.
+ */
+interface StaffCompanyLocation {
+  id: string;
+  isActive: boolean;
+  hub: { id: string; code: string; name: string; district?: string; city?: string };
+}
+
 interface StaffRoster {
   members: StaffMember[];
   pendingInvites: StaffInvite[];
+  locations: StaffCompanyLocation[];
 }
 
 interface LookupHubRef {
@@ -1498,14 +1513,17 @@ function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text
  * same `onChanged`-after-write convention the admin page uses, just under
  * the name this file's read path already had.
  *
- * Deliberately NOT here yet: a "grant a new location" control on an
- * existing member, and the "invite a new employee" form's location
- * checklist. Both need the full list of a company's active locations,
- * which no route in this contract returns to a terminal member (only a
- * member's OWN granted locations, via `/terminal/me` or each roster row) --
- * flagged to god rather than guessed at. Role change, end/reactivate
- * membership, per-location revoke, and invite resend/revoke need no such
- * list and are built below.
+ * `GET /terminal/staff`'s own top-level `locations` field is the ninth
+ * contract item, added after flagging a real gap: neither this route nor
+ * `/terminal/me` told a member their company's full location set, only
+ * their OWN grants (`/terminal/me`'s own `locations` is explicitly
+ * caller-scoped -- confirmed against `terminal.service.ts`, not guessed).
+ * Same shape `apps/admin`'s own `getCompany` already returns -- EVERY
+ * location, `isActive` flagged, never pre-filtered -- so the invite form's
+ * location checklist and the per-member "grant a location" picker below
+ * both show an inactive location present-but-unselectable rather than
+ * letting it silently vanish, per the owner's explicit ruling on why the
+ * flag was asked for over a filtered list.
  */
 function StaffRosterPanel({
   staff,
@@ -1570,13 +1588,23 @@ function StaffRosterPanel({
  * the actor targets themselves or someone else, so there is one refusal
  * path here, never a client-side guess at who counts as "the last one."
  */
+const STAFF_MEMBER_ROLES: StaffMemberRole[] = ['MANAGER', 'OPERATOR'];
+
 function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChanged: () => void }) {
   const [roleBusy, setRoleBusy] = useState<string | null>(null);
   const [endBusy, setEndBusy] = useState<string | null>(null);
   const [reactivateBusy, setReactivateBusy] = useState<string | null>(null);
-  // Keyed `${userId}:${locationId}`.
+  // Keyed `${userId}:${locationId}` for a revoke, `${userId}:grant` for a grant.
   const [locationBusy, setLocationBusy] = useState<string | null>(null);
+  const [grantPick, setGrantPick] = useState<Record<string, string>>({});
   const [rowErr, setRowErrState] = useState<Record<string, string>>({});
+
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<StaffMemberRole>('OPERATOR');
+  const [invitePicked, setInvitePicked] = useState<Set<string>>(new Set());
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteErr, setInviteErr] = useState<string | null>(null);
+  const [inviteDelivery, setInviteDelivery] = useState<InviteDelivery | null>(null);
 
   function setRowErr(userId: string, message: string | null) {
     setRowErrState((prev) => {
@@ -1645,18 +1673,80 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
     }
   }
 
+  /** Scoped to an ACTIVE member only -- the server 404s otherwise, same as the admin page's own grant. */
+  async function grantLocation(userId: string) {
+    const locationId = grantPick[userId];
+    if (!locationId) return;
+    setLocationBusy(`${userId}:grant`);
+    setRowErr(userId, null);
+    try {
+      await api.post(`/terminal/staff/${userId}/locations`, { locationId });
+      setGrantPick((prev) => {
+        const { [userId]: _drop, ...rest } = prev;
+        return rest;
+      });
+      onChanged();
+    } catch (e) {
+      setRowErr(userId, errMessage(e, 'Could not grant that location.'));
+    } finally {
+      setLocationBusy(null);
+    }
+  }
+
+  async function invite() {
+    if (!inviteEmail.trim()) {
+      setInviteErr('An email address is required.');
+      return;
+    }
+    if (invitePicked.size === 0) {
+      // Mirrors inviteTerminalCompanyMemberSchema's own locationIds.min(1),
+      // enforced here before the request -- same reasoning the admin
+      // console's own invite form already applies.
+      setInviteErr('Select at least one location -- there is no whole-company grant.');
+      return;
+    }
+    setInviteBusy(true);
+    setInviteErr(null);
+    setInviteDelivery(null);
+    try {
+      const created = await api.post<{ delivery?: InviteDelivery }>('/terminal/staff/invite', {
+        email: inviteEmail.trim(),
+        memberRole: inviteRole,
+        locationIds: Array.from(invitePicked),
+      });
+      if (created?.delivery) setInviteDelivery(created.delivery);
+      setInviteEmail('');
+      setInviteRole('OPERATOR');
+      setInvitePicked(new Set());
+      onChanged();
+    } catch (e) {
+      setInviteErr(errMessage(e, 'Could not send that invite.'));
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  function toggleInvitePicked(id: string) {
+    setInvitePicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const activeLocationCount = staff.locations.filter((l) => l.isActive).length;
+
   return (
     <div>
       <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Members ({staff.members.length})</h2>
       {staff.members.length === 0 ? (
         <EmptyState
           title="No staff yet"
-          // MDF-740's original reasoning no longer applies -- a Manager now
-          // has a real invite control, it just isn't built in this pass yet
-          // (see this file's TERM-STAFF-UI panel comment). Keep pointing at
-          // the admin console until the invite form itself lands here, so
-          // this never promises a control that doesn't exist on this screen.
-          description="A BML administrator adds terminal staff from the admin console. Ask them to invite your managers and operators."
+          // TERM-STAFF-UI: MDF-740's copy pointed a Manager at the admin
+          // console because this screen had no invite control at all. It
+          // does now -- invite your first employee below.
+          description="Invite your first employee below."
         />
       ) : (
         <div className="space-y-3">
@@ -1729,21 +1819,109 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 </>
               )}
 
+              {m.status === 'ACTIVE' &&
+                (() => {
+                  const grantable = staff.locations.filter((l) => !m.locations.some((ml) => ml.id === l.id));
+                  if (grantable.length === 0) return null;
+                  return (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Select
+                        aria-label={`Grant ${m.name} a location`}
+                        value={grantPick[m.userId] ?? ''}
+                        onChange={(e) => setGrantPick((prev) => ({ ...prev, [m.userId]: e.target.value }))}
+                        className="h-7 py-0 text-xs"
+                      >
+                        <option value="">+ grant a location…</option>
+                        {grantable.map((l) => (
+                          // Shown, never hidden, when inactive -- it is
+                          // present-but-unselectable rather than a vanished
+                          // location this screen pretends the company
+                          // never had.
+                          <option key={l.id} value={l.id} disabled={!l.isActive}>
+                            {l.hub.name} ({l.hub.code}){l.isActive ? '' : ' -- inactive'}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={!grantPick[m.userId] || locationBusy === `${m.userId}:grant`}
+                        onClick={() => void grantLocation(m.userId)}
+                      >
+                        {locationBusy === `${m.userId}:grant` ? 'Granting…' : 'Grant'}
+                      </Button>
+                    </div>
+                  );
+                })()}
+
               {m.status === 'ENDED' && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Ended {when(m.endedAt)}.</p>}
             </Card>
           ))}
         </div>
       )}
+
+      <div className="mt-4 space-y-2 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+        <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Invite a member</h3>
+        {inviteErr && <Alert tone="error">{inviteErr}</Alert>}
+        <Field label="Email" htmlFor="staff-invite-email">
+          <Input
+            id="staff-invite-email"
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="staff@company.bz"
+          />
+        </Field>
+        <Field label="Role" htmlFor="staff-invite-role">
+          <Select id="staff-invite-role" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as StaffMemberRole)}>
+            {STAFF_MEMBER_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label="Locations (at least one -- a role alone never grants access)"
+          htmlFor="staff-invite-locations"
+          hint={activeLocationCount === 0 ? 'No active locations exist yet -- ask a BML administrator to attach one first.' : undefined}
+        >
+          <div id="staff-invite-locations" className="space-y-1 rounded-bmpl-md border border-slate-200 p-2">
+            {staff.locations.length === 0 ? (
+              <p className="text-xs text-[color:var(--bmpl-text-muted)]">No locations to grant.</p>
+            ) : (
+              staff.locations.map((l) => (
+                <label key={l.id} className={`flex items-center gap-2 text-sm ${l.isActive ? '' : 'text-[color:var(--bmpl-text-muted)]'}`}>
+                  <input
+                    type="checkbox"
+                    checked={invitePicked.has(l.id)}
+                    disabled={!l.isActive}
+                    onChange={() => toggleInvitePicked(l.id)}
+                    className="accent-belize-blue"
+                  />
+                  {l.hub.name} ({l.hub.code}){l.isActive ? '' : ' -- inactive'}
+                </label>
+              ))
+            )}
+          </div>
+        </Field>
+        <Button type="button" disabled={inviteBusy || activeLocationCount === 0} onClick={() => void invite()}>
+          {inviteBusy ? 'Sending…' : 'Send invite'}
+        </Button>
+        {inviteDelivery && (
+          <Alert tone={deliveryMessage(inviteDelivery).tone} className="mt-2">
+            {deliveryMessage(inviteDelivery).text}
+          </Alert>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
  * TERM-STAFF-UI: resend/revoke for a pending invitation -- the two routes
- * god added to mirror the admin console's own InvitesCard pair. Needs no
- * company-locations list (unlike the invite-creation form, not built in
- * this pass -- see this file's StaffRosterPanel comment), so there is
- * nothing blocking this half from shipping now.
+ * god added to mirror the admin console's own InvitesCard pair.
  */
 function StaffPendingInvitesSection({ staff, onChanged }: { staff: StaffRoster; onChanged: () => void }) {
   const [resendBusy, setResendBusy] = useState<string | null>(null);
