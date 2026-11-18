@@ -1755,6 +1755,14 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).not.toContain('Internal server error');
     });
 
+    it("shows its own fallback on a 500 whose body carries no message field at all -- not just Nest's exact placeholder", async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: {} });
+      await mount();
+
+      expect(container!.textContent).toContain('Could not load your queue.');
+      expect(container!.textContent).not.toContain('Request failed');
+    });
+
     it('still renders a real business refusal verbatim on a 500 -- only the frameworks own generic text is replaced', async () => {
       stubFetch({ queueStatus: 500, queueErrorBody: { message: 'Your terminal company has been suspended.' } });
       await mount();

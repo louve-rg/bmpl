@@ -347,16 +347,35 @@ type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' 
 
 /**
  * REL-QUEUE-ERR-GENERIC-MASK: a 500 with no specific cause reaches here as
- * the framework's own unhandled-exception placeholder ("Internal server
- * error"), not a reason anyone can act on -- since it is never null, the
- * `?? fallback` below would otherwise never fire, and the generic text
- * would always beat this screen's own human-readable fallback. A real
- * business refusal (400/403/404/409, or even a 500 the API gave an actual
- * reason for) is a real reason and still renders verbatim, unchanged.
+ * one of two hardcoded placeholders, neither a reason anyone can act on --
+ * since neither is null, the `?? fallback` below would otherwise never
+ * fire, and the generic text would always beat this screen's own
+ * human-readable fallback:
+ *   - "Internal server error" -- Nest's own UNKNOWN_EXCEPTION_MESSAGE
+ *     constant (@nestjs/core/constants.js), sent for any unhandled
+ *     exception. Verified against the exact resolved version in this repo's
+ *     lockfile: @nestjs/core@10.4.22.
+ *   - "Request failed" -- lib/api.ts's OWN fallback (`raw = data?.message
+ *     ?? 'Request failed'`) for a 500 whose body carries no `message` field
+ *     at all, e.g. an empty body.
+ * A real business refusal (400/403/404/409, or even a 500 the API gave an
+ * actual reason for) is a real reason and still renders verbatim, unchanged.
+ *
+ * KNOWN COUPLING, NOT ELIMINATED: this is a hardcoded string match against a
+ * framework constant and our own client-side constant, same as the trap
+ * found in the pre-existing tests this change replaces. If a future Nest
+ * upgrade changes UNKNOWN_EXCEPTION_MESSAGE's text, or lib/api.ts's own
+ * 'Request failed' literal changes, this condition silently stops firing --
+ * the generic text reaches the user again, and the tests below, which key
+ * on these same two literals, stay green throughout. There is nothing
+ * better to key on here, since the server always supplies *some* message;
+ * the next reader should know this is a live, accepted gap, not an
+ * oversight.
  */
+const GENERIC_SERVER_FAILURE_MESSAGES = new Set(['Internal server error', 'Request failed']);
 function errMessage(e: unknown, fallback: string): string {
   const err = e as ApiError | undefined;
-  if (err?.status === 500 && err.message === 'Internal server error') return fallback;
+  if (err?.status === 500 && err.message !== undefined && GENERIC_SERVER_FAILURE_MESSAGES.has(err.message)) return fallback;
   return err?.message ?? fallback;
 }
 
