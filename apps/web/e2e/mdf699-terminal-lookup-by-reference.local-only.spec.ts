@@ -296,15 +296,19 @@ test('A terminal staff member can look up a reference at their own hub and gets 
  *
  * Checked, at god's instruction, whether a hub existed outside the
  * UATBC/UATBP pair that could stand in for "a different real terminal"
- * with zero seed change: queried `GET /admin/logistics/hubs` against this
- * environment directly. Five hubs exist: `REHBC`/`REHSP` (Rehearsal Belize
- * City / Rehearsal San Pedro, `isTest:false` -- the DEMO company this
- * floor is explicitly keeping hands off, and wrong side of the isTest
- * boundary regardless), `UATBC`/`UATBP` (the known pair), and `QAOVF` (QA
- * Overflow Test Terminal, `isTest:true` but `isActive:false` -- excluded
- * by `planRoute`'s own `activeHubs = hubs.filter(h => h.isActive)`, and
- * even active it shares hubA's own Belize City/BELIZE district, so it
- * would not isolate hubB either). No qualifying hub exists today.
+ * with zero seed change: queried `GET /admin/logistics/hubs` against THIS
+ * LOCAL DEV STACK directly (not production -- god separately confirmed
+ * production carries nine hubs and none of the five below, so these are
+ * local rows only, not the real "DEMO - San Pedro Terminal" company,
+ * which lives on `DEMO-SP-TER` in production and was never queried here).
+ * Five hubs exist locally: `REHBC`/`REHSP` ("Rehearsal Belize City" /
+ * "Rehearsal San Pedro", `isTest:false` -- wrong side of the isTest
+ * boundary regardless of what they represent), `UATBC`/`UATBP` (the known
+ * pair), and `QAOVF` (QA Overflow Test Terminal, `isTest:true` but
+ * `isActive:false` -- excluded by `planRoute`'s own `activeHubs =
+ * hubs.filter(h => h.isActive)`, and even active it shares hubA's own
+ * Belize City/BELIZE district, so it would not isolate hubB either). No
+ * qualifying hub exists today.
  *
  * `seed-uat-logistics.ts` seeds exactly `UATBC` (Belize City/BELIZE) and
  * `UATBP` (Belmopan/CAYO), one LAND route between them, nothing else.
@@ -392,7 +396,21 @@ test('A terminal staff member can look up a reference at their own hub through t
   await lookupViaTab(staffPage, reference);
   await expect(staffPage.getByText(reference, { exact: false }), 'the real shipment detail must render for an OPERATOR, not just a MANAGER').toBeVisible({ timeout: 15_000 });
   await expect(staffPage.getByText('Leg 1', { exact: false }), 'the leg list must render -- this is the detail payload rich enough for a counter conversation the card asked for').toBeVisible();
-  await expect(staffPage.getByText('Demo', { exact: true }), 'every shipment this spec books is isTest -- the T-7 Demo badge must render, never silently omitted').toBeVisible();
+  // god's finding (2026-11-18, conv-779f94): `getByText('Demo', {exact:
+  // true})` on the whole page was under-specified, not a double-render --
+  // the workspace header carries its OWN Demo badge (page.tsx:789,
+  // `workspace!.isTest`) independently of whichever tab is open, so a page
+  // with any isTest shipment ever has at least two. The one this test
+  // actually means is the lookup RESULT's own badge (page.tsx:1598,
+  // `result.isTest`), which only exists inside the single active
+  // `role="tabpanel"` (page.tsx:956) -- the header is a sibling of that
+  // panel, outside it. Scoping to the tabpanel is a precision fix, not a
+  // relaxation: it still asserts the result's own Demo badge renders, via
+  // `exact: true`, not `.first()`.
+  await expect(
+    staffPage.getByRole('tabpanel').getByText('Demo', { exact: true }),
+    'every shipment this spec books is isTest -- the lookup result\'s own Demo badge must render, never silently omitted',
+  ).toBeVisible();
 });
 
 test('The Lookup tab shows the server\'s own refusal message verbatim, never a paraphrase or a silent empty result', async ({ browser }) => {
