@@ -74,3 +74,8 @@ uploads/
 # MDF-728: the dev-only captured-email mailbox, persisted so it survives an
 # API restart. Local, throwaway, per-worktree — never committed.
 apps/api/.dev-mailbox.json
+
+# TERM-STAFF-INFRA: cached login cookies for the local-only Playwright
+# runner's shared SUPER_ADMIN/UAT_CUSTOMER auth state. Rebuilt every run by
+# local-only-global-setup.ts, never committed.
+apps/web/e2e/support/.local-only-auth-state/

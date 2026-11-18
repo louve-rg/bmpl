@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
+import { ADMIN_STATE_PATH, CUSTOMER_STATE_PATH } from './support/local-only-shared-auth';
 
 /**
  * [LOCAL ONLY, MDF-705 follow-up] Written ahead of MDF-709 (API, Pam) /
@@ -36,8 +36,6 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  *    item 1 ships.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
-const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
-const ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
 const stamp = Date.now();
 
 async function postWithCsrf<T>(page: Page, path: string, body: unknown): Promise<{ status: number; body: T }> {
@@ -82,9 +80,25 @@ async function getJson<T>(page: Page, path: string): Promise<{ status: number; b
   }, path) as Promise<{ status: number; body: T }>;
 }
 
-async function adminLogin(page: Page): Promise<void> {
-  expect(ADMIN_PASSWORD, 'SEED_SUPER_ADMIN_PASSWORD not set -- hard stop, not a skip').toBeTruthy();
-  expect(await tryLogin(page, ADMIN_EMAIL, ADMIN_PASSWORD!), 'admin login failed -- hard stop, not a skip').toBeTruthy();
+/**
+ * TERM-STAFF-INFRA (god, 2026-11-18): admin/customer no longer log in fresh
+ * here -- `local-only-global-setup.ts` builds one shared storageState per
+ * role for the whole local-only run (see local-only-shared-auth.ts), so this
+ * just loads the cached file. storageState restores cookies, not navigation
+ * history, so the page still needs an explicit `goto` before its first
+ * relative fetch -- same requirement `recipientPage` already documents
+ * below.
+ */
+async function adminPageFromCache(browser: import('@playwright/test').Browser): Promise<Page> {
+  const page = await (await browser.newContext({ storageState: ADMIN_STATE_PATH })).newPage();
+  await page.goto(WEB);
+  return page;
+}
+
+async function customerPageFromCache(browser: import('@playwright/test').Browser): Promise<Page> {
+  const page = await (await browser.newContext({ storageState: CUSTOMER_STATE_PATH })).newPage();
+  await page.goto(WEB);
+  return page;
 }
 
 /**
@@ -153,17 +167,16 @@ async function bookAndClaimToAwaitingCollection(
 
 test('GAP-PROOF: a linked recipient\'s own incoming-shipment view carries no collection code at all (MDF-709 item 1\'s gap, proven live)', async ({ browser }) => {
   test.setTimeout(120_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const adminPage = await adminPageFromCache(browser);
+  const customerPage = await customerPageFromCache(browser);
   const recipientPage = await (await browser.newContext()).newPage();
   // god's finding (2026-11-18): this page never navigated anywhere before
   // the first relative fetch below, so it was still on about:blank, which
   // has no origin a relative URL can resolve against -- "Failed to parse
-  // URL from /api/auth/register". adminPage/customerPage never hit this
-  // because tryLogin() navigates first; this page registers instead of
-  // logging in, so it needs the same real origin given explicitly.
+  // URL from /api/auth/register". adminPage/customerPage never hit this --
+  // adminPageFromCache/customerPageFromCache navigate as part of loading
+  // the cached storageState; this page registers a brand new account
+  // instead, so it needs the same real origin given explicitly.
   await recipientPage.goto(WEB);
   // A fresh account, not UAT_CUSTOMER -- the sender and recipient must be
   // different accounts for "linked recipient" to mean anything.
@@ -225,10 +238,8 @@ test('GAP-PROOF: a linked recipient\'s own incoming-shipment view carries no col
  */
 test.fixme('AFTER MDF-709: a linked recipient sees the real collection code once AWAITING_COLLECTION, and only then', async ({ browser }) => {
   test.setTimeout(120_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const adminPage = await adminPageFromCache(browser);
+  const customerPage = await customerPageFromCache(browser);
   const recipientPage = await (await browser.newContext()).newPage();
   const recipientEmail = `mdf709-after-${stamp}@example.bz`;
   await recipientPage.evaluate(
