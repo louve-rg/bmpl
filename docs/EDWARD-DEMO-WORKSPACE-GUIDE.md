@@ -28,24 +28,72 @@ or set a password for you.
 
 ---
 
-## 2. The six demonstration shipments
+## 2. The demonstration shipments
 
-Your demo workspace already has six sample parcels staged in it, each at a
-different point in its journey, so you have something to look at and act on
-immediately rather than an empty screen:
+Your demo workspace has six sample parcels staged in it, each at a different
+point in its journey, so you have something to look at and act on
+immediately. Here is each one, described exactly as your own screens show
+it.
 
-- **One parcel on its way to you now.** It has not yet arrived at your
-  terminal.
-- **One parcel currently in your custody at the counter**, waiting to be
-  collected by the person it's addressed to.
-- **Four parcels already completed** — delivered to their recipients, with
-  their full history recorded.
+### The two you can act on today
 
-You can see all six, with their current state and full history, from the
-**History** tab (Managers only — see Section 3 below). None of this is
-delicate: if you act on the in-progress ones, that is exactly what they are
-there for. If you'd like the demo reset with fresh parcels at particular
-stages so you can try something again, tell us and we will stage them.
+- **BML-KLDR4RBU** — under the **Incoming** tab. It shows "Scheduled," "From
+  DEMO Belize City Interchange," and "No scheduled arrival time yet." There
+  is nothing to click on it yet: it is still waiting to be sent to you, and
+  it will not reach your **Arrive** tab until it has actually been marked
+  departed and has arrived.
+- **BML-ZVERGSME** — under **On Hand** and **Collect**, and on your
+  **Overview** screen's "Collection at the counter" card. It shows "Held
+  since 17 Nov, 23:06." This is the one worth trying end to end: open
+  **Collect**, and the screen tells you to "Ask the recipient for the code
+  on their own device, and their name." When the person collecting it
+  arrives, ask for both, type them in, and press **Record collection**. This
+  is the only complete action you can carry out alone in the demo today.
+
+### The four that are already finished
+
+These four are **delivered**, with nothing left to do, and you'll only find
+them on the **History** tab (Section 3):
+
+- **BML-5R62N72B** — delivered 17 Nov, 23:01.
+- **BML-YGDTR3VW** — delivered 17 Nov, 23:03.
+- **BML-UR3YP7CW** — delivered 17 Nov, 23:20, collected at the counter.
+- **BML-86EBCC3F** — delivered 17 Nov, 23:20, released to a courier and
+  delivered to the door.
+
+The last two are worth a closer look: between them, they show the only two
+ways a parcel ever leaves your shop — handed directly to the person
+collecting it (**BML-UR3YP7CW**), or released to a courier who completes
+the delivery (**BML-86EBCC3F**).
+
+### Two more you'll see in History that are not yours
+
+Your **History** tab will actually list **eight** entries, not six. Two of
+them — **BML-FE5WKZQW** and **BML-GWEUUB35** — are test entries our own
+verification team created while confirming the staff-management feature in
+Section 4 works. They are not part of your demonstration. We cannot remove
+them without a database change we are not prepared to make, and they are
+safe to ignore. We are telling you plainly so that counting eight does not
+read as something wrong with your demonstration, or as parcels you have
+lost track of.
+
+### Three things worth knowing about these screens
+
+- **You cannot open a History row.** To see a parcel's full leg-by-leg
+  timeline, type its reference number into the **Lookup** tab instead —
+  clicking a row in History does nothing, and that is not a broken page.
+- **A finished parcel disappears from every screen except History and
+  Lookup.** The counts on Overview, Incoming, On Hand and Collect only ever
+  count parcels still in progress, so seeing two there while History lists
+  eight is correct — it is not lost data.
+- **History can lag by one label.** A parcel that has arrived at your
+  terminal but not yet been handed off to you can still show as "In
+  Transit" in History, even while the **Hand off** tab correctly shows it as
+  Arrived. Trust the tab you're actually working in; the History label
+  catches up afterward.
+
+If you'd like the demo reset with fresh parcels at particular stages so you
+can try something again, tell us and we will stage them.
 
 ---
 
