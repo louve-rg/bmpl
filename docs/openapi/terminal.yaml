@@ -497,7 +497,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ChangeTerminalCompanyMemberRoleInput" }
+            schema:
+              type: object
+              required: [memberRole]
+              properties: { memberRole: { type: string, enum: [MANAGER, OPERATOR] } }
       responses:
         "200":
           description: The role after this call (unchanged from the request on a no-op)
@@ -534,7 +537,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/GrantTerminalCompanyMemberLocationInput" }
+            schema:
+              type: object
+              required: [locationId]
+              properties: { locationId: { type: string } }
       responses:
         "201": { description: Granted }
         "400": { $ref: "#/components/responses/ValidationError" }
