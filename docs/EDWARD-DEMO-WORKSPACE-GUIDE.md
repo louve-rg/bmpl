@@ -114,9 +114,9 @@ the delivery (**BML-86EBCC3F**).
 ### Two more you'll see in History that are not yours
 
 Your **History** tab will actually list **eight** entries, not six. Two of
-them — **BML-FE5WKZQW** and **BML-GWEUUB35** — are test entries our own
-verification team created while confirming the staff-management feature in
-Section 7 works. They are not part of your demonstration. We cannot remove
+them — **BML-FE5WKZQW** and **BML-GWEUUB35** — are demonstration shipments
+created to test arrival and collection at the terminal. They are not part
+of your demonstration. We cannot remove
 them without a database change we are not prepared to make, and they are
 safe to ignore. We are telling you plainly so that counting eight does not
 read as something wrong with your demonstration, or as parcels you have
