@@ -364,6 +364,22 @@ export default function TerminalWorkspacePage() {
 
   const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
+  // DEMO-UI-POLISH: the tab strip has always scrolled horizontally when it
+  // does not fit (overflow-x-auto below) -- nothing was ever functionally
+  // broken. But at phone width there was no visible cue that it scrolls at
+  // all, so a manager landing on Overview could not tell "Depar[t]" cut off
+  // at the edge meant "swipe for more" rather than "the page is broken".
+  // Tracked via the real DOM scroll metrics (not just tab count) so the
+  // affordance only shows when there genuinely is more off-screen to the
+  // right, and clears itself once the strip is scrolled to its end.
+  const tabStripRef = useRef<HTMLDivElement>(null);
+  const [tabStripScrollable, setTabStripScrollable] = useState(false);
+  const updateTabStripScrollable = useCallback(() => {
+    const el = tabStripRef.current;
+    if (!el) return;
+    setTabStripScrollable(el.scrollWidth - el.clientWidth - el.scrollLeft > 1);
+  }, []);
+
   const [lookupInput, setLookupInput] = useState('');
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
   const [lookupErr, setLookupErr] = useState<string | null>(null);
@@ -416,6 +432,15 @@ export default function TerminalWorkspacePage() {
   useEffect(() => {
     if (workspace) void loadQueue();
   }, [workspace, loadQueue]);
+
+  // Re-measure whenever the tab strip's own content can change width: on
+  // mount, on viewport resize, and when `workspace.memberRole` changes which
+  // tabs render at all (MANAGER gets two extra: Staff, History).
+  useEffect(() => {
+    updateTabStripScrollable();
+    window.addEventListener('resize', updateTabStripScrollable);
+    return () => window.removeEventListener('resize', updateTabStripScrollable);
+  }, [updateTabStripScrollable, workspace?.memberRole]);
 
   const loadStaff = useCallback(async () => {
     setStaffLoading(true);
@@ -813,75 +838,99 @@ export default function TerminalWorkspacePage() {
           `totalCount` both default off `rows ?? []`), so nothing here
           invents a number -- they just show no badge until the queue
           actually loads. */}
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="relative">
         <div
-          className="inline-flex min-w-full overflow-hidden rounded-bmpl-md border border-slate-200"
-          role="tablist"
-          aria-label="Terminal workspace sections"
+          ref={tabStripRef}
+          onScroll={updateTabStripScrollable}
+          className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"
         >
-          {(
-            [
-              'OVERVIEW',
-              'INBOUND',
-              'CUSTODY',
-              ...SECTION_ORDER.map((s) => s.action),
-              ...(workspace!.memberRole === 'MANAGER' ? (['STAFF', 'HISTORY'] as const) : []),
-              'LOOKUP',
-            ] as TabKey[]
-          ).map((key, i) => {
-            const active = tab === key;
-            const label =
-              key === 'OVERVIEW'
-                ? 'Overview'
-                : key === 'INBOUND'
-                  ? 'Incoming'
-                  : key === 'CUSTODY'
-                    ? 'On Hand'
-                    : key === 'STAFF'
-                      ? 'Staff'
-                      : key === 'HISTORY'
-                        ? 'History'
-                        : key === 'LOOKUP'
-                          ? 'Lookup'
-                          : TAB_LABELS[key];
-            const count =
-              key === 'OVERVIEW'
-                ? totalCount
-                : key === 'INBOUND'
-                  ? (inbound ?? []).length
-                  : key === 'CUSTODY'
-                    ? (custody ?? []).length
-                    : key === 'STAFF'
-                      ? activeStaffCount
-                      : key === 'HISTORY' || key === 'LOOKUP'
-                        ? 0
-                        : counts[key];
-            return (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-controls="terminal-workspace-panel"
-                onClick={() => setTab(key)}
-                className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
-                  i > 0 ? 'border-l border-slate-200' : ''
-                } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-              >
-                {label}
-                {count > 0 && (
-                  <span
-                    className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
-                      active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {count > 99 ? '99+' : count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          <div
+            className="inline-flex min-w-full overflow-hidden rounded-bmpl-md border border-slate-200"
+            role="tablist"
+            aria-label="Terminal workspace sections"
+          >
+            {(
+              [
+                'OVERVIEW',
+                'INBOUND',
+                'CUSTODY',
+                ...SECTION_ORDER.map((s) => s.action),
+                ...(workspace!.memberRole === 'MANAGER' ? (['STAFF', 'HISTORY'] as const) : []),
+                'LOOKUP',
+              ] as TabKey[]
+            ).map((key, i) => {
+              const active = tab === key;
+              const label =
+                key === 'OVERVIEW'
+                  ? 'Overview'
+                  : key === 'INBOUND'
+                    ? 'Incoming'
+                    : key === 'CUSTODY'
+                      ? 'On Hand'
+                      : key === 'STAFF'
+                        ? 'Staff'
+                        : key === 'HISTORY'
+                          ? 'History'
+                          : key === 'LOOKUP'
+                            ? 'Lookup'
+                            : TAB_LABELS[key];
+              const count =
+                key === 'OVERVIEW'
+                  ? totalCount
+                  : key === 'INBOUND'
+                    ? (inbound ?? []).length
+                    : key === 'CUSTODY'
+                      ? (custody ?? []).length
+                      : key === 'STAFF'
+                        ? activeStaffCount
+                        : key === 'HISTORY' || key === 'LOOKUP'
+                          ? 0
+                          : counts[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls="terminal-workspace-panel"
+                  onClick={() => setTab(key)}
+                  className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
+                    i > 0 ? 'border-l border-slate-200' : ''
+                  } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {label}
+                  {count > 0 && (
+                    <span
+                      className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
+                        active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* DEMO-UI-POLISH: a manager on a phone had no way to tell the strip
+            scrolls -- the row just ended mid-word ("Depar...") with no cue.
+            `tabStripScrollable` is real scroll-metric state (not a guess from
+            tab count), so this only appears when there truly is more off
+            to the right, and clears itself once scrolled to the end. */}
+        {tabStripScrollable && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 sm:hidden"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900/70 text-white shadow-sm">
+              <svg viewBox="0 0 20 20" fill="none" className="h-3 w-3" aria-hidden="true">
+                <path d="M7.5 4.5 13 10l-5.5 5.5" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          </div>
+        )}
       </div>
 
       <div id="terminal-workspace-panel" role="tabpanel">
@@ -1179,7 +1228,7 @@ function InboundPanel({
     return (
       <EmptyState
         title="Nothing inbound"
-        description="No LINE_HAUL leg is currently scheduled or on its way to any of your locations."
+        description="Nothing is currently scheduled or on its way to any of your locations."
       />
     );
   }
@@ -1282,10 +1331,15 @@ function CustodyPanel({
 }
 
 /**
- * MDF-777 (history): read-only, cursor-paginated past shipments that
- * touched this MANAGER's locations. No action button -- everything here
- * is already complete; what a MANAGER can still do about an item is
- * already covered by Overview/Lookup, not this screen.
+ * MDF-777 (history): read-only, cursor-paginated activity log of every
+ * shipment that touched this MANAGER's locations -- `terminalHistory`
+ * (shipment.service.ts) deliberately filters on hub-touch only, not status,
+ * so an in-flight shipment (AWAITING_COLLECTION, AWAITING_PICKUP, ...) shows
+ * up here alongside a finished one. DEMO-UI-POLISH: the copy used to say
+ * "Completed and past shipments" while the rows plainly weren't -- that was
+ * the bug, not the endpoint; it stayed a superset-of-queue view by design.
+ * No action button -- what a MANAGER can still do about an item is already
+ * covered by Overview/Lookup, not this screen.
  */
 function HistoryPanel({
   rows,
@@ -1323,7 +1377,7 @@ function HistoryPanel({
     return (
       <EmptyState
         title="No shipment history yet"
-        description="Completed and past shipments that touched your locations will appear here."
+        description="Every shipment that has touched your locations will appear here, in progress or finished, newest first."
       />
     );
   }
