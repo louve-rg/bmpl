@@ -51,6 +51,23 @@ import { ADMIN_STATE_PATH, CUSTOMER_STATE_PATH } from './support/local-only-shar
  * established -- has been rewritten into a positive test proving the fix,
  * exactly as this comment always said it would, never deleted. Its own
  * comment carries the gap-proof lineage for a reader who did not read git.
+ *
+ * UPDATE (2026-11-18, SEC-SHIPMENT-REF-DISCLOSURE, Pam's #778): the 403/404
+ * split described just above -- 403 for a real shipment that touches none
+ * of the caller's hubs, distinct from the 404 for a reference that never
+ * existed -- was itself an existence oracle: a caller could tell a real
+ * cross-company reference from a made-up one by the refusal alone. Fixed
+ * by folding the hub-membership check into `lookupForTerminal`'s own query
+ * (`shipment.service.ts`) instead of throwing a separate exception after
+ * the fact -- "not mine" and "doesn't exist" are now one `findFirst`
+ * returning `null`, one `NotFoundException`, one message, always: "No
+ * shipment with that reference." The tests below that asserted the old
+ * distinguishable 403 now assert that same identical 404, matching Pam's
+ * own `terminal-lookup.integration.spec.ts`. The one refusal this file
+ * never exercises, `myActiveHubIds`'s own 403 ("No active terminal company
+ * membership.") for a caller with no terminal membership at all, is
+ * untouched by this fix -- a different, already-content-blind guard,
+ * confirmed against Pam's diff, not assumed.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const stamp = Date.now();
@@ -315,9 +332,19 @@ test('A terminal staff member can look up a reference at their own hub and gets 
  * covers (an explicit product/seed decision, not made here -- god's
  * ruling was no seed change for this card); or `QAOVF` is made active in a
  * district of its own.
+ *
+ * UPDATE (2026-11-18, SEC-SHIPMENT-REF-DISCLOSURE, #778): "ForbiddenException"
+ * above is now historical. `lookupForTerminal` folds the hub-membership
+ * check into its own query instead of throwing a separate exception after
+ * the fact, so both arms described here now return `null` from that query
+ * and throw the identical `NotFoundException` ("No shipment with that
+ * reference."), not `ForbiddenException`. The reachability argument this
+ * whole comment makes is unaffected -- there is still no door in this
+ * two-hub network that reaches a hub while leaving the caller's own hub
+ * untouched -- only the exception type and message changed.
  */
 
-test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the same 403 as the wrong-terminal case', async ({ browser }) => {
+test('An unknown reference and a DIRECT (no-hub) reference now get the identical 404 refusal', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
@@ -328,16 +355,18 @@ test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the sa
 
   // Unknown reference: no shipment with this reference exists anywhere.
   const unknown = await getJson(staffPage, `/terminal/shipments/BML-MDF699-NOPE-${stamp}`);
-  expect(unknown.status, 'a reference that never existed must be 404, distinct from the wrong-terminal 403').toBe(404);
+  expect(unknown.status, 'a reference that never existed must be 404 -- now identical to the DIRECT (no-hub) case below, not distinct').toBe(404);
 
   // DIRECT (no-hub): a DOOR_TO_DOOR shipment touches no hub at all, so it
-  // takes the SAME path as "touches none of my hubs" -- 403, confirmed by
-  // reading ShipmentService.lookupForTerminal directly, not guessed. The
-  // original fixme here asked whether this should be indistinguishable
-  // from the wrong-terminal case to avoid an existence leak; the shipped
-  // contract answers that by construction, since both a real-but-elsewhere
-  // shipment and a real-but-hub-less shipment hit the identical 403 branch
-  // (only "never existed anywhere" gets the different 404).
+  // takes the SAME path as "touches none of my hubs". UPDATE (2026-11-18,
+  // SEC-SHIPMENT-REF-DISCLOSURE, #778): that path used to be a
+  // distinguishable 403, confirmed by reading ShipmentService.lookupForTerminal
+  // directly -- now the hub-membership filter lives IN the lookup's own
+  // query (`legs: { some: { OR: [...] } }` inside the `findFirst` WHERE),
+  // so a shipment that touches none of the caller's hubs simply does not
+  // match the query and comes back exactly like "never existed" -- the
+  // identical 404, "No shipment with that reference.", confirmed against
+  // Pam's diff on fix/sec-shipment-ref-disclosure, not guessed.
   const customerPage = await customerPageFromCache(browser);
   const doorToDoor = {
     service: 'DOOR_TO_DOOR',
@@ -352,7 +381,7 @@ test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the sa
   expect(created.status, `DOOR_TO_DOOR booking failed: ${JSON.stringify(created.body)}`).toBe(201);
 
   const direct = await getJson(staffPage, `/terminal/shipments/${encodeURIComponent(created.body.reference)}`);
-  expect(direct.status, 'a DIRECT shipment touches no hub, so it must 403 the same way a wrong-terminal shipment does').toBe(403);
+  expect(direct.status, 'a DIRECT shipment touches no hub, so it must get the identical 404 the unknown reference above does, per SEC-SHIPMENT-REF-DISCLOSURE').toBe(404);
 });
 
 /** Opens the real "Lookup" tab (#692) and submits a reference through the
@@ -405,16 +434,23 @@ test('A terminal staff member can look up a reference at their own hub through t
 test('The Lookup tab shows the server\'s own refusal message verbatim, never a paraphrase or a silent empty result', async ({ browser }) => {
   test.setTimeout(60_000);
   // REPOINTED (god's ruling, 2026-11-18, conv-904e67): this test only
-  // checks that the 403 COPY renders verbatim -- it never tested which arm
-  // of `touchesMyHub` raised it, and both arms throw the identical
-  // message ("This shipment is not at one of your terminal locations.",
-  // confirmed one `ForbiddenException` site in `lookupForTerminal`). The
-  // DIRECT (no-hub) shape used below is the SAME construction "An unknown
-  // reference gets 404, and a DIRECT (no-hub) reference gets the same
-  // 403..." above already proves reachable, so this test's own purpose
-  // survives completely intact without the wrong-terminal (hubB) shape
-  // that no door choice can produce in this two-hub network -- see the
-  // comment just above "An unknown reference..." for that trace in full.
+  // checks that the refusal COPY renders verbatim -- it never tested which
+  // code path raised it. The DIRECT (no-hub) shape used below is the SAME
+  // construction the unknown-reference test above already proves
+  // reachable, so this test's own purpose survives completely intact
+  // without the wrong-terminal (hubB) shape that no door choice can
+  // produce in this two-hub network -- see the comment just above "An
+  // unknown reference..." for that trace in full.
+  //
+  // UPDATE (2026-11-18, SEC-SHIPMENT-REF-DISCLOSURE, #778): the two
+  // refusals this test compared used to be DISTINGUISHABLE -- 403 "This
+  // shipment is not at one of your terminal locations." for the DIRECT
+  // (no-hub) shape, 404 "No shipment with that reference." for the
+  // nonexistent one. That distinguishability was the existence oracle the
+  // fix closes: both now render the IDENTICAL 404 copy. The two
+  // `lookupViaTab` calls below stay (still proving the UI renders the
+  // server's own text verbatim, never a paraphrase, for two different
+  // triggers), but what they now prove is sameness, not difference.
   const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'UiWrongHub', hubA.id);
@@ -439,12 +475,12 @@ test('The Lookup tab shows the server\'s own refusal message verbatim, never a p
 
   await lookupViaTab(staffPage, created.body.reference);
   await expect(
-    staffPage.getByText('This shipment is not at one of your terminal locations.'),
-    'god\'s own ruling: a customer at the wrong terminal must be told their parcel is real and elsewhere, never that it does not exist',
+    staffPage.getByText('No shipment with that reference.'),
+    'SEC-SHIPMENT-REF-DISCLOSURE: a DIRECT (no-hub) shipment the caller cannot reach must now render the IDENTICAL refusal as a reference that never existed -- never the old distinguishable "not at one of your terminal locations" text, which would again let a caller tell a real reference from a made-up one',
   ).toBeVisible({ timeout: 15_000 });
 
   await lookupViaTab(staffPage, `BML-MDF699-UI-NOPE-${stamp}`);
-  await expect(staffPage.getByText('No shipment with that reference.'), 'the OTHER refusal -- a reference that never existed anywhere -- must be a visibly different message').toBeVisible({ timeout: 15_000 });
+  await expect(staffPage.getByText('No shipment with that reference.'), 'the OTHER trigger -- a reference that never existed anywhere -- renders the SAME message now, by design, not a different one').toBeVisible({ timeout: 15_000 });
 });
 
 test('MDF-721 (TERM-QUEUE-GATE) fixed: the Lookup tab, which has no dependency on the queue, stays present, selectable and functional when GET /terminal/queue fails', async ({ browser }) => {
