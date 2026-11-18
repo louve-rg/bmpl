@@ -92,9 +92,6 @@ lost track of.
   Arrived. Trust the tab you're actually working in; the History label
   catches up afterward.
 
-If you'd like the demo reset with fresh parcels at particular stages so you
-can try something again, tell us and we will stage them.
-
 ---
 
 ## 3. The daily job
