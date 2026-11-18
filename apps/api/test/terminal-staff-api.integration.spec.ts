@@ -43,11 +43,9 @@ const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).
 const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
-// FIN-SELF-LOCKOUT — both messages name WHO can act instead: another manager
-// OR an administrator. Owner's explicit call, 2026-11-18: the access cleanup
-// leaves Edward as San Pedro Elite's only manager, so "ask another manager"
-// alone is a dead end for exactly the person most likely to hit this message.
-const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager, or an administrator, can do this for you.';
+// FIN-SELF-LOCKOUT — each message names WHO can act instead, and the two differ:
+// no admin-console endpoint ever writes memberRole, but endMember does end a membership.
+const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager can do this for you.';
 const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.';
 
 async function registerCustomer(email: string) {

@@ -765,18 +765,12 @@ export class TerminalService {
    * that is actually theirs — they tried to act on their own standing —
    * never the company-wide floor text, which would be true but tell them
    * nothing about why they were actually stopped. The message says who
-   * CAN do it, same two-halves shape as `staffDeactivateMember` below:
-   * another manager, or an administrator. No admin-console endpoint
-   * writes `memberRole` directly (`endMember`/`reactivateMember` never
-   * touch it) — but an administrator reaches the same outcome indirectly,
-   * via `endMember` followed by a fresh invite at the new role, the same
-   * escape route named for self-end below. The owner's explicit call
-   * (2026-11-18): naming that route matters more than the directness of
-   * the path, because a lone manager demoting themselves has no OTHER
-   * manager to ask — see `staffDeactivateMember`'s comment for why this
-   * is not hypothetical. There is no ownership-transfer workflow in this
-   * codebase, so there is no legitimate case where a manager must be
-   * allowed to demote themselves directly
+   * CAN do it: ONLY another manager — unlike `staffDeactivateMember`
+   * below, there is no admin-console endpoint that changes a member's
+   * role at all (`endMember`/`reactivateMember` never touch `memberRole`),
+   * so the message must not claim an administrator can. There is no
+   * ownership-transfer workflow in this codebase, so there is no
+   * legitimate case where a manager must be allowed to demote themselves
    * — the refusal has no exception path by design. A MANAGER may still
    * freely promote themselves to MANAGER (a no-op) or be demoted by a
    * DIFFERENT manager; only self-targeted self-demotion is blocked here.
@@ -784,7 +778,7 @@ export class TerminalService {
   async staffChangeRole(actorId: string, targetUserId: string, dto: ChangeTerminalCompanyMemberRoleInput) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
     if (isSelfAction(actorId, targetUserId) && dto.memberRole === 'OPERATOR') {
-      throw new ForbiddenException('You cannot change your own role from manager to operator. Another manager, or an administrator, can do this for you.');
+      throw new ForbiddenException('You cannot change your own role from manager to operator. Another manager can do this for you.');
     }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
@@ -890,13 +884,9 @@ export class TerminalService {
    * A company with several active managers never trips the floor, but a
    * manager still cannot end their own access through this door; only a
    * DIFFERENT manager through this same door, or an administrator through
-   * the admin console's `endMember`, can — the direct, no-detour version
-   * of the same escape route `staffChangeRole`'s message points at
-   * indirectly for self-demote. This is the owner's named case for why
-   * both messages carry the administrator half even before this PR
-   * merges: the access cleanup leaves Edward as San Pedro Elite's only
-   * manager, so "ask another manager" is a dead end for exactly the
-   * person most likely to hit this message.
+   * the admin console's `endMember`, can — unlike the role-change guard
+   * above, an administrator genuinely can do this one, so the message
+   * says so.
    */
   async staffDeactivateMember(actorId: string, targetUserId: string) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
