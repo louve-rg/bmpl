@@ -232,7 +232,11 @@ function stubFetch(opts: StubOpts = {}) {
       if (url.includes('/api/terminal/me')) {
         return jsonResponse(opts.workspaceStatus ?? 200, opts.workspaceBody ?? WORKSPACE);
       }
-      if (url.includes('/api/terminal/staff')) {
+      // TERM-STAFF-UI: exact-path + GET only -- the mutation routes below
+      // (.../staff/:userId/role, .../locations/:id, .../invites/:id/resend
+      // etc.) all share this same "/api/terminal/staff" prefix and must NOT
+      // be swallowed by the roster read.
+      if (url.endsWith('/api/terminal/staff') && method === 'GET') {
         return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
       }
       if (url.includes('/api/terminal/inbound')) {
@@ -269,7 +273,7 @@ function stubFetch(opts: StubOpts = {}) {
         const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
         return jsonResponse(200, rows, { 'X-BMPL-Queue-Has-More': String(opts.queueHasMore ?? false) });
       }
-      if (method === 'POST') {
+      if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
         calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
         return jsonResponse(opts.actionStatus ?? 200, opts.actionBody ?? {});
       }
@@ -710,7 +714,10 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent?.toLowerCase()).not.toContain('token');
     });
 
-    it('offers no resend, revoke or end-membership control -- this screen is read-only', async () => {
+    // TERM-STAFF-UI superseded this screen's old read-only characterization
+    // (the controls below did not exist before) -- see the dedicated
+    // "TERM-STAFF-UI" describe block below for the actual mutation behavior.
+    it('offers the self-service controls the owner approved: role change, end membership, reactivate, revoke location, invite resend/revoke', async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
       await act(async () => {
@@ -719,7 +726,12 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickTab('Staff');
 
       const buttonTexts = Array.from(container!.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '');
-      expect(buttonTexts.some((t) => /resend|revoke|end membership|reactivate/i.test(t))).toBe(false);
+      expect(buttonTexts).toContain('Set as operator'); // Edward is an ACTIVE MANAGER
+      expect(buttonTexts).toContain('End membership');
+      expect(buttonTexts).toContain('Reactivate'); // Rosa is ENDED
+      expect(buttonTexts).toContain('Resend');
+      expect(buttonTexts).toContain('Revoke');
+      expect(container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]')).not.toBeNull();
     });
 
     it('shows an honest empty state when a manager has no staff yet', async () => {
@@ -763,6 +775,212 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('This action requires the terminal manager role.');
       expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
+    });
+  });
+
+  // TERM-STAFF-UI: the owner-approved self-service controls on the Staff
+  // tab -- role change (a manager may appoint managers), end/reactivate
+  // membership, revoke one location grant, and resend/revoke a pending
+  // invite. Every refusal renders the server's own message verbatim --
+  // these tests assert that, never a client-paraphrased string, matching
+  // the owner's explicit rule that the API proves the boundary.
+  describe('TERM-STAFF-UI — staff self-service: role change, membership, location grants, invite control', () => {
+    it('appoints an ACTIVE operator as manager with one PATCH, body { memberRole: "MANAGER" }', async () => {
+      const calls = stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: { members: [{ ...STAFF_ROSTER.members[0], memberRole: 'OPERATOR' }], pendingInvites: [] },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Appoint as manager');
+
+      const call = calls.find((c) => c.url.includes('/terminal/staff/user_1/role') && c.method === 'PATCH');
+      expect(call?.body).toEqual({ memberRole: 'MANAGER' });
+    });
+
+    it('demotes an ACTIVE manager to operator with one PATCH, body { memberRole: "OPERATOR" } -- never end-then-reinvite', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Set as operator');
+
+      const call = calls.find((c) => c.url.includes('/terminal/staff/user_1/role') && c.method === 'PATCH');
+      expect(call?.body).toEqual({ memberRole: 'OPERATOR' });
+      expect(calls.some((c) => c.method === 'DELETE')).toBe(false); // no end-membership side effect
+    });
+
+    it('renders the server\'s own last-active-manager refusal verbatim on a role change, never a paraphrase or a pre-emptive disable', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionStatus: 409,
+        actionBody: { message: 'This company must always have at least one active manager.' },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      // Not pre-emptively disabled -- the owner's rule is that the API
+      // proves the boundary, not a disabled control hiding it.
+      const button = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Set as operator') as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+
+      await clickButton('Set as operator');
+      expect(container!.textContent).toContain('This company must always have at least one active manager.');
+    });
+
+    it('ends an ACTIVE membership with one POST and an empty body', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('End membership');
+
+      const call = calls.find((c) => c.url.includes('/terminal/staff/user_1/deactivate'));
+      expect(call?.body).toEqual({});
+    });
+
+    it('renders the last-active-manager refusal verbatim on End membership too, same text as the role-change refusal', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionStatus: 409,
+        actionBody: { message: 'This company must always have at least one active manager.' },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('End membership');
+
+      expect(container!.textContent).toContain('This company must always have at least one active manager.');
+    });
+
+    it('reactivates an ENDED membership with one POST', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Reactivate');
+
+      const call = calls.find((c) => c.url.includes('/terminal/staff/user_2/reactivate'));
+      expect(call).toBeDefined();
+    });
+
+    it('confirms before revoking a location grant, naming both the member and the hub -- and does nothing if cancelled', async () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const revokeBtn = container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]') as HTMLButtonElement;
+      await act(async () => {
+        revokeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(confirmSpy).toHaveBeenCalledWith("Remove Edward Broaster's access to Belize City Hub? They will no longer be able to work there.");
+      expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+      confirmSpy.mockRestore();
+    });
+
+    it('revokes a location grant by DELETE .../locations/:locationId once confirmed', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const revokeBtn = container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]') as HTMLButtonElement;
+      await act(async () => {
+        revokeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('/terminal/staff/user_1/locations/loc_1'))).toBe(true);
+      vi.restoreAllMocks();
+    });
+
+    it('the copy next to a location revoke control never blurs it with removing the member', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).toContain('Removing a location only ends access to that location -- it never ends a membership or changes a role.');
+    });
+
+    it('resends a pending invite and shows the delivery outcome, same shape/rendering as the admin console', async () => {
+      const calls = stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionBody: { delivery: { delivered: true, outcome: 'accepted' } },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Resend');
+
+      expect(calls.some((c) => c.url.includes('/terminal/staff/invites/inv_1/resend') && c.method === 'POST')).toBe(true);
+      expect(container!.textContent).toContain('Invitation created and the email was accepted by the provider.');
+    });
+
+    it('surfaces an undelivered resend honestly -- the invite is still valid, never "start again"', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionBody: { delivery: { delivered: false, outcome: 'provider_error' } },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Resend');
+
+      expect(container!.textContent).toContain('the email provider rejected or failed the send');
+      expect(container!.textContent).toContain('The invite is still valid: use Resend below.');
+    });
+
+    it('revokes a pending invite with one POST', async () => {
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Revoke');
+
+      expect(calls.some((c) => c.url.includes('/terminal/staff/invites/inv_1/revoke') && c.method === 'POST')).toBe(true);
     });
   });
 
