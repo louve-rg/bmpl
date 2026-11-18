@@ -456,11 +456,18 @@ const MEMBER_ROLES: MemberRole[] = ['MANAGER', 'OPERATOR'];
  */
 type InviteDelivery = { delivered: boolean; outcome: string };
 
-function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text: string } {
+/**
+ * RESEND-BANNER-COPY: the same fix as apps/web's copy of this function,
+ * ported from here originally -- `action` lets each call site (create vs.
+ * resend) say which really happened, since "Invitation created" is false on
+ * a resend. Delivery-outcome logic is untouched.
+ */
+function deliveryMessage(d: InviteDelivery, action: 'created' | 'resent'): { tone: 'success' | 'warning'; text: string } {
+  const verb = action === 'created' ? 'Invitation created' : 'Invitation resent';
   if (d.delivered) {
     return d.outcome === 'simulated'
-      ? { tone: 'warning', text: 'Invitation created. Email was SIMULATED by this environment, not actually delivered.' }
-      : { tone: 'success', text: 'Invitation created and the email was accepted by the provider.' };
+      ? { tone: 'warning', text: `${verb}. Email was SIMULATED by this environment, not actually delivered.` }
+      : { tone: 'success', text: `${verb} and the email was accepted by the provider.` };
   }
   const why =
     d.outcome === 'missing_credential'
@@ -472,7 +479,7 @@ function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text
           : d.outcome;
   return {
     tone: 'warning',
-    text: `Invitation created but the email was NOT delivered — ${why}. The invite is still valid: use Resend below. The link cannot be recovered any other way.`,
+    text: `${verb} but the email was NOT delivered — ${why}. The invite is still valid: use Resend below. The link cannot be recovered any other way.`,
   };
 }
 
@@ -779,8 +786,8 @@ function MembersCard({
             {inviteBusy ? 'Sending…' : 'Send invite'}
           </Button>
           {delivery && (
-            <Alert tone={deliveryMessage(delivery).tone === 'success' ? 'success' : 'warning'} className="mt-2">
-              {deliveryMessage(delivery).text}
+            <Alert tone={deliveryMessage(delivery, 'created').tone === 'success' ? 'success' : 'warning'} className="mt-2">
+              {deliveryMessage(delivery, 'created').text}
             </Alert>
           )}
         </div>
@@ -845,8 +852,8 @@ function InvitesCard({
       <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Pending invites</h3>
       {err && <Alert tone="warning" className="mt-2">{err}</Alert>}
       {delivery && (
-        <Alert tone={deliveryMessage(delivery).tone === 'success' ? 'success' : 'warning'} className="mt-2">
-          {deliveryMessage(delivery).text}
+        <Alert tone={deliveryMessage(delivery, 'resent').tone === 'success' ? 'success' : 'warning'} className="mt-2">
+          {deliveryMessage(delivery, 'resent').text}
         </Alert>
       )}
       {company.pendingInvites.length === 0 ? (

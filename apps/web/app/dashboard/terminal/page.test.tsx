@@ -1032,7 +1032,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickButton('Resend');
 
       expect(calls.some((c) => c.url.includes('/terminal/staff/invites/inv_1/resend') && c.method === 'POST')).toBe(true);
-      expect(container!.textContent).toContain('Invitation created and the email was accepted by the provider.');
+      expect(container!.textContent).toContain('Invitation resent and the email was accepted by the provider.');
     });
 
     it('surfaces an undelivered resend honestly -- the invite is still valid, never "start again"', async () => {
@@ -1051,6 +1051,30 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('the email provider rejected or failed the send');
       expect(container!.textContent).toContain('The invite is still valid: use Resend below.');
+    });
+
+    /**
+     * RESEND-BANNER-COPY: Stanley found a resend saying "Invitation created"
+     * -- true of nothing, since a resend creates no invitation. This locks
+     * the two paths to different verbs so they can't drift back to sharing
+     * one string.
+     */
+    it('says "resent", never "created", after a resend -- nothing was created', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionBody: { id: 'inv_1', delivery: { delivered: true, outcome: 'accepted' } },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Resend');
+
+      expect(container!.textContent).toContain('Invitation resent');
+      expect(container!.textContent).not.toContain('Invitation created');
     });
 
     it('revokes a pending invite with one POST', async () => {
@@ -1108,11 +1132,11 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickTab('Staff');
       await clickButton('Resend');
 
-      expect(container!.textContent).toContain('Invitation created and the email was accepted by the provider.');
+      expect(container!.textContent).toContain('Invitation resent and the email was accepted by the provider.');
 
       await clickButton('Revoke');
 
-      expect(container!.textContent).not.toContain('Invitation created and the email was accepted by the provider.');
+      expect(container!.textContent).not.toContain('Invitation resent and the email was accepted by the provider.');
       expect(container!.textContent).toContain('No pending invites.');
     });
 

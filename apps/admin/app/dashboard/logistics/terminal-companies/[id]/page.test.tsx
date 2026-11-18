@@ -557,8 +557,33 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
 
     expect(posts.some((p) => p.method === 'POST' && p.url.includes('/invites/inv_1/resend'))).toBe(true);
     expect(container!.querySelector('[role="status"]')).toBeNull(); // settled, not stuck loading
-    expect(container!.textContent).toContain('Invitation created. Email was SIMULATED by this environment, not actually delivered.');
+    expect(container!.textContent).toContain('Invitation resent. Email was SIMULATED by this environment, not actually delivered.');
     expect(container!.textContent).toContain('new@bts.bz');
+  });
+
+  /**
+   * RESEND-BANNER-COPY: this component's own copy of the same bug apps/web
+   * had -- "Invitation created" survives being said after a resend, where
+   * nothing was created. Locks the two paths to different verbs.
+   */
+  it('says "resent", never "created", after a resend -- nothing was created', async () => {
+    stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        pendingInvites: [{ id: 'inv_1', email: 'new@bts.bz', memberRole: 'OPERATOR', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString(), locationCount: 1 }],
+      },
+      resendDelivery: { delivered: true, outcome: 'accepted' },
+    });
+    await mount();
+
+    const resendButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Resend')!;
+    await act(async () => {
+      resendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container!.textContent).toContain('Invitation resent');
+    expect(container!.textContent).not.toContain('Invitation created');
   });
 
   it('refuses to send an invite with no location selected', async () => {
