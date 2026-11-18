@@ -28,35 +28,48 @@ password for you.
 
 ## 2. Navigating your workspace
 
-Once you're signed in, your workspace is a single screen with a row of
-tabs across the top. Each tab is named exactly as it appears on your
-screen, and a number on a tab is a live count of what's currently waiting
-on it — a tab with no number has nothing waiting right now, which is the
-normal, caught-up state, not a sign anything is broken.
+Once you're signed in, your workspace is organized into **six sections**:
+**Overview, Incoming, On Hand, Queue, Lookup,** and **History**. Each is
+its own tab across the top of your screen — except **Queue**, which isn't
+one tab at all. It shows up as **five separate tabs**, one for each
+specific thing you might need to do next: **Depart, Arrive, Hand off,
+Release,** and **Collect**. Count every tab across the top and you'll get
+more than six — that's six sections, with Queue spread across five of
+them. None of that extra counting means anything is wrong; it's just how
+one section can need more than one button.
 
-As a Manager, you see all of these:
+A number on a tab is a live count of what's currently waiting on it — a
+tab with no number has nothing waiting right now, which is the normal,
+caught-up state, not a sign anything is broken.
+
+Here is each section:
 
 - **Overview** — a summary of what's moving through your terminal right
   now, including the "Collection at the counter" card for anything ready
   to be picked up.
 - **Incoming** — parcels on their way to you that haven't arrived yet.
 - **On Hand** — parcels physically in your building right now.
-- **Depart** — line-haul legs starting their trip from your terminal,
-  waiting for you to confirm they've actually left.
-- **Arrive** — line-haul legs waiting for you to confirm they've actually
-  reached your terminal.
-- **Hand off** — parcels waiting for you to take custody from the person
-  delivering them, using the code they read to you.
-- **Release** — parcels waiting for you to release to a courier
-  continuing their journey.
-- **Collect** — parcels waiting for the person collecting them in person.
-- **Staff** — managing who on your team has access, and to what
-  (Section 7). Visible to Managers only; an Operator does not see this
-  tab.
-- **History** — every parcel that has passed through your terminal, with
-  its outcome (Section 6). Visible to Managers only.
+- **Queue** — the five tabs where you actually act on a parcel:
+  - **Depart** — line-haul legs starting their trip from your terminal,
+    waiting for you to confirm they've actually left.
+  - **Arrive** — line-haul legs waiting for you to confirm they've
+    actually reached your terminal.
+  - **Hand off** — parcels waiting for you to take custody from the
+    person delivering them, using the code they read to you.
+  - **Release** — parcels waiting for you to release to a courier
+    continuing their journey.
+  - **Collect** — parcels waiting for the person collecting them in
+    person.
 - **Lookup** — find any one parcel of yours by its reference number,
   wherever it currently is.
+- **History** — every parcel that has passed through your terminal, with
+  its outcome (Section 7). **Visible to Managers only** — if you're an
+  Operator and don't see this tab, that's correct, not a problem with
+  your account.
+
+As a Manager, you also have one tab beyond these six sections: **Staff**
+— managing who on your team has access, and to what (Section 8). Like
+History, **Staff is visible to Managers only.**
 
 ---
 
