@@ -51,6 +51,16 @@ export type GrantTerminalCompanyMemberLocationInput = z.infer<typeof grantTermin
 
 export const terminalCompanyMemberRoleSchema = z.enum(['MANAGER', 'OPERATOR']);
 
+/** TERM-STAFF-API: the one operation the owner's directive added that admin's
+ *  own door never needed — change an already-ACTIVE member's role between
+ *  the two that exist. The last-ACTIVE-MANAGER floor lives in the service,
+ *  never here: this schema only proves the requested role is one of the two
+ *  real values. */
+export const changeTerminalCompanyMemberRoleSchema = z.object({
+  memberRole: terminalCompanyMemberRoleSchema,
+});
+export type ChangeTerminalCompanyMemberRoleInput = z.infer<typeof changeTerminalCompanyMemberRoleSchema>;
+
 export const inviteTerminalCompanyMemberSchema = z.object({
   email: emailSchema,
   memberRole: terminalCompanyMemberRoleSchema.optional().default('OPERATOR'),

@@ -485,6 +485,8 @@ enum AuditAction {
   TERMINAL_COMPANY_MEMBER_REACTIVATED
   TERMINAL_COMPANY_MEMBER_LOCATION_GRANTED
   TERMINAL_COMPANY_MEMBER_LOCATION_REVOKED
+  // ---- Terminal Operations, manager-run staff management (TERM-STAFF-API) ----
+  TERMINAL_COMPANY_MEMBER_ROLE_CHANGED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

@@ -1,14 +1,15 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { hashPassword, hashToken, issueToken } from '@bmpl/authentication';
 import { templates } from '@bmpl/notifications';
 import type {
   AcceptTerminalInviteInput,
   AddTerminalCompanyLocationInput,
+  ChangeTerminalCompanyMemberRoleInput,
   CreateTerminalCompanyInput,
   InviteTerminalCompanyMemberInput,
   UpdateTerminalCompanyInput,
 } from '@bmpl/validation';
-import type { TerminalCompanyMemberRole, TerminalCompanyProfile } from '@bmpl/database';
+import type { Prisma, TerminalCompanyMemberRole, TerminalCompanyProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
@@ -575,20 +576,35 @@ export class TerminalService {
    * keep checking ONLY location, never role, exactly as before this
    * card — an OPERATOR-level action never calls this method. This is
    * called only by a MANAGER-only capability, e.g. `myStaff` below.
+   *
+   * TERM-STAFF-API: `findMany`, not the original `findFirst` — the
+   * `@@unique([terminalCompanyId, userId])` constraint on
+   * `TerminalCompanyMember` explicitly permits the same person holding
+   * simultaneous ACTIVE memberships at two different companies, and an
+   * unordered `findFirst` picked an arbitrary one of them. Now: every
+   * ACTIVE membership is read, ordered oldest-first (the same tie-break
+   * convention `getCompany`/`myStaff`'s own member queries already use),
+   * and the first one whose role is in `allowed` wins — so a caller who
+   * is OPERATOR at their oldest company but MANAGER at a newer one still
+   * reaches a MANAGER-only action, scoped correctly to the company where
+   * they actually hold it. Only when NO active membership anywhere has an
+   * allowed role does this fall back to the two existing, still-
+   * distinguishable refusals: no membership at all, or membership but
+   * never the right role.
    */
   async assertActiveMemberRole(
     userId: string,
     allowed: TerminalCompanyMemberRole[],
   ): Promise<{ id: string; terminalCompanyId: string; memberRole: TerminalCompanyMemberRole }> {
-    const member = await this.prisma.terminalCompanyMember.findFirst({
+    const memberships = await this.prisma.terminalCompanyMember.findMany({
       where: { userId, status: 'ACTIVE', terminalCompany: { isActive: true } },
       select: { id: true, terminalCompanyId: true, memberRole: true },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!member) throw new ForbiddenException('No active terminal company membership.');
-    if (!allowed.includes(member.memberRole)) {
-      throw new ForbiddenException('This action requires the terminal manager role.');
-    }
-    return member;
+    if (memberships.length === 0) throw new ForbiddenException('No active terminal company membership.');
+    const eligible = memberships.find((m) => allowed.includes(m.memberRole));
+    if (!eligible) throw new ForbiddenException('This action requires the terminal manager role.');
+    return eligible;
   }
 
   /**
@@ -606,9 +622,26 @@ export class TerminalService {
    * Reuses `serializeMember`/`serializeInvite` and the exact member/invite
    * query shape `getCompany` already uses — this is the same roster an
    * admin already sees, scoped to one company instead of taken by id.
+   *
+   * TERM-STAFF-API/Oscar: also returns the COMPANY's own locations
+   * top-level, the exact gap Oscar found — without it, a manager with
+   * partial location coverage could not grant a colleague, or invite a
+   * new hire to, a location the company holds but the manager does not
+   * personally hold, even though the owner's own ruling is that a
+   * manager's authority comes from membership and role, never from which
+   * locations they currently hold. Same shape `getCompany` already
+   * returns (`serializeLocation`, same hub select) — every location,
+   * including an inactive one with `isActive: false`, not pre-filtered —
+   * so the invite/grant pickers can show one as unselectable instead of
+   * it silently vanishing, exactly like the admin pickers already do.
    */
   async myStaff(userId: string) {
     const member = await this.assertActiveMemberRole(userId, ['MANAGER']);
+    const companyLocations = await this.prisma.terminalCompanyLocation.findMany({
+      where: { terminalCompanyId: member.terminalCompanyId },
+      include: { hub: { select: { id: true, code: true, name: true, district: true, city: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
     const members = await this.prisma.terminalCompanyMember.findMany({
       where: { terminalCompanyId: member.terminalCompanyId },
       include: {
@@ -622,9 +655,227 @@ export class TerminalService {
       orderBy: { createdAt: 'desc' },
     });
     return {
+      locations: companyLocations.map((l) => this.serializeLocation(l)),
       members: members.map((m) => this.serializeMember(m)),
       pendingInvites: invites.map((i) => this.serializeInvite(i)),
     };
+  }
+
+  /* ---- staff: manager-run staff management (TERM-STAFF-API) ---------------
+   *
+   * The owner-approved self-serve door onto the same six primitives
+   * AdminTerminalController already exposes, scoped to the CALLER's own
+   * company instead of a companyId taken from the request — a userId or
+   * locationId belonging to another company is unreachable by construction,
+   * not merely refused: every lookup below is keyed off `caller.terminalCompanyId`,
+   * read from the caller's own ACTIVE membership, never from the request.
+   *
+   * Authority model, stated once here because every method below depends on
+   * it: company membership and terminal-location assignment are SEPARATE.
+   * `assertActiveMemberRole` never checks a location, so revoking every
+   * location a MANAGER holds does not reduce their authority — only ending
+   * their membership does. The three guarded doors below protect the
+   * company from ever having zero ACTIVE MANAGERs; they do not, and must
+   * not, require the CALLER to hold a location themselves (the owner's
+   * confirmed instinct — staff management isn't counter work).
+   *
+   * Reuses the existing admin-door methods (inviteMember/grantMemberLocation)
+   * directly rather than re-deriving their logic — the only new logic here
+   * is the caller-derived scoping and the last-ACTIVE-MANAGER floor.
+   */
+
+  /**
+   * Row-locks the company for the duration of the transaction (the same
+   * `SELECT ... FOR UPDATE` pattern `WalletService` uses before reading a
+   * balance it is about to act on — apps/api/src/wallet/wallet.service.ts).
+   * Without this, two concurrent requests against the same company (e.g.
+   * two managers each demoting a DIFFERENT one of the company's exactly-two
+   * MANAGERs) could each read "2 active managers" before either writes,
+   * and both pass the floor check — leaving zero. Locking the company row
+   * first serializes every staff-management write for that one company;
+   * unrelated companies are never blocked by each other.
+   */
+  private async countActiveManagers(tx: Prisma.TransactionClient, companyId: string): Promise<number> {
+    await tx.$queryRaw`SELECT id FROM terminal_company_profiles WHERE id = ${companyId} FOR UPDATE`;
+    return tx.terminalCompanyMember.count({
+      where: { terminalCompanyId: companyId, status: 'ACTIVE', memberRole: 'MANAGER' },
+    });
+  }
+
+  /**
+   * The last-ACTIVE-MANAGER floor, same guard shape on every door that can
+   * remove a MANAGER's standing, different trigger per door — applies
+   * identically whether the caller is acting on themselves or on another
+   * manager; there is no separate "is this me" rule, per the owner's
+   * directive.
+   */
+  private async assertManagerFloorHolds(tx: Prisma.TransactionClient, companyId: string, wouldRemoveOneManager: boolean): Promise<void> {
+    if (!wouldRemoveOneManager) return;
+    const activeManagers = await this.countActiveManagers(tx, companyId);
+    if (activeManagers <= 1) {
+      throw new ConflictException('This company must always have at least one active manager.');
+    }
+  }
+
+  /** Self-serve mirror of `inviteMember` — the company comes from the
+   *  caller's own MANAGER membership, everything else is identical,
+   *  including the role the caller chooses to invite (MANAGER or
+   *  OPERATOR — the owner's explicit YES on manager-creates-manager). */
+  async staffInvite(actorId: string, dto: InviteTerminalCompanyMemberInput) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.inviteMember(actorId, caller.terminalCompanyId, dto);
+  }
+
+  /**
+   * Promote OPERATOR<->MANAGER on an already-ACTIVE member. The one
+   * operation the original plan did not have — the directive's own
+   * addition. A no-op (new role equals current role) still runs the floor
+   * check against the HYPOTHETICAL post-write state before short-circuiting,
+   * so a demote-to-the-same-role request against the last manager is
+   * refused exactly like a real demote would be, never silently accepted
+   * as "nothing changed."
+   */
+  async staffChangeRole(actorId: string, targetUserId: string, dto: ChangeTerminalCompanyMemberRoleInput) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.prisma.$transaction(async (tx) => {
+      const target = await tx.terminalCompanyMember.findUnique({
+        where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },
+      });
+      if (!target || target.status !== 'ACTIVE') throw new NotFoundException('Member not found.');
+      const demotingTheOnlyManager = target.memberRole === 'MANAGER' && dto.memberRole === 'OPERATOR';
+      await this.assertManagerFloorHolds(tx, caller.terminalCompanyId, demotingTheOnlyManager);
+      if (target.memberRole === dto.memberRole) {
+        return { roleChanged: true as const, memberRole: target.memberRole };
+      }
+      const updated = await tx.terminalCompanyMember.update({ where: { id: target.id }, data: { memberRole: dto.memberRole } });
+      // MDF-TERM-STAFF-API: audit action name confirmed with god before this
+      // landed — TERMINAL_COMPANY_MEMBER_ROLE_CHANGED, the same
+      // one-action-per-lifecycle shape as SHIPPING_PROVIDER_MEMBER_CHANGED/
+      // PASSENGER_AFFILIATION_CHANGED, verb carried in newValue.
+      await this.audit.record(
+        {
+          action: 'TERMINAL_COMPANY_MEMBER_ROLE_CHANGED',
+          actorId,
+          targetUserId,
+          newValue: { terminalCompanyId: caller.terminalCompanyId, fromRole: target.memberRole, toRole: updated.memberRole },
+        },
+        tx,
+      );
+      return { roleChanged: true as const, memberRole: updated.memberRole };
+    });
+  }
+
+  /** Self-serve mirror of `grantMemberLocation` — no floor needed, this
+   *  door only ever adds. */
+  async staffGrantLocation(actorId: string, targetUserId: string, locationId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.grantMemberLocation(actorId, caller.terminalCompanyId, targetUserId, locationId);
+  }
+
+  /**
+   * Self-serve mirror of `revokeMemberLocation`, with the floor the
+   * directive named explicitly: refusing to revoke the company's sole
+   * ACTIVE MANAGER's own last remaining ACTIVE location. A company with
+   * two or more ACTIVE MANAGERs may freely revoke any one manager's last
+   * location — the floor only ever protects the LAST standing manager,
+   * never every manager's own location count.
+   *
+   * Deliberately its OWN message, never the doors-2/5 "no active manager
+   * left" text: this write does not touch membership or role at all, so
+   * it cannot be the same failure. `grantMemberLocation` never requires
+   * the caller to hold a location, so the manager this refuses is never
+   * truly locked out — they could self-grant a location straight back —
+   * and the owner's own ruling is that authority comes from membership
+   * and role, NOT from holding a location. A message that reused the
+   * manager-count wording would teach a reader the opposite of that
+   * ruling while the guard quietly agreed with it.
+   */
+  async staffRevokeLocation(actorId: string, targetUserId: string, locationId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM terminal_company_profiles WHERE id = ${caller.terminalCompanyId} FOR UPDATE`;
+      const target = await tx.terminalCompanyMember.findUnique({
+        where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },
+      });
+      if (!target || target.status !== 'ACTIVE') throw new NotFoundException('Member not found.');
+      const grant = await tx.terminalCompanyMemberLocation.findUnique({
+        where: { memberId_locationId: { memberId: target.id, locationId } },
+      });
+      if (!grant) throw new NotFoundException('This member does not hold that location.');
+      if (target.memberRole === 'MANAGER') {
+        const activeManagers = await tx.terminalCompanyMember.count({
+          where: { terminalCompanyId: caller.terminalCompanyId, status: 'ACTIVE', memberRole: 'MANAGER' },
+        });
+        if (activeManagers <= 1) {
+          const otherActiveLocations = await tx.terminalCompanyMemberLocation.count({
+            where: { memberId: target.id, id: { not: grant.id }, location: { isActive: true } },
+          });
+          if (otherActiveLocations === 0) {
+            throw new ConflictException('This would leave the company\'s only manager without access to any location.');
+          }
+        }
+      }
+      await tx.terminalCompanyMemberLocation.delete({ where: { id: grant.id } });
+      await this.audit.record(
+        {
+          action: 'TERMINAL_COMPANY_MEMBER_LOCATION_REVOKED',
+          actorId,
+          targetUserId,
+          newValue: { terminalCompanyId: caller.terminalCompanyId, locationId },
+        },
+        tx,
+      );
+      return { revoked: true as const };
+    });
+  }
+
+  /** Self-serve mirror of `endMember`, guarded by the same floor as
+   *  `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
+   *  refused, whether the caller is ending themself or someone else. */
+  async staffDeactivateMember(actorId: string, targetUserId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.prisma.$transaction(async (tx) => {
+      const target = await tx.terminalCompanyMember.findUnique({
+        where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },
+      });
+      if (!target || target.status === 'ENDED') throw new NotFoundException('Member not found.');
+      await this.assertManagerFloorHolds(tx, caller.terminalCompanyId, target.memberRole === 'MANAGER');
+      await tx.terminalCompanyMember.update({ where: { id: target.id }, data: { status: 'ENDED', endedAt: new Date() } });
+      await this.audit.record(
+        { action: 'TERMINAL_COMPANY_MEMBER_ENDED', actorId, targetUserId, newValue: { terminalCompanyId: caller.terminalCompanyId } },
+        tx,
+      );
+      return { ended: true as const };
+    });
+  }
+
+  /** Self-serve mirror of `reactivateMember` — no floor: reactivating only
+   *  ever adds a manager back, never removes one. */
+  async staffReactivateMember(actorId: string, targetUserId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.reactivateMember(actorId, caller.terminalCompanyId, targetUserId);
+  }
+
+  /**
+   * TERM-STAFF-API, god's own scope addition: a manager who mistypes an
+   * invite email had no way to undo it — an admin dependency surviving
+   * inside the feature built to end admin dependency. Self-serve mirror of
+   * `revokeInvite`, no new logic: that method already scopes its lookup to
+   * `{ id: inviteId, terminalCompanyId: companyId }`, so an inviteId
+   * belonging to another company already 404s ("Invite not found.")
+   * rather than 403ing — never confirming the invite exists at all, per
+   * the directive.
+   */
+  async staffRevokeInvite(actorId: string, inviteId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.revokeInvite(actorId, caller.terminalCompanyId, inviteId);
+  }
+
+  /** Self-serve mirror of `resendInvite` — same cross-company 404 via the
+   *  same scoped lookup, same reasoning as `staffRevokeInvite` above. */
+  async staffResendInvite(actorId: string, inviteId: string) {
+    const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    return this.resendInvite(actorId, caller.terminalCompanyId, inviteId);
   }
 
   async myWorkspace(userId: string) {
