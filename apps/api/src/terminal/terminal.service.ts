@@ -707,8 +707,22 @@ export class TerminalService {
    * The last-ACTIVE-MANAGER floor, same guard shape on every door that can
    * remove a MANAGER's standing, different trigger per door — applies
    * identically whether the caller is acting on themselves or on another
-   * manager; there is no separate "is this me" rule, per the owner's
-   * directive.
+   * manager: this floor alone never distinguished "is this me," and still
+   * doesn't.
+   *
+   * FIN-SELF-LOCKOUT (2026-11-18) supersedes the owner's EARLIER directive
+   * that this comment used to cite verbatim ("there is no separate 'is
+   * this me' rule"). That was true of THIS floor and remains true of it —
+   * the floor is still one condition, about the COMPANY, blind to who the
+   * actor is. What changed is that a SECOND, separate guard now sits in
+   * front of it in `staffChangeRole`/`staffDeactivateMember`: the ACTOR
+   * may never act on their own standing through those self-service doors
+   * at all, regardless of how many managers exist, so the floor below can
+   * fire on a self-action but a self-action usually never reaches it
+   * anymore — the self guard answers first. Two guards, never merged: do
+   * not fold the self check into this method's `wouldRemoveOneManager`
+   * condition, and do not delete this comment's history when touching
+   * either guard again.
    */
   private async assertManagerFloorHolds(tx: Prisma.TransactionClient, companyId: string, wouldRemoveOneManager: boolean): Promise<void> {
     if (!wouldRemoveOneManager) return;
@@ -736,27 +750,35 @@ export class TerminalService {
    * refused exactly like a real demote would be, never silently accepted
    * as "nothing changed."
    *
-   * FIN-SELF-LOCKOUT: a MANAGER demoting THEMSELVES to OPERATOR is refused
-   * unconditionally, before the floor check even runs — this is a
-   * different guard from `assertManagerFloorHolds` below, not a special
-   * case of it. The floor is about the COMPANY (never zero active
-   * managers); this is about the ACTOR (never remove your own standing
-   * through the routine self-service door). They can both fire on the
-   * same request — a lone manager demoting themselves would trip the
-   * floor too — but the self guard is checked first, so the caller always
-   * sees the mistake that is actually theirs to fix: ask another manager,
-   * not "the company has no other manager." There is no
+   * FIN-SELF-LOCKOUT (2026-11-18, the owner's reversal of his own earlier
+   * "no separate is-this-me rule" — see `assertManagerFloorHolds`'s
+   * comment below for that history): a MANAGER demoting THEMSELVES to
+   * OPERATOR is refused unconditionally, before the floor check even
+   * runs — a different guard from `assertManagerFloorHolds`, not a
+   * special case of it. The floor is about the COMPANY (never zero
+   * active managers) and fires regardless of who the target is; this is
+   * about the ACTOR and fires regardless of how many managers exist —
+   * even with a second active manager standing by and zero floor risk,
+   * self-demotion is still refused. They CAN both be true of the same
+   * request (a lone manager demoting themselves trips the floor too),
+   * but the self guard is checked first, so the caller sees the mistake
+   * that is actually theirs — they tried to act on their own standing —
+   * never the company-wide floor text, which would be true but tell them
+   * nothing about why they were actually stopped. The message says who
+   * CAN do it: ONLY another manager — unlike `staffDeactivateMember`
+   * below, there is no admin-console endpoint that changes a member's
+   * role at all (`endMember`/`reactivateMember` never touch `memberRole`),
+   * so the message must not claim an administrator can. There is no
    * ownership-transfer workflow in this codebase, so there is no
    * legitimate case where a manager must be allowed to demote themselves
-   * — the refusal has no exception path by design (owner's directive).
-   * A MANAGER may still freely promote themselves to MANAGER (a no-op) or
-   * be demoted by a DIFFERENT manager; only self-targeted self-demotion is
-   * blocked here.
+   * — the refusal has no exception path by design. A MANAGER may still
+   * freely promote themselves to MANAGER (a no-op) or be demoted by a
+   * DIFFERENT manager; only self-targeted self-demotion is blocked here.
    */
   async staffChangeRole(actorId: string, targetUserId: string, dto: ChangeTerminalCompanyMemberRoleInput) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
     if (isSelfAction(actorId, targetUserId) && dto.memberRole === 'OPERATOR') {
-      throw new ForbiddenException('You cannot demote your own role from manager to operator. Ask another manager to do this for you.');
+      throw new ForbiddenException('You cannot change your own role from manager to operator. Another manager can do this for you.');
     }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
@@ -855,17 +877,21 @@ export class TerminalService {
    * floor as `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
    * refused regardless of who is ending whom.
    *
-   * FIN-SELF-LOCKOUT: on top of that floor, a MANAGER ending THEIR OWN
-   * membership is refused unconditionally, checked first and before the
-   * floor — same two-guards-not-one reasoning as `staffChangeRole` above.
+   * FIN-SELF-LOCKOUT (2026-11-18): on top of that floor, a MANAGER ending
+   * THEIR OWN membership is refused unconditionally, checked first and
+   * before the floor — same two-guards-not-one reasoning as
+   * `staffChangeRole` above, fires regardless of how many managers exist.
    * A company with several active managers never trips the floor, but a
    * manager still cannot end their own access through this door; only a
-   * DIFFERENT manager (or the admin console's `endMember`) can.
+   * DIFFERENT manager through this same door, or an administrator through
+   * the admin console's `endMember`, can — unlike the role-change guard
+   * above, an administrator genuinely can do this one, so the message
+   * says so.
    */
   async staffDeactivateMember(actorId: string, targetUserId: string) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
     if (isSelfAction(actorId, targetUserId)) {
-      throw new ForbiddenException('You cannot end your own terminal company membership. Ask another manager to do this for you.');
+      throw new ForbiddenException('You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.');
     }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
