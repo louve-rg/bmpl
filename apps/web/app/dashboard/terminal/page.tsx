@@ -1630,7 +1630,12 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
   // Keyed `${userId}:${locationId}` for a revoke, `${userId}:grant` for a grant.
   const [locationBusy, setLocationBusy] = useState<string | null>(null);
   const [grantPick, setGrantPick] = useState<Record<string, string>>({});
-  const [rowErr, setRowErrState] = useState<Record<string, string>>({});
+  // TERM-STAFF-390: `source` anchors the message to the control that caused
+  // it (god/Stanley -- a manager who clicks "Set as operator" and gets a
+  // refusal must not have to guess whether it was about the role change or
+  // something further down the card). 'top' = the role/end/reactivate row;
+  // 'locations' = the chip list or the grant picker below it.
+  const [rowErr, setRowErrState] = useState<Record<string, { message: string; source: 'top' | 'locations' }>>({});
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<StaffMemberRole>('OPERATOR');
@@ -1638,14 +1643,22 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteErr, setInviteErr] = useState<string | null>(null);
   const [inviteDelivery, setInviteDelivery] = useState<InviteDelivery | null>(null);
+  // TERM-STAFF-390: which invite the banner above is actually describing --
+  // Stanley found the "Invitation created" banner surviving a revoke of that
+  // same invite from the (sibling, separately-stated) Pending Invites
+  // section below. Rendered only while `staff.pendingInvites` -- refetched
+  // on every `onChanged()`, including a revoke in that other section --
+  // still contains this id, so the banner dies with the row it describes
+  // rather than lingering on stale state no one told it to clear.
+  const [inviteDeliveryFor, setInviteDeliveryFor] = useState<string | null>(null);
 
-  function setRowErr(userId: string, message: string | null) {
+  function setRowErr(userId: string, message: string | null, source: 'top' | 'locations' = 'top') {
     setRowErrState((prev) => {
       if (message === null) {
         const { [userId]: _drop, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [userId]: message };
+      return { ...prev, [userId]: { message, source } };
     });
   }
 
@@ -1656,20 +1669,30 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
       await api.patch(`/terminal/staff/${userId}/role`, { memberRole });
       onChanged();
     } catch (e) {
-      setRowErr(userId, errMessage(e, 'Could not change that role.'));
+      setRowErr(userId, errMessage(e, 'Could not change that role.'), 'top');
     } finally {
       setRoleBusy(null);
     }
   }
 
-  async function endMember(userId: string) {
+  /**
+   * TERM-STAFF-390: the owner's "destructive actions display understandable
+   * confirmations" ruling, and Stanley's finding that this was the ONE
+   * action on the card with none -- the milder "Remove location" already
+   * confirmed well below, this one went straight to the request. Wording
+   * modeled on that same confirm (god's explicit instruction): name the
+   * person, say what stops, in a shop manager's language -- never
+   * "deactivate membership".
+   */
+  async function endMember(userId: string, memberName: string) {
+    if (!window.confirm(`End ${memberName}'s membership? They will no longer be able to work here until you reactivate them.`)) return;
     setEndBusy(userId);
     setRowErr(userId, null);
     try {
       await api.post(`/terminal/staff/${userId}/deactivate`, {});
       onChanged();
     } catch (e) {
-      setRowErr(userId, errMessage(e, 'Could not end that membership.'));
+      setRowErr(userId, errMessage(e, 'Could not end that membership.'), 'top');
     } finally {
       setEndBusy(null);
     }
@@ -1682,7 +1705,7 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
       await api.post(`/terminal/staff/${userId}/reactivate`, {});
       onChanged();
     } catch (e) {
-      setRowErr(userId, errMessage(e, 'Could not reactivate that membership.'));
+      setRowErr(userId, errMessage(e, 'Could not reactivate that membership.'), 'top');
     } finally {
       setReactivateBusy(null);
     }
@@ -1700,7 +1723,7 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
       await api.del(`/terminal/staff/${userId}/locations/${locationId}`);
       onChanged();
     } catch (e) {
-      setRowErr(userId, errMessage(e, 'Could not revoke that location.'));
+      setRowErr(userId, errMessage(e, 'Could not revoke that location.'), 'locations');
     } finally {
       setLocationBusy(null);
     }
@@ -1720,7 +1743,7 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
       });
       onChanged();
     } catch (e) {
-      setRowErr(userId, errMessage(e, 'Could not grant that location.'));
+      setRowErr(userId, errMessage(e, 'Could not grant that location.'), 'locations');
     } finally {
       setLocationBusy(null);
     }
@@ -1741,13 +1764,17 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
     setInviteBusy(true);
     setInviteErr(null);
     setInviteDelivery(null);
+    setInviteDeliveryFor(null);
     try {
-      const created = await api.post<{ delivery?: InviteDelivery }>('/terminal/staff/invite', {
+      const created = await api.post<{ id: string; delivery?: InviteDelivery }>('/terminal/staff/invite', {
         email: inviteEmail.trim(),
         memberRole: inviteRole,
         locationIds: Array.from(invitePicked),
       });
-      if (created?.delivery) setInviteDelivery(created.delivery);
+      if (created?.delivery) {
+        setInviteDelivery(created.delivery);
+        setInviteDeliveryFor(created.id);
+      }
       setInviteEmail('');
       setInviteRole('OPERATOR');
       setInvitePicked(new Set());
@@ -1801,7 +1828,15 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                   <span className="font-medium text-[color:var(--bmpl-text)]">{m.name}</span>{' '}
                   <span className="text-xs text-[color:var(--bmpl-text-muted)]">{m.email}</span>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                {/* TERM-STAFF-390: Stanley read the computed layout -- this
+                    div already had flex-wrap, but `shrink-0` stopped the
+                    browser from ever narrowing it to the available column
+                    width, so its own wrap never got a box narrow enough to
+                    use. Removing shrink-0 (not touching the wrap below) is
+                    the fix: the ancestor can now shrink, which is what lets
+                    it wrap. Measured before/after with a real browser
+                    against the compiled CSS, not just reasoned. */}
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Badge tone={m.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{m.memberRole}</Badge>
                   <Badge tone={m.status === 'ACTIVE' ? 'success' : 'neutral'}>{m.status}</Badge>
                   {m.status === 'ACTIVE' && (
@@ -1815,7 +1850,7 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                     </Button>
                   )}
                   {m.status === 'ACTIVE' && (
-                    <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId)}>
+                    <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId, m.name)}>
                       {endBusy === m.userId ? 'Ending…' : 'End membership'}
                     </Button>
                   )}
@@ -1827,7 +1862,11 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 </div>
               </div>
 
-              {rowErr[m.userId] && <Alert tone="error" className="mt-2">{rowErr[m.userId]}</Alert>}
+              {rowErr[m.userId]?.source === 'top' && (
+                <Alert tone="error" className="mt-2">
+                  {rowErr[m.userId]!.message}
+                </Alert>
+              )}
 
               <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                 {m.locations.length === 0 ? 'No locations granted.' : `Granted at: ${m.locations.map((l) => l.hub.name).join(', ')}`}
@@ -1839,7 +1878,19 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                     {m.locations.map((l) => (
                       <li
                         key={l.id}
-                        className="inline-flex items-center gap-1 rounded-bmpl-sm border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-[color:var(--bmpl-text-secondary)]"
+                        // TERM-STAFF-390: this pill hardcodes a light
+                        // background (bg-slate-50/border-slate-200), so its
+                        // text must be a hardcoded dark class too, never a
+                        // themed CSS variable -- the glass theme redefines
+                        // --bmpl-text-secondary to a near-white value meant
+                        // for the Card's own dark glass fill, which made the
+                        // location name read at ~1:1 against this nested,
+                        // independently-light surface (Stanley measured it;
+                        // confirmed again here with the real rendered
+                        // colours: 9.90:1 after this change). Same reasoning
+                        // as the tab strip's own hardcoded text-slate-600 on
+                        // bg-white a few hundred lines up in this file.
+                        className="inline-flex items-center gap-1 rounded-bmpl-sm border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-0.5 text-xs text-slate-700"
                       >
                         {l.hub.name}
                         <button
@@ -1847,7 +1898,13 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                           disabled={locationBusy === `${m.userId}:${l.id}`}
                           onClick={() => void revokeLocation(m.userId, l.id, l.hub.name, m.name)}
                           aria-label={`Remove ${m.name}'s access to ${l.hub.name}`}
-                          className="font-semibold text-[color:var(--bmpl-text-muted)] hover:text-amber-800 disabled:opacity-50"
+                          // Same contrast fix as the pill itself (7.24:1
+                          // measured), plus a real touch target -- Stanley
+                          // measured the old control at 8x16px. 24x24 is the
+                          // WCAG 2.5.8 AA floor, not the AAA 44px, since this
+                          // sits inside a dense inline chip list rather than
+                          // standing alone.
+                          className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center font-semibold text-slate-600 hover:text-amber-800 disabled:opacity-50"
                         >
                           ×
                         </button>
@@ -1867,6 +1924,12 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                   Location list is unavailable right now -- refresh to grant a location.
                 </p>
+              )}
+
+              {rowErr[m.userId]?.source === 'locations' && (
+                <Alert tone="error" className="mt-2">
+                  {rowErr[m.userId]!.message}
+                </Alert>
               )}
 
               {m.status === 'ACTIVE' &&
@@ -1968,7 +2031,7 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
         <Button type="button" disabled={inviteBusy || activeLocationCount === 0} onClick={() => void invite()}>
           {inviteBusy ? 'Sending…' : 'Send invite'}
         </Button>
-        {inviteDelivery && (
+        {inviteDelivery && inviteDeliveryFor && staff.pendingInvites.some((i) => i.id === inviteDeliveryFor) && (
           <Alert tone={deliveryMessage(inviteDelivery).tone} className="mt-2">
             {deliveryMessage(inviteDelivery).text}
           </Alert>
@@ -1987,14 +2050,24 @@ function StaffPendingInvitesSection({ staff, onChanged }: { staff: StaffRoster; 
   const [revokeBusy, setRevokeBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [delivery, setDelivery] = useState<InviteDelivery | null>(null);
+  // TERM-STAFF-390: same stale-banner fix as StaffMembersSection's own
+  // inviteDeliveryFor -- the resend banner is also keyed to one invite and
+  // must die when that invite is revoked, even though here the revoke button
+  // sits in this same component (god asked whether another banner on this
+  // screen shared the lifetime bug; this one did).
+  const [deliveryFor, setDeliveryFor] = useState<string | null>(null);
 
   async function resend(inviteId: string) {
     setResendBusy(inviteId);
     setErr(null);
     setDelivery(null);
+    setDeliveryFor(null);
     try {
-      const res = await api.post<{ delivery?: InviteDelivery }>(`/terminal/staff/invites/${inviteId}/resend`, {});
-      if (res?.delivery) setDelivery(res.delivery);
+      const res = await api.post<{ id: string; delivery?: InviteDelivery }>(`/terminal/staff/invites/${inviteId}/resend`, {});
+      if (res?.delivery) {
+        setDelivery(res.delivery);
+        setDeliveryFor(res.id);
+      }
       onChanged();
     } catch (e) {
       setErr(errMessage(e, 'Could not resend that invite.'));
@@ -2020,7 +2093,7 @@ function StaffPendingInvitesSection({ staff, onChanged }: { staff: StaffRoster; 
     <div>
       <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Pending invites ({staff.pendingInvites.length})</h2>
       {err && <Alert tone="error" className="mb-2">{err}</Alert>}
-      {delivery && (
+      {delivery && deliveryFor && staff.pendingInvites.some((i) => i.id === deliveryFor) && (
         <Alert tone={deliveryMessage(delivery).tone} className="mb-2">
           {deliveryMessage(delivery).text}
         </Alert>

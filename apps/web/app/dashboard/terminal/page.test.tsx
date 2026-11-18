@@ -856,9 +856,16 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       await clickButton('Set as operator');
       expect(container!.textContent).toContain('This company must always have at least one active manager.');
+      // TERM-STAFF-390: anchored near the role/end/reactivate row it came
+      // from, not down by the locations section -- a manager who clicked
+      // "Set as operator" should not have to guess which control a refusal
+      // under the card refers to.
+      const text = container!.textContent!;
+      expect(text.indexOf('This company must always have at least one active manager.')).toBeLessThan(text.indexOf('Granted at:'));
     });
 
     it('ends an ACTIVE membership with one POST and an empty body', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
       const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
       await act(async () => {
@@ -869,9 +876,26 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       const call = calls.find((c) => c.url.includes('/terminal/staff/user_1/deactivate'));
       expect(call?.body).toEqual({});
+      vi.restoreAllMocks();
+    });
+
+    it("asks for confirmation before ending a membership, naming the person and what stops -- the owner's required fix for the one control that had none", async () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('End membership');
+
+      expect(confirmSpy).toHaveBeenCalledWith("End Edward Broaster's membership? They will no longer be able to work here until you reactivate them.");
+      expect(calls.find((c) => c.url.includes('/terminal/staff/user_1/deactivate'))).toBeUndefined();
+      vi.restoreAllMocks();
     });
 
     it('renders the last-active-manager refusal verbatim on End membership too, same text as the role-change refusal', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
       stubFetch({
         workspaceBody: MANAGER_WORKSPACE,
         queueRows: [],
@@ -887,6 +911,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickButton('End membership');
 
       expect(container!.textContent).toContain('This company must always have at least one active manager.');
+      vi.restoreAllMocks();
     });
 
     // Revoking the company's only manager's last location refuses with its
@@ -992,7 +1017,12 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
         workspaceBody: MANAGER_WORKSPACE,
         queueRows: [],
         staffBody: STAFF_ROSTER,
-        actionBody: { delivery: { delivered: true, outcome: 'accepted' } },
+        // id matches the real API shape (resendInvite returns
+        // {...serializeInvite(updated), delivery}) -- the stale-banner fix
+        // (TERM-STAFF-390) keys the banner to this id against
+        // staff.pendingInvites, so a fixture missing it would silently hide
+        // the banner rather than exercise the real path.
+        actionBody: { id: 'inv_1', delivery: { delivered: true, outcome: 'accepted' } },
       });
       await mount();
       await act(async () => {
@@ -1010,7 +1040,7 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
         workspaceBody: MANAGER_WORKSPACE,
         queueRows: [],
         staffBody: STAFF_ROSTER,
-        actionBody: { delivery: { delivered: false, outcome: 'provider_error' } },
+        actionBody: { id: 'inv_1', delivery: { delivered: false, outcome: 'provider_error' } },
       });
       await mount();
       await act(async () => {
@@ -1033,6 +1063,57 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickButton('Revoke');
 
       expect(calls.some((c) => c.url.includes('/terminal/staff/invites/inv_1/revoke') && c.method === 'POST')).toBe(true);
+    });
+
+    /**
+     * TERM-STAFF-390: Stanley's production finding -- the resend-delivery
+     * banner is keyed to one invite (inv_1) and must stop asserting
+     * anything about it once a revoke makes that invite gone, even though
+     * the revoke happened in the same component's own data, not through any
+     * explicit "clear the banner" call on revoke(). The fix ties the
+     * banner's visibility to staff.pendingInvites still containing the id,
+     * refetched fresh on every onChanged() -- so this test controls what
+     * that refetch returns across calls, the same way the queue-retry test
+     * above does, rather than relying on the static stubFetch default.
+     */
+    it('clears the resend-delivery banner once that same invite is revoked -- it must not keep asserting a stale outcome', async () => {
+      let staffGetCount = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          const method = init?.method ?? 'GET';
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, MANAGER_WORKSPACE);
+          if (url.endsWith('/api/terminal/staff') && method === 'GET') {
+            staffGetCount += 1;
+            // After the revoke's own onChanged() refetch (3rd GET: mount,
+            // post-resend, post-revoke), the invite is gone.
+            const pendingInvites = staffGetCount >= 3 ? [] : STAFF_ROSTER.pendingInvites;
+            return jsonResponse(200, { ...STAFF_ROSTER, pendingInvites });
+          }
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, [], { 'X-BMPL-Queue-Has-More': 'false' });
+          if (url.includes('/terminal/staff/invites/inv_1/resend') && method === 'POST') {
+            return jsonResponse(200, { id: 'inv_1', delivery: { delivered: true, outcome: 'accepted' } });
+          }
+          if (url.includes('/terminal/staff/invites/inv_1/revoke') && method === 'POST') {
+            return jsonResponse(200, { revoked: true });
+          }
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await clickButton('Resend');
+
+      expect(container!.textContent).toContain('Invitation created and the email was accepted by the provider.');
+
+      await clickButton('Revoke');
+
+      expect(container!.textContent).not.toContain('Invitation created and the email was accepted by the provider.');
+      expect(container!.textContent).toContain('No pending invites.');
     });
 
     it('shows every company location in the invite checklist, including an inactive one marked unselectable, never vanished', async () => {
@@ -1077,6 +1158,70 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(call?.body).toEqual({ email: 'new-hire@tropicair.bz', memberRole: 'MANAGER', locationIds: ['loc_2'] });
     });
 
+    /**
+     * TERM-STAFF-390: the same stale-banner bug Stanley found, but crossing
+     * components -- the "Invitation created" banner lives in
+     * StaffMembersSection's own invite form, while Revoke lives in the
+     * sibling StaffPendingInvitesSection below. Neither component has any
+     * direct reference to the other; the only thing they share is the
+     * `staff` prop, refetched by the SAME onChanged() every mutation on the
+     * tab calls -- which is exactly what the fix leans on instead of
+     * reaching across components.
+     */
+    it("clears the invite-creation banner once that invite is revoked from the sibling Pending Invites list -- god's cross-component finding", async () => {
+      let staffGetCount = 0;
+      const noInvitesYet = { ...STAFF_ROSTER, pendingInvites: [] as typeof STAFF_ROSTER.pendingInvites };
+      const oneNewInvite = {
+        ...STAFF_ROSTER,
+        pendingInvites: [{ id: 'inv_new', email: 'new-hire@tropicair.bz', memberRole: 'MANAGER', expiresAt: '2026-12-01T12:00:00.000Z', createdAt: '2026-11-18T12:00:00.000Z', locationCount: 1 }],
+      };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          const method = init?.method ?? 'GET';
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, MANAGER_WORKSPACE);
+          if (url.endsWith('/api/terminal/staff') && method === 'GET') {
+            staffGetCount += 1;
+            // 1st GET (mount): no pending invites. 2nd (post-create): the
+            // new one appears. 3rd (post-revoke): gone again.
+            return jsonResponse(200, staffGetCount === 1 ? noInvitesYet : staffGetCount === 2 ? oneNewInvite : noInvitesYet);
+          }
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, [], { 'X-BMPL-Queue-Has-More': 'false' });
+          if (url.endsWith('/terminal/staff/invite') && method === 'POST') {
+            return jsonResponse(200, { id: 'inv_new', delivery: { delivered: true, outcome: 'accepted' } });
+          }
+          if (url.includes('/terminal/staff/invites/inv_new/revoke') && method === 'POST') {
+            return jsonResponse(200, { revoked: true });
+          }
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      act(() => {
+        setValue(container!.querySelector('#staff-invite-email') as HTMLInputElement, 'new-hire@tropicair.bz');
+        setSelectValue(container!.querySelector('#staff-invite-role') as HTMLSelectElement, 'MANAGER');
+      });
+      const checkbox = Array.from(container!.querySelectorAll('#staff-invite-locations input[type="checkbox"]')).find((c) =>
+        (c as HTMLInputElement).closest('label')?.textContent?.includes('San Pedro Hub'),
+      ) as HTMLInputElement;
+      await act(async () => {
+        checkbox.click();
+      });
+      await clickButton('Send invite');
+
+      expect(container!.textContent).toContain('Invitation created and the email was accepted by the provider.');
+
+      await clickButton('Revoke');
+
+      expect(container!.textContent).not.toContain('Invitation created and the email was accepted by the provider.');
+    });
+
     it('refuses to send an invite with no location picked, before any request -- there is no whole-company grant', async () => {
       const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
@@ -1112,6 +1257,38 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(call?.body).toEqual({ locationId: 'loc_2' });
     });
 
+    /**
+     * TERM-STAFF-390: the optional anchoring item god offered either answer
+     * on -- cheap enough on this layout, so taken. A grant refusal is about
+     * the locations section, not the role/end/reactivate row, so it renders
+     * below the "Removing a location..." distinction paragraph rather than
+     * at the top where a role-change refusal does.
+     */
+    it('anchors a grant-location refusal near the locations section, not the role/end row at the top', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionStatus: 404,
+        actionBody: { message: 'That location is not active.' },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const select = container!.querySelector('select[aria-label="Grant Edward Broaster a location"]') as HTMLSelectElement;
+      act(() => {
+        setSelectValue(select, 'loc_2');
+      });
+      await clickButton('Grant');
+
+      expect(container!.textContent).toContain('That location is not active.');
+      const text = container!.textContent!;
+      expect(text.indexOf('Removing a location only ends access')).toBeLessThan(text.indexOf('That location is not active.'));
+    });
+
     it('shows the inactive company location in the grant picker as a disabled option, never hidden', async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
@@ -1124,6 +1301,59 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       const option = Array.from(select.options).find((o) => o.textContent?.includes('Orange Walk Hub'));
       expect(option).toBeDefined();
       expect(option!.disabled).toBe(true);
+    });
+
+    /**
+     * TERM-STAFF-390: Stanley measured the location chip's text at a
+     * contrast ratio of about 1:1 (rgba(244,248,255,.82) on rgb(248,250,252))
+     * and its remove control at 8x16px. jsdom computes neither real layout
+     * nor real contrast (same limit as the earlier 390 question), so this
+     * locks in the TOKEN CHOICE and the TOUCH-TARGET CLASS -- a literal
+     * regression (someone reverting to the CSS-variable class or dropping
+     * the min-h/min-w) would fail this. It does NOT prove the rendered
+     * ratio or the rendered pixel box; that observation belongs to Stanley
+     * on the deployed build, same as the layout claim below.
+     */
+    it('uses a hardcoded light-surface text class on the location chip, never the glass-ambient CSS variable', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const chip = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Belize City Hub')) as HTMLLIElement;
+      expect(chip.className).toContain('text-slate-700');
+      expect(chip.className).not.toContain('--bmpl-text-secondary');
+
+      const removeBtn = container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]') as HTMLButtonElement;
+      expect(removeBtn.className).toContain('text-slate-600');
+      expect(removeBtn.className).not.toContain('--bmpl-text-muted');
+      expect(removeBtn.className).toContain('min-h-[24px]');
+      expect(removeBtn.className).toContain('min-w-[24px]');
+    });
+
+    /**
+     * TERM-STAFF-390: Stanley read the computed layout and found the
+     * badge/button cluster's wrapper effectively flex-nowrap -- `shrink-0`
+     * stopped it from ever narrowing to the available column width, so its
+     * own flex-wrap never got a box narrow enough to use. This locks in
+     * that `shrink-0` is gone from that specific div; it does not (and
+     * cannot, in jsdom) prove the rendered layout no longer overflows --
+     * that observation belongs to Stanley on the deployed build.
+     */
+    it('removes shrink-0 from the badge/button cluster so its own flex-wrap can actually engage', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const endButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'End membership') as HTMLButtonElement;
+      const cluster = endButton.parentElement as HTMLElement;
+      expect(cluster.className).toContain('flex-wrap');
+      expect(cluster.className).not.toContain('shrink-0');
     });
 
     /**
