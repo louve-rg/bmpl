@@ -8,9 +8,7 @@ freely, because none of it is real.
 
 This guide describes behaviour our own quality-assurance team has watched
 work end to end on the live, deployed site, using our own test accounts —
-not something you have tried yourself. A small number of display issues on
-the Staff screen are still being fixed; those are listed in Section 4, and
-we will update this guide and tell you directly once they clear.
+not something you have tried yourself.
 
 ---
 
@@ -186,11 +184,12 @@ your workspace is where you manage your own team.
 - **Changing someone's role.** You can move an employee between Manager and
   Operator, in either direction, at any time.
 - **Ending someone's access.** You can end an employee's access entirely.
-  They stay visible on your list with a Restore option, but their access
-  genuinely stops working the moment you end it — it is not just hidden from
-  the screen. The screen does not yet ask you to confirm before ending
-  someone's access, so double-check who you've selected before you click it
-  (see below).
+  The system asks you to confirm before it takes effect, so you get one more
+  chance to check you've selected the right person — it's a plain pop-up
+  asking you to confirm or cancel, and clicking Cancel is always safe and
+  changes nothing. They stay visible on your list afterward with a Restore
+  option, but their access genuinely stops working the moment you confirm —
+  it is not just hidden from the screen.
 - **Restoring someone's access.** You can restore access for someone you
   previously ended, and they can use the workspace again.
 - **Granting or revoking access to a specific location.** Each active
@@ -240,17 +239,6 @@ entirely — and you would not be able to undo it yourself. If that ever
 happens, contact us and we will restore your access. This is the second of
 the two instructions in this document where getting it wrong does
 something rather than merely looking odd — leave your own row alone.
-
-**Still open on the Staff screen — known, and being fixed; none of these are
-a sign that your action failed:**
-
-- A location's name can show as a blank label.
-- The button to end someone's access can be cut off on a phone screen.
-- A "success" message can linger on screen after you've revoked an
-  invitation.
-- Ending someone's access has no confirmation step yet, as noted above.
-
-We'll tell you when these are fixed.
 
 ---
 
