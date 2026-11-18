@@ -6,12 +6,11 @@ here touches San Pedro Elite, your real SP-EL-TER terminal, a real customer,
 or real money. Treat anything this guide describes as something you can try
 freely, because none of it is real.
 
-Everything below describes what the system is built to do, derived directly
-from its own specification and screen code. Where a step is marked **pending
-confirmation**, our own acceptance testing on the live site is still in
-progress as this guide is written — the step is described accurately, but
-nobody has yet watched it work end to end on the deployed product. We will
-update this guide, and tell you directly, once that testing finishes.
+Most of this guide describes behaviour our own quality-assurance team has
+now watched work on the live, deployed site, using our own test account —
+not something you have tried yourself. A small number of steps are still
+being verified; those are marked **pending confirmation** below, and we will
+update this guide and tell you directly once they clear.
 
 ---
 
@@ -100,60 +99,84 @@ control for that step; it is hidden rather than shown and then refused.
 
 ## 4. Inviting and managing your employees
 
-**This feature finished building and deploying today.** Everything in this
-section describes what the screen and the system are built to do, read
-directly from the specification and the screen's own code — but our own
-acceptance testing of it against the live site is running as this guide is
-written, and no step below has yet been confirmed working end to end on the
-deployed product. We will fill in a confirmed result for each item as soon
-as that testing completes; until then, treat each description as "this is
-what it's designed to do," not "this is proven to work."
+This feature deployed today. Everything marked **confirmed** below has been
+watched working on the live, deployed site by our own quality-assurance
+team, using our own test account — not by you. As the Manager, a new
+**Staff** tab on your workspace is where you manage your own team.
 
-As the Manager, a new **Staff** tab on your workspace is where you manage
-your own team — nobody else needs to do this for you once it is confirmed
-working.
+- **Inviting someone — confirmed.** Enter their email, choose whether they
+  join as a Manager or an Operator, and choose which of your locations they
+  get. The invitation appears in a waiting list and is still there after you
+  refresh the page or sign in fresh later. Leaving out a location is refused
+  before anything is even sent; a malformed email address is refused with a
+  readable message. After sending, the screen tells you plainly whether the
+  invitation email actually went out or was only simulated by this demo
+  environment (see Section 5).
+- **Resending or revoking an invitation — confirmed.** If an invitation went
+  to the wrong address, or an invited person never acted on it, you can send
+  it again, or cancel it outright — revoking removes it from the waiting
+  list for good.
+- **Changing someone's role — confirmed.** You can move an employee between
+  Manager and Operator, in either direction, at any time.
+- **Ending someone's access — confirmed.** You can end an employee's access
+  entirely. They stay visible on your list with a Restore option, but their
+  access genuinely stops working the moment you end it — it is not just
+  hidden from the screen.
+- **Restoring someone's access — confirmed.** You can restore access for
+  someone you previously ended, and they can use the workspace again.
+- **Granting or revoking access to a specific location — confirmed.** Each
+  active employee can be given access to an additional location, or have
+  access to one specific location removed, independent of anything else
+  about their account. Removing one location only ends their access to that
+  location — it never ends their membership or changes their role.
 
-- **Inviting someone.** Enter their email, choose whether they join as a
-  Manager or an Operator, and select at least one of your terminal's
-  locations to grant them — a role on its own never grants access to a
-  location; it must be chosen explicitly. After sending the invitation, the
-  screen tells you plainly whether the invitation email actually went out or
-  was only simulated by this demo environment (see Section 5 — this matters
-  for a new employee who never receives anything).
-- **Granting or revoking access to a specific location.** Each of your
-  active employees can be given access to additional locations one at a
-  time, or have access to a specific location removed, independent of
-  anything else about their account. Removing someone's access to one
-  location only ends their access to that location — it never ends their
-  membership or changes their role.
-- **Changing someone's role.** You can move an employee between Manager and
-  Operator at any time; this can always be changed back.
-- **Ending and restoring someone's access.** You can end an employee's
-  membership entirely, and later reactivate it — reactivating restores
-  exactly the locations they had before, rather than starting them over with
-  nothing.
-- **Resending or revoking an invitation.** If an invitation went to the
-  wrong address, or an invited person never acted on it, you can send it
-  again or cancel it outright from the list of invitations still waiting on
-  a response.
+All of the above held up after a page refresh and after signing out and back
+in fresh — it is a real, saved change, not something that looks done and
+then reverts.
 
 A built-in safeguard runs underneath all of this: your company must always
-have at least one active Manager. An action that would leave the company
-with none — changing the last Manager's role, ending their membership, or
-removing their last location — is refused, with an on-screen message
-explaining exactly why.
+have at least one active Manager. Section 5 says more about what that means
+for you specifically.
+
+**Two things not yet confirmed, so not promised here:**
+
+- **Whether an invited person can actually accept the invitation and sign in
+  is still being verified.** The inviting side is confirmed; the new
+  employee's own side of it is not, yet.
+- **The Staff screen itself is not finished.** Three display problems are
+  known and being fixed: a location's name can show as a blank label, the
+  button to end someone's access can be cut off on a phone screen, and a
+  "success" message can linger on screen after you've revoked an invitation.
+  None of these affect whether the underlying action actually worked — they
+  are display issues, not refusals — but if something on this screen looks
+  visually wrong, it is probably one of these three, not a sign your action
+  failed. We'll tell you when they're fixed.
 
 ---
 
 ## 5. What you cannot do alone
 
 These actions need someone else — a customer, a courier, or a BML
-administrator — no matter who you are or what role you hold:
+administrator — no matter who you are or what role you hold. This is
+checked directly against what the system actually allows, not assumed.
 
-- **Adding a new counter location to your company.** Only a BML
-  administrator can attach a new location to your terminal company. You can
-  grant or remove your own employees' access to a location once it exists
-  (Section 4), but you cannot create one yourself.
+- **Adding a new counter location to your company, or closing an existing
+  one.** Both need a BML administrator. What you *can* do yourself is decide
+  which of your existing locations each of your employees may work at
+  (Section 4). Put simply: **which of your locations a person can work at is
+  yours to set; adding or closing a location is ours.**
+- **Managing anyone outside your own company, or giving anyone platform
+  administrator powers.** You cannot see or touch another company's staff,
+  and you cannot grant anyone — including yourself — any administrator
+  power over BML's platform. This isn't a restriction worth worrying about;
+  it's why your staff list is genuinely your own and nobody else's.
+- **Removing your own last manager, or your own last location, if you are
+  currently the company's only active Manager.** The system will refuse to
+  let you end your own access, step down from Manager, or remove your own
+  last location while you're the only one holding the role — it exists to
+  stop the company being left with nobody in charge. You likely won't hit
+  this on purpose, but if you ever do by accident, that refusal is the
+  system working correctly, not something broken.
 - **Unlocking a parcel after too many wrong codes.** If a collection or
   hand-off code is entered incorrectly enough times, the system locks that
   parcel as a precaution against guessing. Only a BML administrator can clear
