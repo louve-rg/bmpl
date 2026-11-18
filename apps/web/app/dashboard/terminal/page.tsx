@@ -1518,11 +1518,18 @@ function HistoryPanel({
  */
 type InviteDelivery = { delivered: boolean; outcome: string };
 
-function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text: string } {
+/**
+ * RESEND-BANNER-COPY: Stanley found the resend path reusing this function's
+ * "Invitation created" wording -- true for the create path, false for a
+ * resend, where nothing was created. `action` lets each call site say which
+ * really happened; the delivery-outcome logic itself is untouched.
+ */
+function deliveryMessage(d: InviteDelivery, action: 'created' | 'resent'): { tone: 'success' | 'warning'; text: string } {
+  const verb = action === 'created' ? 'Invitation created' : 'Invitation resent';
   if (d.delivered) {
     return d.outcome === 'simulated'
-      ? { tone: 'warning', text: 'Invitation created. Email was SIMULATED by this environment, not actually delivered.' }
-      : { tone: 'success', text: 'Invitation created and the email was accepted by the provider.' };
+      ? { tone: 'warning', text: `${verb}. Email was SIMULATED by this environment, not actually delivered.` }
+      : { tone: 'success', text: `${verb} and the email was accepted by the provider.` };
   }
   const why =
     d.outcome === 'missing_credential'
@@ -1534,7 +1541,7 @@ function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text
           : d.outcome;
   return {
     tone: 'warning',
-    text: `Invitation created but the email was NOT delivered -- ${why}. The invite is still valid: use Resend below. The link cannot be recovered any other way.`,
+    text: `${verb} but the email was NOT delivered -- ${why}. The invite is still valid: use Resend below. The link cannot be recovered any other way.`,
   };
 }
 
@@ -2032,8 +2039,8 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
           {inviteBusy ? 'Sending…' : 'Send invite'}
         </Button>
         {inviteDelivery && inviteDeliveryFor && staff.pendingInvites.some((i) => i.id === inviteDeliveryFor) && (
-          <Alert tone={deliveryMessage(inviteDelivery).tone} className="mt-2">
-            {deliveryMessage(inviteDelivery).text}
+          <Alert tone={deliveryMessage(inviteDelivery, 'created').tone} className="mt-2">
+            {deliveryMessage(inviteDelivery, 'created').text}
           </Alert>
         )}
       </div>
@@ -2094,8 +2101,8 @@ function StaffPendingInvitesSection({ staff, onChanged }: { staff: StaffRoster; 
       <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Pending invites ({staff.pendingInvites.length})</h2>
       {err && <Alert tone="error" className="mb-2">{err}</Alert>}
       {delivery && deliveryFor && staff.pendingInvites.some((i) => i.id === deliveryFor) && (
-        <Alert tone={deliveryMessage(delivery).tone} className="mb-2">
-          {deliveryMessage(delivery).text}
+        <Alert tone={deliveryMessage(delivery, 'resent').tone} className="mb-2">
+          {deliveryMessage(delivery, 'resent').text}
         </Alert>
       )}
       {staff.pendingInvites.length === 0 ? (
