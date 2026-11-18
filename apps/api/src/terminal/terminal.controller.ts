@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import {
   acceptTerminalInviteSchema,
   addTerminalCompanyLocationSchema,
+  changeTerminalCompanyMemberRoleSchema,
   collectShipmentSchema,
   createTerminalCompanySchema,
   grantTerminalCompanyMemberLocationSchema,
@@ -13,6 +14,7 @@ import {
   updateTerminalCompanySchema,
   type AcceptTerminalInviteInput,
   type AddTerminalCompanyLocationInput,
+  type ChangeTerminalCompanyMemberRoleInput,
   type CollectShipmentInput,
   type CreateTerminalCompanyInput,
   type GrantTerminalCompanyMemberLocationInput,
@@ -248,6 +250,65 @@ export class TerminalController {
     await this.terminal.assertActiveMemberRole(u.userId, ['MANAGER']);
     const hubIds = await this.terminal.myActiveHubIds(u.userId);
     return this.shipments.terminalHistory(hubIds, { cursor, limit: limit ? Number(limit) : undefined });
+  }
+
+  /**
+   * TERM-STAFF-API: the owner-approved self-serve door onto the same six
+   * primitives AdminTerminalController already exposes — see
+   * TerminalService's "staff: manager-run staff management" section for
+   * the authority model and the last-ACTIVE-MANAGER floor these six share.
+   * MANAGER-only, enforced inside each service method via
+   * `assertActiveMemberRole` — same reasoning as `staff`/`history` above,
+   * never a decorator, and the company is always the CALLER's own, never
+   * taken from the request.
+   */
+  @Post('staff/invite')
+  staffInvite(@CurrentUser() u: AuthContext, @Body(ZodBody(inviteTerminalCompanyMemberSchema)) dto: InviteTerminalCompanyMemberInput) {
+    return this.terminal.staffInvite(u.userId, dto);
+  }
+
+  /** god's own scope addition: undo a mistyped invite without an admin. */
+  @Post('staff/invites/:inviteId/revoke')
+  staffRevokeInvite(@CurrentUser() u: AuthContext, @Param('inviteId') inviteId: string) {
+    return this.terminal.staffRevokeInvite(u.userId, inviteId);
+  }
+
+  @Post('staff/invites/:inviteId/resend')
+  staffResendInvite(@CurrentUser() u: AuthContext, @Param('inviteId') inviteId: string) {
+    return this.terminal.staffResendInvite(u.userId, inviteId);
+  }
+
+  @Patch('staff/:userId/role')
+  staffChangeRole(
+    @CurrentUser() u: AuthContext,
+    @Param('userId') userId: string,
+    @Body(ZodBody(changeTerminalCompanyMemberRoleSchema)) dto: ChangeTerminalCompanyMemberRoleInput,
+  ) {
+    return this.terminal.staffChangeRole(u.userId, userId, dto);
+  }
+
+  @Post('staff/:userId/locations')
+  staffGrantLocation(
+    @CurrentUser() u: AuthContext,
+    @Param('userId') userId: string,
+    @Body(ZodBody(grantTerminalCompanyMemberLocationSchema)) dto: GrantTerminalCompanyMemberLocationInput,
+  ) {
+    return this.terminal.staffGrantLocation(u.userId, userId, dto.locationId);
+  }
+
+  @Delete('staff/:userId/locations/:locationId')
+  staffRevokeLocation(@CurrentUser() u: AuthContext, @Param('userId') userId: string, @Param('locationId') locationId: string) {
+    return this.terminal.staffRevokeLocation(u.userId, userId, locationId);
+  }
+
+  @Post('staff/:userId/deactivate')
+  staffDeactivateMember(@CurrentUser() u: AuthContext, @Param('userId') userId: string) {
+    return this.terminal.staffDeactivateMember(u.userId, userId);
+  }
+
+  @Post('staff/:userId/reactivate')
+  staffReactivateMember(@CurrentUser() u: AuthContext, @Param('userId') userId: string) {
+    return this.terminal.staffReactivateMember(u.userId, userId);
   }
 }
 

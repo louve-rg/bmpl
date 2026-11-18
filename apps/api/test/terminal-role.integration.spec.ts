@@ -307,6 +307,22 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     // MDF-701: history/reporting is the owner's own MANAGER-only split,
     // named in TerminalService.myStaff's doc comment — same role as /staff.
     { controller: 'TerminalController', route: 'GET /terminal/history', roles: 'MANAGER', throttled: false },
+    // TERM-STAFF-API: the owner-approved self-serve staff-management door.
+    // MANAGER-only on every one of the six, same role axis /staff and
+    // /history already use — see TerminalService's "staff: manager-run
+    // staff management" section for the authority model and floor these
+    // six share. Not throttled: each is scoped to the caller's own company
+    // by construction (the id in the path can only ever resolve inside
+    // that company), so a path id cannot be used to probe another
+    // company's data the way a cross-company lookup could.
+    { controller: 'TerminalController', route: 'POST /terminal/staff/invite', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'POST /terminal/staff/invites/:inviteId/revoke', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'POST /terminal/staff/invites/:inviteId/resend', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'PATCH /terminal/staff/:userId/role', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/locations', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'DELETE /terminal/staff/:userId/locations/:locationId', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/deactivate', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/reactivate', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },

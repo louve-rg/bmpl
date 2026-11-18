@@ -331,6 +331,12 @@ export const AUDIT_ACTIONS = [
   'TERMINAL_COMPANY_MEMBER_REACTIVATED',
   'TERMINAL_COMPANY_MEMBER_LOCATION_GRANTED',
   'TERMINAL_COMPANY_MEMBER_LOCATION_REVOKED',
+  // ---- Terminal Operations, manager-run staff management (TERM-STAFF-API) ----
+  // A manager-run role change (MANAGER<->OPERATOR) on an already-ACTIVE
+  // member — the one operation admin's own door never needed. Same
+  // one-action-per-lifecycle shape as SHIPPING_PROVIDER_MEMBER_CHANGED/
+  // PASSENGER_AFFILIATION_CHANGED; the verb travels in newValue.
+  'TERMINAL_COMPANY_MEMBER_ROLE_CHANGED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

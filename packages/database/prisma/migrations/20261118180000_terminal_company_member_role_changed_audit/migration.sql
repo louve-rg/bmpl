@@ -1,0 +1,24 @@
+-- TERM-STAFF-API: the owner-approved manager-run staff management card adds
+-- one operation admin's own terminal console never needed — changing an
+-- already-ACTIVE member's role between MANAGER and OPERATOR. None of the
+-- 7 existing TERMINAL_COMPANY_* actions (nor any of the ~260 other
+-- AuditAction values) cover a role change; checked before proposing this
+-- one, not assumed.
+--
+-- A NEW action, following the established "one lifecycle, one action, the
+-- verb carried in newValue" shape this schema already uses three times
+-- (PASSENGER_AFFILIATION_CHANGED, SHIPPING_PROVIDER_MEMBER_CHANGED,
+-- PROPERTY_ASSIGNMENT_CHANGED) rather than two role-specific actions —
+-- newValue carries { terminalCompanyId, fromRole, toRole }.
+--
+-- ADD ONLY: nothing in this migration references the new value — Postgres
+-- refuses a transaction that both adds an enum member and uses it (see
+-- packages/database/CLAUDE.md §2). The implementation PR's own code is the
+-- first thing that ever writes this value, at runtime, long after this
+-- migration has committed.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'TERMINAL_COMPANY_MEMBER_ROLE_CHANGED';
