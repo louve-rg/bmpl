@@ -212,7 +212,7 @@ interface StaffInvite {
 interface StaffCompanyLocation {
   id: string;
   isActive: boolean;
-  hub: { id: string; code: string; name: string; district?: string; city?: string };
+  hub: { id: string; code: string; name: string; district: string; city: string };
 }
 
 interface StaffRoster {

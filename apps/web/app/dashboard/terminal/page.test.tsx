@@ -889,6 +889,39 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('This company must always have at least one active manager.');
     });
 
+    // Revoking the company's only manager's last location refuses with its
+    // OWN distinct text, never the membership/role refusal above -- that
+    // write touches neither membership nor role, so it gets its own 409.
+    it("renders the distinct last-location-of-the-only-manager refusal verbatim, never the manager-count text", async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: STAFF_ROSTER,
+        actionStatus: 409,
+        // Verbatim as relayed -- not re-punctuated.
+        actionBody: { message: 'This would leave the companys only manager without access to any location.' },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const revokeBtn = container!.querySelector('button[aria-label="Remove Edward Broaster\'s access to Belize City Hub"]') as HTMLButtonElement;
+      await act(async () => {
+        revokeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(container!.textContent).toContain('This would leave the companys only manager without access to any location.');
+      expect(container!.textContent).not.toContain('This company must always have at least one active manager.');
+      vi.restoreAllMocks();
+    });
+
     it('reactivates an ENDED membership with one POST', async () => {
       const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
