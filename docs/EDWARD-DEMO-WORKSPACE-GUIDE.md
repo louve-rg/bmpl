@@ -6,11 +6,11 @@ here touches San Pedro Elite, your real SP-EL-TER terminal, a real customer,
 or real money. Treat anything this guide describes as something you can try
 freely, because none of it is real.
 
-Most of this guide describes behaviour our own quality-assurance team has
-now watched work on the live, deployed site, using our own test account —
-not something you have tried yourself. A small number of steps are still
-being verified; those are marked **pending confirmation** below, and we will
-update this guide and tell you directly once they clear.
+This guide describes behaviour our own quality-assurance team has watched
+work end to end on the live, deployed site, using our own test accounts —
+not something you have tried yourself. A small number of display issues on
+the Staff screen are still being fixed; those are listed in Section 4, and
+we will update this guide and tell you directly once they clear.
 
 ---
 
@@ -99,58 +99,75 @@ control for that step; it is hidden rather than shown and then refused.
 
 ## 4. Inviting and managing your employees
 
-This feature deployed today. Everything marked **confirmed** below has been
-watched working on the live, deployed site by our own quality-assurance
-team, using our own test account — not by you. As the Manager, a new
-**Staff** tab on your workspace is where you manage your own team.
+This feature deployed today. Everything described below has been watched
+working end to end on the live, deployed site by our own quality-assurance
+team — including, for the invitation itself, by a second real test account
+standing in for a brand-new employee. As the Manager, a new **Staff** tab on
+your workspace is where you manage your own team.
 
-- **Inviting someone — confirmed.** Enter their email, choose whether they
-  join as a Manager or an Operator, and choose which of your locations they
-  get. The invitation appears in a waiting list and is still there after you
-  refresh the page or sign in fresh later. Leaving out a location is refused
-  before anything is even sent; a malformed email address is refused with a
+- **Inviting someone.** Enter their email, choose whether they join as a
+  Manager or an Operator, and choose which of your locations they get. The
+  invitation appears in a waiting list and is still there after you refresh
+  the page or sign in fresh later. Leaving out a location is refused before
+  anything is even sent; a malformed email address is refused with a
   readable message. After sending, the screen tells you plainly whether the
   invitation email actually went out or was only simulated by this demo
   environment (see Section 5).
-- **Resending or revoking an invitation — confirmed.** If an invitation went
-  to the wrong address, or an invited person never acted on it, you can send
-  it again, or cancel it outright — revoking removes it from the waiting
-  list for good.
-- **Changing someone's role — confirmed.** You can move an employee between
-  Manager and Operator, in either direction, at any time.
-- **Ending someone's access — confirmed.** You can end an employee's access
-  entirely. They stay visible on your list with a Restore option, but their
-  access genuinely stops working the moment you end it — it is not just
-  hidden from the screen.
-- **Restoring someone's access — confirmed.** You can restore access for
-  someone you previously ended, and they can use the workspace again.
-- **Granting or revoking access to a specific location — confirmed.** Each
-  active employee can be given access to an additional location, or have
-  access to one specific location removed, independent of anything else
-  about their account. Removing one location only ends their access to that
-  location — it never ends their membership or changes their role.
+- **What actually happens for the person you invite.** We tested this end
+  to end: a Manager invited someone who had no account at all. That person
+  opened the invitation, chose their own name and password, and signed in
+  normally — landing directly in the Terminal Workspace as an Operator, able
+  to see and work the location they'd been granted, with real work waiting
+  for them. As an Operator, they correctly had no Staff tab and no History
+  tab. That is the real, observed shape of taking on a new employee from a
+  standing start.
+- **Opening an invitation link a second time.** If an invitation link is
+  opened again after it has already been used, the person sees a clear
+  message telling them to ask you for a new link, or to sign in normally if
+  they already have an account. This is the mistake a new employee is most
+  likely to make — forwarding or re-clicking an old link — so it's worth
+  warning them about it yourself.
+- **Resending or revoking an invitation.** If an invitation went to the
+  wrong address, or an invited person never acted on it, you can send it
+  again, or cancel it outright — revoking removes it from the waiting list
+  for good.
+- **Changing someone's role.** You can move an employee between Manager and
+  Operator, in either direction, at any time.
+- **Ending someone's access.** You can end an employee's access entirely.
+  They stay visible on your list with a Restore option, but their access
+  genuinely stops working the moment you end it — it is not just hidden from
+  the screen. The screen does not yet ask you to confirm before ending
+  someone's access, so double-check who you've selected before you click it
+  (see below).
+- **Restoring someone's access.** You can restore access for someone you
+  previously ended, and they can use the workspace again.
+- **Granting or revoking access to a specific location.** Each active
+  employee can be given access to an additional location, or have access to
+  one specific location removed, independent of anything else about their
+  account. We watched the effect from the employee's own side, too: after a
+  grant, that location and its real work appear in their queue; after a
+  revoke, nothing does. Removing one location only ends their access to
+  that location — it never ends their membership or changes their role.
+- **The one-Manager floor.** Your company must always have at least one
+  active Manager. We watched this refuse, in a real browser: a sole Manager
+  cannot demote themselves to Operator, cannot end their own access, and
+  cannot remove their own last location. Section 5 says more about what
+  this means for you specifically.
 
 All of the above held up after a page refresh and after signing out and back
 in fresh — it is a real, saved change, not something that looks done and
 then reverts.
 
-A built-in safeguard runs underneath all of this: your company must always
-have at least one active Manager. Section 5 says more about what that means
-for you specifically.
+**Still open on the Staff screen — known, and being fixed; none of these are
+a sign that your action failed:**
 
-**Two things not yet confirmed, so not promised here:**
+- A location's name can show as a blank label.
+- The button to end someone's access can be cut off on a phone screen.
+- A "success" message can linger on screen after you've revoked an
+  invitation.
+- Ending someone's access has no confirmation step yet, as noted above.
 
-- **Whether an invited person can actually accept the invitation and sign in
-  is still being verified.** The inviting side is confirmed; the new
-  employee's own side of it is not, yet.
-- **The Staff screen itself is not finished.** Three display problems are
-  known and being fixed: a location's name can show as a blank label, the
-  button to end someone's access can be cut off on a phone screen, and a
-  "success" message can linger on screen after you've revoked an invitation.
-  None of these affect whether the underlying action actually worked — they
-  are display issues, not refusals — but if something on this screen looks
-  visually wrong, it is probably one of these three, not a sign your action
-  failed. We'll tell you when they're fixed.
+We'll tell you when these are fixed.
 
 ---
 
