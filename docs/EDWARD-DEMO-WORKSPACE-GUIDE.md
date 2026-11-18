@@ -321,13 +321,24 @@ checked directly against what the system actually allows, not assumed.
   and you cannot grant anyone — including yourself — any administrator
   power over BML's platform. This isn't a restriction worth worrying about;
   it's why your staff list is genuinely your own and nobody else's.
-- **Removing your own last manager, or your own last location, if you are
-  currently the company's only active Manager.** The system will refuse to
-  let you end your own access, step down from Manager, or remove your own
-  last location while you're the only one holding the role — it exists to
-  stop the company being left with nobody in charge. You likely won't hit
-  this on purpose, but if you ever do by accident, that refusal is the
-  system working correctly, not something broken.
+- **Changing your own role away from Manager, if you are the company's only
+  active Manager.** This needs another Manager to do it for you — you
+  cannot step yourself down to Operator while you're the only one, and the
+  product will tell you so rather than let you. If you ever genuinely need
+  this done while you remain the only Manager, contact us — but know
+  honestly what it actually involves on our side first: there is no simple
+  role toggle for this case. It means ending your membership and sending
+  you a fresh invitation at the new role, which you would have to accept
+  again, with your location access granted to you again from scratch. It
+  is a real change to how your account works, not a quick switch, so it's
+  worth being sure before you ask.
+- **Ending your own access, or removing your own last location, if you are
+  the company's only active Manager.** The system refuses both the same
+  way and for the same reason — it exists to stop the company being left
+  with nobody in charge. You likely won't hit this on purpose, but if you
+  ever do by accident, that refusal is the system working correctly, not
+  something broken. If you ever genuinely need either done while you're
+  the only Manager, contact us.
 - **Unlocking a parcel after too many wrong codes.** If a collection or
   hand-off code is entered incorrectly enough times, the system locks that
   parcel as a precaution against guessing. Only a BML administrator can clear
