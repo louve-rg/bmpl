@@ -930,6 +930,11 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
      * re-merges the two notes back into one shared sentence fails here
      * specifically.
      */
+    // The only admin-console route to a role change is end-membership plus a fresh invite
+    // at the new role. That is not a role change: the person loses the membership itself,
+    // has to accept an invitation again, and their terminal-location grant rows are left
+    // behind as history rather than carried across. Naming an administrator in this note
+    // would promise a direct action we do not perform -- do not restore the word here.
     it('never mentions an administrator in the role-change note -- no admin endpoint can change a role today', async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
       await mount();
