@@ -353,6 +353,31 @@ describe('TERM-STAFF-API: deactivate / reactivate', () => {
   });
 
   /**
+   * FIN-REGRESSION delta: the role-change door above already proves this
+   * boundary ("with exactly two managers, demoting one... succeeds"); the
+   * deactivate door never had the equivalent. Added for symmetry and
+   * because it is the only way left to exercise the floor's NON-firing
+   * boundary against a genuinely different (non-self) target now that
+   * FIN-SELF-LOCKOUT's self guard answers every self case first — see the
+   * mutual-distinctness test at the end of this file for why the floor's
+   * FIRING branch can no longer be reached by a non-self actor at all.
+   */
+  it('with exactly two managers, deactivating one (non-self) succeeds — one manager remaining is not the floor', async () => {
+    const { company, loc } = await makeCompanyWithLocation('TwoManagersDeactivate');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    const m2 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await post(m1.cookies, `terminal/staff/${m2.userId}/deactivate`, {});
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ ended: true });
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m2.userId } },
+    });
+    expect(row.status).toBe('ENDED');
+  });
+
+  /**
    * FIN-SELF-LOCKOUT: ending ONESELF is refused by its OWN guard, checked
    * before the last-manager floor — same two-guards-not-one reasoning as
    * the role-change self-demote tests above. A lone manager self-ending
@@ -428,6 +453,57 @@ describe('TERM-STAFF-API: deactivate / reactivate', () => {
     const reactivateRes = await post(operator.cookies, `terminal/staff/${other.userId}/reactivate`, {});
     expect(reactivateRes.status).toBe(403);
     expect(reactivateRes.body.message).toBe(ROLE_MESSAGE);
+  });
+});
+
+describe('FIN-REGRESSION: the self-lockout and floor refusals are mutually distinct, by substance not by a pinned sentence', () => {
+  /**
+   * The owner's own concern, named explicitly: a test that accepts any
+   * refusal would pass while the two self-lockout messages collapsed into
+   * the floor's wording, or into each other. Compared LIVE, against each
+   * other, never against a literal string this test writes itself -- the
+   * exact self-end sentence is about to change (an "administrator" clause
+   * is being added), and a test pinned to today's wording would break on
+   * that edit and prove nothing about the thing that actually matters:
+   * that three genuinely different failures render three genuinely
+   * different messages.
+   *
+   * FLOOR_MESSAGE (the company-wide "at least one active manager" 409) is
+   * deliberately NOT one of the three live triggers below. It cannot be —
+   * `assertManagerFloorHolds` is only ever reached from staffChangeRole/
+   * staffDeactivateMember on the NON-SELF branch (the self guard throws
+   * first for any self-target, before the transaction that calls it even
+   * opens), and a non-self target can never bring the active-manager count
+   * to <=1: the caller must themselves be an ACTIVE MANAGER of that same
+   * company to reach either method at all, so caller != target already
+   * means at least two managers are counted. That was true before
+   * FIN-SELF-LOCKOUT too — the floor's FIRING branch was always only
+   * reachable by a lone manager acting on themselves, which the self guard
+   * now intercepts first. So FLOOR_MESSAGE is checked only as the fixed
+   * string already declared above, confirming no live message below
+   * accidentally collapses onto it — not as a fourth live trigger, because
+   * no live request through these two doors can produce it anymore.
+   */
+  it('self-demote, self-end, and the location floor each produce a DIFFERENT live refusal message', async () => {
+    const demoteFixture = await makeCompanyWithLocation('DistinctSelfDemote');
+    const demoteManager = await inviteAndAccept(demoteFixture.company.id, [demoteFixture.loc.id], 'MANAGER');
+    const selfDemoteRes = await patch(demoteManager.cookies, `terminal/staff/${demoteManager.userId}/role`, { memberRole: 'OPERATOR' });
+    expect(selfDemoteRes.status).toBe(403);
+
+    const endFixture = await makeCompanyWithLocation('DistinctSelfEnd');
+    const endManager = await inviteAndAccept(endFixture.company.id, [endFixture.loc.id], 'MANAGER');
+    const selfEndRes = await post(endManager.cookies, `terminal/staff/${endManager.userId}/deactivate`, {});
+    expect(selfEndRes.status).toBe(403);
+
+    const locFixture = await makeCompanyWithLocation('DistinctLocationFloor');
+    const locManager = await inviteAndAccept(locFixture.company.id, [locFixture.loc.id], 'MANAGER');
+    const locationFloorRes = await del(locManager.cookies, `terminal/staff/${locManager.userId}/locations/${locFixture.loc.id}`);
+    expect(locationFloorRes.status).toBe(409);
+
+    const messages: unknown[] = [selfDemoteRes.body.message, selfEndRes.body.message, locationFloorRes.body.message];
+    expect(messages.every((m) => typeof m === 'string' && m.length > 0)).toBe(true);
+    expect(new Set(messages).size).toBe(3);
+    expect(messages).not.toContain(FLOOR_MESSAGE);
   });
 });
 
