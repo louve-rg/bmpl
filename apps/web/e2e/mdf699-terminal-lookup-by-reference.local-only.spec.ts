@@ -190,14 +190,15 @@ async function waitForWorkspaceLoaded(page: Page): Promise<void> {
 }
 
 /**
- * The two simulation hubs' own district/city, read from their seed rows
- * (`packages/database/prisma/seed-uat-logistics.ts` HUB_A/HUB_B) rather
- * than assumed. `resolveHub` (`route-planner.ts`) matches a door to a hub
- * by district first, then city -- these are the ONLY two districts this
- * simulation network has a hub in, so every door below resolves to one of
- * exactly these two hubs, never a third.
+ * hubB's own district/city, read from its seed row
+ * (`packages/database/prisma/seed-uat-logistics.ts` HUB_B) rather than
+ * assumed. `resolveHub` (`route-planner.ts`) matches a door to a hub by
+ * district first, then city. Only hubB's coverage is still needed below --
+ * hubA's own (`city: 'Belize City', district: 'BELIZE'`) was this
+ * constant's other half until god's ruling removed its last caller; see
+ * the comment above "An unknown reference gets 404..." for why no
+ * hubA-coverage door construction survived.
  */
-const HUBA_COVERAGE_DOOR = { city: 'Belize City', district: 'BELIZE' } as const;
 const HUBB_COVERAGE_DOOR = { city: 'Belmopan', district: 'CAYO' } as const;
 
 /**
@@ -276,33 +277,52 @@ test('A terminal staff member can look up a reference at their own hub and gets 
   expect(leakedKeys, `response must never carry a code/PIN/token field, found: ${leakedKeys.join(', ')}`).toEqual([]);
 });
 
-test('A reference belonging to another terminal is refused on lookup with a real 403, never a silent empty result', async ({ browser }) => {
-  test.setTimeout(60_000);
-  // BLOCKED (god, conv-eb30f0, 2026-11-18): this test's own premise --
-  // "staff holds ONLY hubA, book a shipment that touches ONLY hubB" -- has
-  // no construction that both books successfully AND touches exactly one
-  // hub, in this two-hub simulation network. A door inside hubB's own
-  // coverage is LOCAL_DELIVERY (rejected, confirmed live); a door outside
-  // it (hubA's coverage) touches hubA too via the LAST_MILE leg, which is
-  // the exact 200-instead-of-403 this test already caught. Left pointed at
-  // hubA's coverage (the ORIGINAL shape) so the failure stays the one
-  // already reported, not a new one, until god decides between adding a
-  // third simulation hub or accepting a different proof.
-  const adminPage = await adminPageFromCache(browser);
-  const { hubA, hubB } = await findHubs(adminPage);
-  // Staff holds ONLY hubA. Book a shipment that touches ONLY hubB.
-  const { email } = await createTerminalStaff(adminPage, 'WrongHub', hubA.id);
-
-  const customerPage = await customerPageFromCache(browser);
-  const { reference } = await bookHubToDoor(customerPage, hubB.id, `Mdf699WrongHub ${stamp}`, HUBA_COVERAGE_DOOR);
-
-  const staffPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-
-  const lookup = await getJson<Record<string, unknown>>(staffPage, `/terminal/shipments/${encodeURIComponent(reference)}`);
-  expect(lookup.status, 'a real shipment at a DIFFERENT terminal must be a real 403, not a 200 with empty/null fields').toBe(403);
-  expect('reference' in lookup.body, '403 body must not leak the shipment payload').toBe(false);
-});
+/**
+ * RULED OUT (god, 2026-11-18, conv-904e67): the mismatch arm of
+ * `touchesMyHub` -- "a real shipment at a DIFFERENT real terminal" -- has
+ * no reachable construction in this environment, checked deliberately,
+ * not left untested by oversight.
+ *
+ * `lookupForTerminal` (`shipment.service.ts:5920-5958`) grants access on
+ * `shipment.legs.some(l => hubIds.includes(l.originHubId) ||
+ * hubIds.includes(l.destinationHubId))` -- ONE predicate with two ways to
+ * fail it: no hub at all (the null-guard arm, already exercised by "An
+ * unknown reference gets 404, and a DIRECT (no-hub) reference gets the
+ * same 403..." above), or a real hub that just isn't mine (the mismatch
+ * arm, this test's premise). Both arms throw the identical
+ * ForbiddenException message, which is why "The Lookup tab shows the
+ * server's own refusal message verbatim" below only needs the null-guard
+ * arm to prove its own point in full.
+ *
+ * Checked, at god's instruction, whether a hub existed outside the
+ * UATBC/UATBP pair that could stand in for "a different real terminal"
+ * with zero seed change: queried `GET /admin/logistics/hubs` against this
+ * environment directly. Five hubs exist: `REHBC`/`REHSP` (Rehearsal Belize
+ * City / Rehearsal San Pedro, `isTest:false` -- the DEMO company this
+ * floor is explicitly keeping hands off, and wrong side of the isTest
+ * boundary regardless), `UATBC`/`UATBP` (the known pair), and `QAOVF` (QA
+ * Overflow Test Terminal, `isTest:true` but `isActive:false` -- excluded
+ * by `planRoute`'s own `activeHubs = hubs.filter(h => h.isActive)`, and
+ * even active it shares hubA's own Belize City/BELIZE district, so it
+ * would not isolate hubB either). No qualifying hub exists today.
+ *
+ * `seed-uat-logistics.ts` seeds exactly `UATBC` (Belize City/BELIZE) and
+ * `UATBP` (Belmopan/CAYO), one LAND route between them, nothing else.
+ * `resolveHub` (`route-planner.ts:411-437`) resolves a door by district,
+ * narrowed to city -- so every door in this simulation network resolves to
+ * one of those two hubs, never a third. `planRoute`'s `LOCAL_DELIVERY`
+ * check (`route-planner.ts:241-246`, `originHub.id === destinationHub.id`)
+ * then means a HUB_TO_DOOR booking either lands back on its own origin hub
+ * (rejected outright, no shipment created) or reaches the OTHER hub via a
+ * LAST_MILE leg (touching both, not one) -- there is no door that reaches
+ * a second hub while leaving the first untouched.
+ *
+ * Reachable again the moment either holds: a third ACTIVE, isTest hub is
+ * added to the simulation network in a district neither UATBC nor UATBP
+ * covers (an explicit product/seed decision, not made here -- god's
+ * ruling was no seed change for this card); or `QAOVF` is made active in a
+ * district of its own.
+ */
 
 test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the same 403 as the wrong-terminal case', async ({ browser }) => {
   test.setTimeout(60_000);
@@ -377,25 +397,40 @@ test('A terminal staff member can look up a reference at their own hub through t
 
 test('The Lookup tab shows the server\'s own refusal message verbatim, never a paraphrase or a silent empty result', async ({ browser }) => {
   test.setTimeout(60_000);
-  // BLOCKED (god, conv-eb30f0, 2026-11-18) -- same unresolved premise as
-  // "A reference belonging to another terminal is refused...": no door
-  // choice makes a HUB_TO_DOOR booking from hubB touch only hubB in this
-  // two-hub network. See that test's own comment and bookHubToDoor's doc
-  // comment for the full trace. Left pointed at hubA's coverage so this
-  // keeps failing the same already-reported way, not a new one.
+  // REPOINTED (god's ruling, 2026-11-18, conv-904e67): this test only
+  // checks that the 403 COPY renders verbatim -- it never tested which arm
+  // of `touchesMyHub` raised it, and both arms throw the identical
+  // message ("This shipment is not at one of your terminal locations.",
+  // confirmed one `ForbiddenException` site in `lookupForTerminal`). The
+  // DIRECT (no-hub) shape used below is the SAME construction "An unknown
+  // reference gets 404, and a DIRECT (no-hub) reference gets the same
+  // 403..." above already proves reachable, so this test's own purpose
+  // survives completely intact without the wrong-terminal (hubB) shape
+  // that no door choice can produce in this two-hub network -- see the
+  // comment just above "An unknown reference..." for that trace in full.
   const adminPage = await adminPageFromCache(browser);
-  const { hubA, hubB } = await findHubs(adminPage);
+  const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'UiWrongHub', hubA.id);
 
   const customerPage = await customerPageFromCache(browser);
-  const { reference: wrongTerminalRef } = await bookHubToDoor(customerPage, hubB.id, `Mdf699UiWrongHub ${stamp}`, HUBA_COVERAGE_DOOR);
+  const doorToDoor = {
+    service: 'DOOR_TO_DOOR',
+    origin: { name: 'Sender', phone: '501-222-7096', address: '3 MDF-699 UI Sender Road', city: 'Belize City', district: 'BELIZE' },
+    destination: { name: `Mdf699UiWrongHub ${stamp}`, phone: '501-222-7095', address: '4 MDF-699 UI Recipient Road', city: 'Belize City', district: 'BELIZE' },
+    pieces: 1,
+    description: `MDF-699 UI DIRECT fixture ${stamp}`,
+    payWithWallet: true,
+  };
+  await postWithCsrf(customerPage, '/shipping/quote', doorToDoor);
+  const created = await postWithCsrf<{ reference: string }>(customerPage, '/shipping', doorToDoor);
+  expect(created.status, `DOOR_TO_DOOR booking failed: ${JSON.stringify(created.body)}`).toBe(201);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
   await staffPage.goto(`${WEB}/dashboard/terminal`);
   await waitForWorkspaceLoaded(staffPage);
 
-  await lookupViaTab(staffPage, wrongTerminalRef);
+  await lookupViaTab(staffPage, created.body.reference);
   await expect(
     staffPage.getByText('This shipment is not at one of your terminal locations.'),
     'god\'s own ruling: a customer at the wrong terminal must be told their parcel is real and elsewhere, never that it does not exist',
