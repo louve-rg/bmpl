@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { hashPassword, hashToken, issueToken } from '@bmpl/authentication';
+import { isSelfAction } from '@bmpl/authorization';
 import { templates } from '@bmpl/notifications';
 import type {
   AcceptTerminalInviteInput,
@@ -734,9 +735,29 @@ export class TerminalService {
    * so a demote-to-the-same-role request against the last manager is
    * refused exactly like a real demote would be, never silently accepted
    * as "nothing changed."
+   *
+   * FIN-SELF-LOCKOUT: a MANAGER demoting THEMSELVES to OPERATOR is refused
+   * unconditionally, before the floor check even runs — this is a
+   * different guard from `assertManagerFloorHolds` below, not a special
+   * case of it. The floor is about the COMPANY (never zero active
+   * managers); this is about the ACTOR (never remove your own standing
+   * through the routine self-service door). They can both fire on the
+   * same request — a lone manager demoting themselves would trip the
+   * floor too — but the self guard is checked first, so the caller always
+   * sees the mistake that is actually theirs to fix: ask another manager,
+   * not "the company has no other manager." There is no
+   * ownership-transfer workflow in this codebase, so there is no
+   * legitimate case where a manager must be allowed to demote themselves
+   * — the refusal has no exception path by design (owner's directive).
+   * A MANAGER may still freely promote themselves to MANAGER (a no-op) or
+   * be demoted by a DIFFERENT manager; only self-targeted self-demotion is
+   * blocked here.
    */
   async staffChangeRole(actorId: string, targetUserId: string, dto: ChangeTerminalCompanyMemberRoleInput) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    if (isSelfAction(actorId, targetUserId) && dto.memberRole === 'OPERATOR') {
+      throw new ForbiddenException('You cannot demote your own role from manager to operator. Ask another manager to do this for you.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
         where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },
@@ -829,11 +850,23 @@ export class TerminalService {
     });
   }
 
-  /** Self-serve mirror of `endMember`, guarded by the same floor as
-   *  `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
-   *  refused, whether the caller is ending themself or someone else. */
+  /**
+   * Self-serve mirror of `endMember`, guarded by the same last-ACTIVE-MANAGER
+   * floor as `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
+   * refused regardless of who is ending whom.
+   *
+   * FIN-SELF-LOCKOUT: on top of that floor, a MANAGER ending THEIR OWN
+   * membership is refused unconditionally, checked first and before the
+   * floor — same two-guards-not-one reasoning as `staffChangeRole` above.
+   * A company with several active managers never trips the floor, but a
+   * manager still cannot end their own access through this door; only a
+   * DIFFERENT manager (or the admin console's `endMember`) can.
+   */
   async staffDeactivateMember(actorId: string, targetUserId: string) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    if (isSelfAction(actorId, targetUserId)) {
+      throw new ForbiddenException('You cannot end your own terminal company membership. Ask another manager to do this for you.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
         where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },

@@ -18,6 +18,13 @@
  *    like a location that does not exist at all — proving reach is
  *    impossible by construction, not merely blocked by a check that could
  *    be bypassed with a different id shape.
+ *  - FIN-SELF-LOCKOUT: self-demote (role change) and self-end (deactivate)
+ *    are refused UNCONDITIONALLY for the actor acting on themselves, by a
+ *    guard separate from and checked before the last-manager floor above —
+ *    proven both in the lone-manager case (where the floor would also
+ *    fire, but the self message wins) and with a second active manager
+ *    standing by (where the floor alone would not fire, proving this is
+ *    not a floor special case).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -36,6 +43,9 @@ const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).
 const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
+// FIN-SELF-LOCKOUT
+const SELF_DEMOTE_MESSAGE = 'You cannot demote your own role from manager to operator. Ask another manager to do this for you.';
+const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Ask another manager to do this for you.';
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -161,16 +171,49 @@ describe('TERM-STAFF-API: PATCH /terminal/staff/:userId/role', () => {
     expect(res.body.memberRole).toBe('OPERATOR');
   });
 
-  it('a lone MANAGER cannot demote themselves to OPERATOR — self-demotion is restricted by the SAME floor, not a separate "is it me" rule', async () => {
+  /**
+   * FIN-SELF-LOCKOUT: a MANAGER demoting THEMSELVES is refused
+   * unconditionally — a SEPARATE guard from the last-manager floor, checked
+   * first, with its OWN message. A lone manager self-demoting trips BOTH
+   * guards (floor count is also 1), but the self guard answers first, so
+   * the caller sees the mistake that is theirs to fix ("ask another
+   * manager"), never the company-wide floor text. Supersedes the old
+   * "restricted by the SAME floor, not a separate 'is it me' rule" framing
+   * this test used to assert — the owner's directive now requires exactly
+   * the separate "is it me" rule that comment said didn't exist.
+   */
+  it('a lone MANAGER cannot demote themselves to OPERATOR — refused by the self guard, not the floor', async () => {
     const { company, loc } = await makeCompanyWithLocation('SelfDemoteLast');
     const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
 
     const res = await patch(manager.cookies, `terminal/staff/${manager.userId}/role`, { memberRole: 'OPERATOR' });
-    expect(res.status).toBe(409);
-    expect(res.body.message).toBe(FLOOR_MESSAGE);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_DEMOTE_MESSAGE);
+    expect(res.body.message).not.toBe(FLOOR_MESSAGE);
 
     const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
       where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(row.memberRole).toBe('MANAGER');
+  });
+
+  /**
+   * The genuinely new case the floor alone could never prove: with a SECOND
+   * active manager standing by (so the floor would not fire), self-demotion
+   * is still refused — the guard is unconditional for self, not a
+   * last-manager special case.
+   */
+  it('a MANAGER cannot demote themselves even with another active manager standing by', async () => {
+    const { company, loc } = await makeCompanyWithLocation('SelfDemoteNotLast');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await patch(m1.cookies, `terminal/staff/${m1.userId}/role`, { memberRole: 'OPERATOR' });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_DEMOTE_MESSAGE);
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m1.userId } },
     });
     expect(row.memberRole).toBe('MANAGER');
   });
@@ -308,16 +351,46 @@ describe('TERM-STAFF-API: deactivate / reactivate', () => {
     expect(res.body).toEqual({ ended: true });
   });
 
-  it('deactivating the company\'s ONLY active manager is refused — including ending oneself', async () => {
+  /**
+   * FIN-SELF-LOCKOUT: ending ONESELF is refused by its OWN guard, checked
+   * before the last-manager floor — same two-guards-not-one reasoning as
+   * the role-change self-demote tests above. A lone manager self-ending
+   * trips both guards (floor count is also 1); the self guard answers
+   * first. Supersedes the old "refused ... including ending oneself"
+   * framing this test used to assert as a single floor outcome.
+   */
+  it('a lone MANAGER cannot end their own membership — refused by the self guard, not the floor', async () => {
     const { company, loc } = await makeCompanyWithLocation('DeactivateLast');
     const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
 
     const res = await post(manager.cookies, `terminal/staff/${manager.userId}/deactivate`, {});
-    expect(res.status).toBe(409);
-    expect(res.body.message).toBe(FLOOR_MESSAGE);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_END_MESSAGE);
+    expect(res.body.message).not.toBe(FLOOR_MESSAGE);
 
     const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
       where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(row.status).toBe('ACTIVE');
+  });
+
+  /**
+   * The genuinely new case the floor alone could never prove: with a
+   * SECOND active manager standing by (so the floor would not fire),
+   * self-ending is still refused — unconditional for self, not a
+   * last-manager special case.
+   */
+  it('a MANAGER cannot end their own membership even with another active manager standing by', async () => {
+    const { company, loc } = await makeCompanyWithLocation('SelfEndNotLast');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await post(m1.cookies, `terminal/staff/${m1.userId}/deactivate`, {});
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_END_MESSAGE);
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m1.userId } },
     });
     expect(row.status).toBe('ACTIVE');
   });
