@@ -1125,6 +1125,74 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(option).toBeDefined();
       expect(option!.disabled).toBe(true);
     });
+
+    /**
+     * TERM-STAFF-ROBUST: Stanley caught this screen crashing to the root
+     * error boundary against an API build that predates the top-level
+     * `locations` field (`GET /terminal/staff` returning `{members,
+     * pendingInvites}` with no `locations` key at all, not even `[]`) --
+     * `staff.locations.filter(...)` on `undefined`. Everything that does
+     * NOT depend on the missing field -- the member list, role controls,
+     * end/reactivate, and each member's own already-granted locations with
+     * working revoke -- must still render and work.
+     */
+    it('does not crash when the API response has no top-level locations field at all, and keeps the rest of the roster working', async () => {
+      const oldShapeRoster = { members: STAFF_ROSTER.members, pendingInvites: STAFF_ROSTER.pendingInvites };
+      const calls = stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: oldShapeRoster });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      // Positive control: no render threw to the root error boundary.
+      expect(container!.textContent).not.toContain('Something went wrong');
+      expect(container!.textContent).toContain('Edward Broaster');
+      expect(container!.textContent).toContain('Rosa Chi');
+      expect(container!.textContent).toContain('Granted at: Belize City Hub');
+
+      // Role/membership controls, which depend on nothing in `locations`,
+      // still work.
+      await clickButton('Set as operator');
+      const roleCall = calls.find((c) => c.url.includes('/terminal/staff/user_1/role') && c.method === 'PATCH');
+      expect(roleCall?.body).toEqual({ memberRole: 'OPERATOR' });
+
+      // A member's own already-granted location (not the missing
+      // company-wide list) still renders and its revoke still works.
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const revokeBtn = container!.querySelector("button[aria-label=\"Remove Edward Broaster's access to Belize City Hub\"]") as HTMLButtonElement;
+      expect(revokeBtn).toBeTruthy();
+      await act(async () => {
+        revokeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      const revokeCall = calls.find((c) => c.url.includes('/terminal/staff/user_1/locations/loc_1') && c.method === 'DELETE');
+      expect(revokeCall).toBeDefined();
+      vi.restoreAllMocks();
+    });
+
+    it('says the location list is unavailable, not a silently-empty picker that looks like a company with no locations', async () => {
+      const oldShapeRoster = { members: STAFF_ROSTER.members, pendingInvites: STAFF_ROSTER.pendingInvites };
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: oldShapeRoster });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      // Per-member grant picker: an honest note, not a vanished control and
+      // not the genuinely-no-locations-to-grant case (which renders nothing).
+      expect(container!.textContent).toContain('Location list is unavailable right now -- refresh to grant a location.');
+      expect(container!.querySelector('select[aria-label="Grant Edward Broaster a location"]')).toBeNull();
+
+      // Invite form: same honest copy, Send invite disabled, no checklist
+      // claiming the company genuinely has zero locations.
+      expect(container!.textContent).toContain('Location list is unavailable right now -- refresh to try again.');
+      expect(container!.textContent).not.toContain('No locations to grant.');
+      expect(container!.textContent).not.toContain('No active locations exist yet');
+      const sendInvite = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Send invite') as HTMLButtonElement;
+      expect(sendInvite.disabled).toBe(true);
+    });
   });
 
   // MDF-777 (history): the MANAGER-only History tab, GET /terminal/history
@@ -1665,6 +1733,41 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       });
 
       expect(container!.textContent).toContain('BML-1');
+      expect(container!.textContent).not.toContain('Could not load your queue.');
+    });
+
+    /**
+     * REL-QUEUE-ERR-GENERIC-MASK: every existing 500-path test above hands
+     * the stub a body that already says "Could not load your queue." --
+     * which is this screen's own fallback text, not what the API actually
+     * sends for an unhandled 500. A real crash reaches the browser as
+     * Nest's own unhandled-exception shape, `{statusCode:500, message:
+     * "Internal server error"}` -- and since that message is non-null,
+     * `errMessage`'s `?? fallback` never fires, so the generic placeholder
+     * reached the user instead of the specific, actionable fallback this
+     * screen was written to show.
+     */
+    it('shows its own fallback, not the frameworks generic placeholder, on an unhandled 500', async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: { statusCode: 500, message: 'Internal server error' } });
+      await mount();
+
+      expect(container!.textContent).toContain('Could not load your queue.');
+      expect(container!.textContent).not.toContain('Internal server error');
+    });
+
+    it("shows its own fallback on a 500 whose body carries no message field at all -- not just Nest's exact placeholder", async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: {} });
+      await mount();
+
+      expect(container!.textContent).toContain('Could not load your queue.');
+      expect(container!.textContent).not.toContain('Request failed');
+    });
+
+    it('still renders a real business refusal verbatim on a 500 -- only the frameworks own generic text is replaced', async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: { message: 'Your terminal company has been suspended.' } });
+      await mount();
+
+      expect(container!.textContent).toContain('Your terminal company has been suspended.');
       expect(container!.textContent).not.toContain('Could not load your queue.');
     });
   });

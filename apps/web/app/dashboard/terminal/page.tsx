@@ -218,7 +218,10 @@ interface StaffCompanyLocation {
 interface StaffRoster {
   members: StaffMember[];
   pendingInvites: StaffInvite[];
-  locations: StaffCompanyLocation[];
+  // TERM-STAFF-ROBUST: optional, not required -- an API build that predates
+  // this field omits it entirely rather than sending `[]`, and the render
+  // below must survive that, not assume the contract is always current.
+  locations?: StaffCompanyLocation[];
 }
 
 interface LookupHubRef {
@@ -342,8 +345,38 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
 
 type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' | 'HISTORY' | 'LOOKUP';
 
+/**
+ * REL-QUEUE-ERR-GENERIC-MASK: a 500 with no specific cause reaches here as
+ * one of two hardcoded placeholders, neither a reason anyone can act on --
+ * since neither is null, the `?? fallback` below would otherwise never
+ * fire, and the generic text would always beat this screen's own
+ * human-readable fallback:
+ *   - "Internal server error" -- Nest's own UNKNOWN_EXCEPTION_MESSAGE
+ *     constant (@nestjs/core/constants.js), sent for any unhandled
+ *     exception. Verified against the exact resolved version in this repo's
+ *     lockfile: @nestjs/core@10.4.22.
+ *   - "Request failed" -- lib/api.ts's OWN fallback (`raw = data?.message
+ *     ?? 'Request failed'`) for a 500 whose body carries no `message` field
+ *     at all, e.g. an empty body.
+ * A real business refusal (400/403/404/409, or even a 500 the API gave an
+ * actual reason for) is a real reason and still renders verbatim, unchanged.
+ *
+ * KNOWN COUPLING, NOT ELIMINATED: this is a hardcoded string match against a
+ * framework constant and our own client-side constant, same as the trap
+ * found in the pre-existing tests this change replaces. If a future Nest
+ * upgrade changes UNKNOWN_EXCEPTION_MESSAGE's text, or lib/api.ts's own
+ * 'Request failed' literal changes, this condition silently stops firing --
+ * the generic text reaches the user again, and the tests below, which key
+ * on these same two literals, stay green throughout. There is nothing
+ * better to key on here, since the server always supplies *some* message;
+ * the next reader should know this is a live, accepted gap, not an
+ * oversight.
+ */
+const GENERIC_SERVER_FAILURE_MESSAGES = new Set(['Internal server error', 'Request failed']);
 function errMessage(e: unknown, fallback: string): string {
-  return (e as ApiError)?.message ?? fallback;
+  const err = e as ApiError | undefined;
+  if (err?.status === 500 && err.message !== undefined && GENERIC_SERVER_FAILURE_MESSAGES.has(err.message)) return fallback;
+  return err?.message ?? fallback;
 }
 
 const when = (iso: string | null | undefined) =>
@@ -1735,7 +1768,18 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
     });
   }
 
-  const activeLocationCount = staff.locations.filter((l) => l.isActive).length;
+  /**
+   * TERM-STAFF-ROBUST: Stanley caught this screen crashing to the root error
+   * boundary against an API build that hasn't shipped the top-level
+   * `locations` field yet -- `staff.locations.filter(...)` on `undefined`,
+   * confirmed by reading the code, not guessed. `null` here means "the API
+   * didn't send a location list at all" and is kept distinct from `[]`
+   * ("it sent one and it's genuinely empty") throughout this component, so
+   * the two degrade differently rather than looking like the same thing.
+   */
+  const locations = staff.locations ?? null;
+  const activeLocationCount = locations ? locations.filter((l) => l.isActive).length : 0;
+  const locationsUnavailable = locations === null;
 
   return (
     <div>
@@ -1819,9 +1863,16 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 </>
               )}
 
+              {m.status === 'ACTIVE' && locationsUnavailable && (
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
+                  Location list is unavailable right now -- refresh to grant a location.
+                </p>
+              )}
+
               {m.status === 'ACTIVE' &&
+                !locationsUnavailable &&
                 (() => {
-                  const grantable = staff.locations.filter((l) => !m.locations.some((ml) => ml.id === l.id));
+                  const grantable = locations!.filter((l) => !m.locations.some((ml) => ml.id === l.id));
                   if (grantable.length === 0) return null;
                   return (
                     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -1885,13 +1936,21 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
         <Field
           label="Locations (at least one -- a role alone never grants access)"
           htmlFor="staff-invite-locations"
-          hint={activeLocationCount === 0 ? 'No active locations exist yet -- ask a BML administrator to attach one first.' : undefined}
+          hint={
+            locationsUnavailable
+              ? 'Location list is unavailable right now -- refresh to try again.'
+              : activeLocationCount === 0
+                ? 'No active locations exist yet -- ask a BML administrator to attach one first.'
+                : undefined
+          }
         >
           <div id="staff-invite-locations" className="space-y-1 rounded-bmpl-md border border-slate-200 p-2">
-            {staff.locations.length === 0 ? (
+            {locationsUnavailable ? (
+              <p className="text-xs text-[color:var(--bmpl-text-muted)]">Location list is unavailable right now -- refresh to try again.</p>
+            ) : locations!.length === 0 ? (
               <p className="text-xs text-[color:var(--bmpl-text-muted)]">No locations to grant.</p>
             ) : (
-              staff.locations.map((l) => (
+              locations!.map((l) => (
                 <label key={l.id} className={`flex items-center gap-2 text-sm ${l.isActive ? '' : 'text-[color:var(--bmpl-text-muted)]'}`}>
                   <input
                     type="checkbox"
