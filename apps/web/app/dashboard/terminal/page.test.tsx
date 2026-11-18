@@ -1667,6 +1667,33 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('BML-1');
       expect(container!.textContent).not.toContain('Could not load your queue.');
     });
+
+    /**
+     * REL-QUEUE-ERR-GENERIC-MASK: every existing 500-path test above hands
+     * the stub a body that already says "Could not load your queue." --
+     * which is this screen's own fallback text, not what the API actually
+     * sends for an unhandled 500. A real crash reaches the browser as
+     * Nest's own unhandled-exception shape, `{statusCode:500, message:
+     * "Internal server error"}` -- and since that message is non-null,
+     * `errMessage`'s `?? fallback` never fires, so the generic placeholder
+     * reached the user instead of the specific, actionable fallback this
+     * screen was written to show.
+     */
+    it('shows its own fallback, not the frameworks generic placeholder, on an unhandled 500', async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: { statusCode: 500, message: 'Internal server error' } });
+      await mount();
+
+      expect(container!.textContent).toContain('Could not load your queue.');
+      expect(container!.textContent).not.toContain('Internal server error');
+    });
+
+    it('still renders a real business refusal verbatim on a 500 -- only the frameworks own generic text is replaced', async () => {
+      stubFetch({ queueStatus: 500, queueErrorBody: { message: 'Your terminal company has been suspended.' } });
+      await mount();
+
+      expect(container!.textContent).toContain('Your terminal company has been suspended.');
+      expect(container!.textContent).not.toContain('Could not load your queue.');
+    });
   });
 
   // DEMO-UI-POLISH (Stanley's browser acceptance test against production,

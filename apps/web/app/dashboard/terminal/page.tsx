@@ -342,8 +342,19 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
 
 type TabKey = 'OVERVIEW' | 'INBOUND' | 'CUSTODY' | QueueRow['action'] | 'STAFF' | 'HISTORY' | 'LOOKUP';
 
+/**
+ * REL-QUEUE-ERR-GENERIC-MASK: a 500 with no specific cause reaches here as
+ * the framework's own unhandled-exception placeholder ("Internal server
+ * error"), not a reason anyone can act on -- since it is never null, the
+ * `?? fallback` below would otherwise never fire, and the generic text
+ * would always beat this screen's own human-readable fallback. A real
+ * business refusal (400/403/404/409, or even a 500 the API gave an actual
+ * reason for) is a real reason and still renders verbatim, unchanged.
+ */
 function errMessage(e: unknown, fallback: string): string {
-  return (e as ApiError)?.message ?? fallback;
+  const err = e as ApiError | undefined;
+  if (err?.status === 500 && err.message === 'Internal server error') return fallback;
+  return err?.message ?? fallback;
 }
 
 const when = (iso: string | null | undefined) =>
