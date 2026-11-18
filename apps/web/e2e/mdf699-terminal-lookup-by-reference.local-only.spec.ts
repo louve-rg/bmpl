@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
 import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
 
 /**
@@ -101,6 +101,51 @@ async function adminLogin(page: Page): Promise<void> {
   expect(await tryLogin(page, ADMIN_EMAIL, ADMIN_PASSWORD!), 'admin login failed -- hard stop, not a skip').toBeTruthy();
 }
 
+/**
+ * MDF-705 follow-up (god, 2026-11-18): this file's 6 tests used to log in
+ * as admin AND customer fresh in nearly every one -- 17 real `/auth/login`
+ * POSTs in well under 60s, which collides with `/auth/login`'s own
+ * `@StrictThrottle()` (limit 10/60s, `THROTTLE_AUTH_LIMIT`/
+ * `THROTTLE_TTL_SECONDS`, `auth.controller.ts`/`throttle.decorators.ts`)
+ * and failed tests 5/6 with "admin login failed" that had nothing to do
+ * with the product. Fix is on this side, not the throttle (explicitly not
+ * to be raised or special-cased): log in as admin once and as customer
+ * once for the whole file, capture `storageState`, and hand every test a
+ * context built FROM that state instead of a fresh login. Staff accounts
+ * stay a real login per test -- each one is a genuinely distinct account
+ * created by that test, so there is nothing to reuse there.
+ */
+let adminStorageState: Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>;
+let customerStorageState: Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>;
+
+test.beforeAll(async ({ browser }: { browser: Browser }) => {
+  const adminSetupCtx = await browser.newContext();
+  await adminLogin(await adminSetupCtx.newPage());
+  adminStorageState = await adminSetupCtx.storageState();
+  await adminSetupCtx.close();
+
+  const customerSetupCtx = await browser.newContext();
+  expect(await tryLogin(await customerSetupCtx.newPage(), UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  customerStorageState = await customerSetupCtx.storageState();
+  await customerSetupCtx.close();
+});
+
+// storageState restores cookies, not navigation history -- a context built
+// from it still starts on about:blank, which has no origin a relative
+// fetch can resolve against (the exact bug god found in the sibling file's
+// recipientPage). Every page these two hand back must navigate once first.
+async function adminPageFromCache(browser: Browser): Promise<Page> {
+  const page = await (await browser.newContext({ storageState: adminStorageState })).newPage();
+  await page.goto(WEB);
+  return page;
+}
+
+async function customerPageFromCache(browser: Browser): Promise<Page> {
+  const page = await (await browser.newContext({ storageState: customerStorageState })).newPage();
+  await page.goto(WEB);
+  return page;
+}
+
 async function findHubs(adminPage: Page): Promise<{ hubA: { id: string; code: string }; hubB: { id: string; code: string } }> {
   const { body: hubs } = await getJson<Array<{ id: string; code: string }>>(adminPage, '/admin/logistics/hubs');
   const hubA = hubs.find((h) => h.code === 'UATBC');
@@ -144,16 +189,46 @@ async function waitForWorkspaceLoaded(page: Page): Promise<void> {
   });
 }
 
-/** Books HUB_TO_DOOR (hub -> a Belize City door) via the real endpoint --
- * same sanctioned route-around mdf705's release-to-courier fixture already
- * uses, since the booking UI's hub picker cannot select an isTest hub.
- * Touches exactly ONE hub (the origin), deterministically -- no planner
- * routing ambiguity, unlike a door-origin booking. */
-async function bookHubToDoor(customerPage: Page, hubId: string, label: string): Promise<{ reference: string }> {
+/**
+ * The two simulation hubs' own district/city, read from their seed rows
+ * (`packages/database/prisma/seed-uat-logistics.ts` HUB_A/HUB_B) rather
+ * than assumed. `resolveHub` (`route-planner.ts`) matches a door to a hub
+ * by district first, then city -- these are the ONLY two districts this
+ * simulation network has a hub in, so every door below resolves to one of
+ * exactly these two hubs, never a third.
+ */
+const HUBA_COVERAGE_DOOR = { city: 'Belize City', district: 'BELIZE' } as const;
+const HUBB_COVERAGE_DOOR = { city: 'Belmopan', district: 'CAYO' } as const;
+
+/**
+ * Books HUB_TO_DOOR via the real endpoint -- same sanctioned route-around
+ * mdf705's release-to-courier fixture already uses, since the booking UI's
+ * hub picker cannot select an isTest hub.
+ *
+ * god's finding (2026-11-18): this used to hardcode the door to Belize
+ * City regardless of which hub was passed as origin, and its own doc
+ * comment claimed it "touches exactly one hub, deterministically" -- false
+ * for every caller, confirmed against `route-planner.ts`'s `LOCAL_DELIVERY`
+ * check (`originHub.id === destinationHub.id`) and empirically against the
+ * live stack. The door's coverage is now the CALLER's choice, because the
+ * two directions behave oppositely: a door INSIDE the origin hub's own
+ * coverage makes `LOCAL_DELIVERY` reject the booking outright (no shipment
+ * is ever created); a door OUTSIDE it plans a real two-leg journey
+ * (LINE_HAUL to the hub that covers the door, then LAST_MILE) -- which
+ * means the shipment touches BOTH hubs, not just the origin. There is no
+ * door, in this two-hub network, that makes a successful HUB_TO_DOOR
+ * booking touch its origin hub alone.
+ */
+async function bookHubToDoor(
+  customerPage: Page,
+  hubId: string,
+  label: string,
+  destination: { city: string; district: string },
+): Promise<{ reference: string }> {
   const booking = {
     service: 'HUB_TO_DOOR',
     origin: { hubId },
-    destination: { name: label, phone: '501-222-7099', address: '12 MDF-699 Fixture Road', city: 'Belize City', district: 'BELIZE' },
+    destination: { name: label, phone: '501-222-7099', address: '12 MDF-699 Fixture Road', ...destination },
     pieces: 1,
     description: `MDF-699 fixture ${label}`,
     payWithWallet: true,
@@ -178,14 +253,16 @@ type LookupResponse = {
 
 test('A terminal staff member can look up a reference at their own hub and gets a detail payload with no code/PIN/reveal-token field', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'OwnHub', hubA.id);
 
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699OwnHub ${stamp}`);
+  const customerPage = await customerPageFromCache(browser);
+  // Door OUTSIDE hubA's own coverage (Belmopan/CAYO) -- a door inside it
+  // would be LOCAL_DELIVERY and never book at all (god's finding). The
+  // resulting shipment also touches hubB via its LAST_MILE leg, but this
+  // test only needs hubA-touch, which the LINE_HAUL leg's origin gives it.
+  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699OwnHub ${stamp}`, HUBB_COVERAGE_DOOR);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
@@ -201,15 +278,23 @@ test('A terminal staff member can look up a reference at their own hub and gets 
 
 test('A reference belonging to another terminal is refused on lookup with a real 403, never a silent empty result', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  // BLOCKED (god, conv-eb30f0, 2026-11-18): this test's own premise --
+  // "staff holds ONLY hubA, book a shipment that touches ONLY hubB" -- has
+  // no construction that both books successfully AND touches exactly one
+  // hub, in this two-hub simulation network. A door inside hubB's own
+  // coverage is LOCAL_DELIVERY (rejected, confirmed live); a door outside
+  // it (hubA's coverage) touches hubA too via the LAST_MILE leg, which is
+  // the exact 200-instead-of-403 this test already caught. Left pointed at
+  // hubA's coverage (the ORIGINAL shape) so the failure stays the one
+  // already reported, not a new one, until god decides between adding a
+  // third simulation hub or accepting a different proof.
+  const adminPage = await adminPageFromCache(browser);
   const { hubA, hubB } = await findHubs(adminPage);
   // Staff holds ONLY hubA. Book a shipment that touches ONLY hubB.
   const { email } = await createTerminalStaff(adminPage, 'WrongHub', hubA.id);
 
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  const { reference } = await bookHubToDoor(customerPage, hubB.id, `Mdf699WrongHub ${stamp}`);
+  const customerPage = await customerPageFromCache(browser);
+  const { reference } = await bookHubToDoor(customerPage, hubB.id, `Mdf699WrongHub ${stamp}`, HUBA_COVERAGE_DOOR);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
@@ -221,8 +306,7 @@ test('A reference belonging to another terminal is refused on lookup with a real
 
 test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the same 403 as the wrong-terminal case', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'NoHub', hubA.id);
 
@@ -241,8 +325,7 @@ test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the sa
   // contract answers that by construction, since both a real-but-elsewhere
   // shipment and a real-but-hub-less shipment hit the identical 403 branch
   // (only "never existed anywhere" gets the different 404).
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const customerPage = await customerPageFromCache(browser);
   const doorToDoor = {
     service: 'DOOR_TO_DOOR',
     origin: { name: 'Sender', phone: '501-222-7098', address: '1 MDF-699 Sender Road', city: 'Belize City', district: 'BELIZE' },
@@ -270,17 +353,16 @@ async function lookupViaTab(staffPage: Page, reference: string): Promise<void> {
 
 test('A terminal staff member can look up a reference at their own hub through the real Lookup tab and sees the detail rendered', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   // OPERATOR, deliberately: #692's own contract is hub-scoped, not
   // role-scoped -- this is NOT a MANAGER-only screen, and using OPERATOR
   // here is the live demonstration, not just a claim in a comment.
   const { email } = await createTerminalStaff(adminPage, 'UiOwnHub', hubA.id);
 
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699UiOwnHub ${stamp}`);
+  const customerPage = await customerPageFromCache(browser);
+  // Door outside hubA's coverage -- see bookHubToDoor's own doc comment.
+  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699UiOwnHub ${stamp}`, HUBB_COVERAGE_DOOR);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
@@ -295,14 +377,18 @@ test('A terminal staff member can look up a reference at their own hub through t
 
 test('The Lookup tab shows the server\'s own refusal message verbatim, never a paraphrase or a silent empty result', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  // BLOCKED (god, conv-eb30f0, 2026-11-18) -- same unresolved premise as
+  // "A reference belonging to another terminal is refused...": no door
+  // choice makes a HUB_TO_DOOR booking from hubB touch only hubB in this
+  // two-hub network. See that test's own comment and bookHubToDoor's doc
+  // comment for the full trace. Left pointed at hubA's coverage so this
+  // keeps failing the same already-reported way, not a new one.
+  const adminPage = await adminPageFromCache(browser);
   const { hubA, hubB } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'UiWrongHub', hubA.id);
 
-  const customerPage = await (await browser.newContext()).newPage();
-  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  const { reference: wrongTerminalRef } = await bookHubToDoor(customerPage, hubB.id, `Mdf699UiWrongHub ${stamp}`);
+  const customerPage = await customerPageFromCache(browser);
+  const { reference: wrongTerminalRef } = await bookHubToDoor(customerPage, hubB.id, `Mdf699UiWrongHub ${stamp}`, HUBA_COVERAGE_DOOR);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
@@ -321,8 +407,7 @@ test('The Lookup tab shows the server\'s own refusal message verbatim, never a p
 
 test('GAP-PROOF (MDF-721, TERM-QUEUE-GATE): the Lookup tab, which has no dependency on the queue, disappears entirely when GET /terminal/queue fails', async ({ browser }) => {
   test.setTimeout(60_000);
-  const adminPage = await (await browser.newContext()).newPage();
-  await adminLogin(adminPage);
+  const adminPage = await adminPageFromCache(browser);
   const { hubA } = await findHubs(adminPage);
   const { email } = await createTerminalStaff(adminPage, 'QueueDown', hubA.id);
 

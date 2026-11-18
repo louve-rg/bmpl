@@ -87,15 +87,28 @@ async function adminLogin(page: Page): Promise<void> {
   expect(await tryLogin(page, ADMIN_EMAIL, ADMIN_PASSWORD!), 'admin login failed -- hard stop, not a skip').toBeTruthy();
 }
 
-/** Books HUB_TO_HUB (UATBC -> UATBP) and drives the one LINE_HAUL leg to
+/**
+ * Books HUB_TO_HUB (UATBC -> UATBP) and drives the one LINE_HAUL leg to
  * AWAITING_COLLECTION via the real admin API -- same sequence mdf587/mdf705
  * already use for this. Also CLAIMS the shipment as a second, newly
  * registered recipient account, through the real claim endpoint, so a
- * genuinely LINKED recipient exists to test against. */
+ * genuinely LINKED recipient exists to test against.
+ *
+ * god's finding (2026-11-18, via the claim's own 400 once the earlier
+ * fetch-before-navigate bug stopped masking it): `ShipmentService.
+ * claimAsRecipient` (`shipment.service.ts:1527-1534`) matches on the
+ * caller's own email OR phone against `destinationEmail`/`destinationPhone`
+ * -- this booking set only a destination `phone`, and the recipient account
+ * registers with only an `email`, no phone, so NEITHER side of that OR ever
+ * matched and the claim was rejected every time this ever ran. Needs the
+ * recipient's own registered email on the booking's destination for the
+ * match to have anything to succeed on.
+ */
 async function bookAndClaimToAwaitingCollection(
   customerPage: Page,
   adminPage: Page,
   recipientPage: Page,
+  recipientEmail: string,
   label: string,
 ): Promise<{ reference: string; recipientToken: string }> {
   const { body: hubs } = await getJson<Array<{ id: string; code: string }>>(adminPage, '/admin/logistics/hubs');
@@ -106,7 +119,7 @@ async function bookAndClaimToAwaitingCollection(
   const booking = {
     service: 'HUB_TO_HUB',
     origin: { hubId: hubA!.id },
-    destination: { hubId: hubB!.id, name: label, phone: '501-222-7101' },
+    destination: { hubId: hubB!.id, name: label, phone: '501-222-7101', email: recipientEmail },
     pieces: 1,
     description: `MDF-709/710 fixture ${label}`,
     payWithWallet: true,
@@ -145,6 +158,13 @@ test('GAP-PROOF: a linked recipient\'s own incoming-shipment view carries no col
   const customerPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
   const recipientPage = await (await browser.newContext()).newPage();
+  // god's finding (2026-11-18): this page never navigated anywhere before
+  // the first relative fetch below, so it was still on about:blank, which
+  // has no origin a relative URL can resolve against -- "Failed to parse
+  // URL from /api/auth/register". adminPage/customerPage never hit this
+  // because tryLogin() navigates first; this page registers instead of
+  // logging in, so it needs the same real origin given explicitly.
+  await recipientPage.goto(WEB);
   // A fresh account, not UAT_CUSTOMER -- the sender and recipient must be
   // different accounts for "linked recipient" to mean anything.
   const recipientEmail = `mdf709-recipient-${stamp}@example.bz`;
@@ -162,7 +182,27 @@ test('GAP-PROOF: a linked recipient\'s own incoming-shipment view carries no col
   );
   expect(register, 'recipient registration failed').toBe(201);
 
-  const { reference } = await bookAndClaimToAwaitingCollection(customerPage, adminPage, recipientPage, `Mdf709 ${stamp}`);
+  // god's finding (2026-11-18): the email fix above wasn't enough -- the
+  // claim still 400'd, at an EARLIER gate than the email/phone match.
+  // `claimAsRecipient` (shipment.service.ts:1526-1528) refuses first on
+  // `me.isTest !== s.isTest`, and a plain `/auth/register` always produces
+  // isTest:false (CLAUDE.md §4: "isTest is derived, never supplied" -- a
+  // public registration endpoint cannot be the one place that's untrue).
+  // This shipment is isTest:true (booked by the isTest UAT_CUSTOMER), so
+  // the mismatch threw before email/phone was ever compared. The sanctioned
+  // designation path is admin-only (`POST /admin/users/test-flag`,
+  // `admin.controller.ts:139-147`, `users.suspend`) -- exactly the
+  // "owner's decision, not the user's" shape the prime directive asks for.
+  const me = await getJson<{ id: string }>(recipientPage, '/me');
+  expect(me.status, 'could not read the new recipient\'s own id').toBe(200);
+  const flagged = await postWithCsrf(adminPage, '/admin/users/test-flag', {
+    userId: me.body.id,
+    isTest: true,
+    reason: 'MDF-709/710 e2e fixture -- recipient must be isTest to claim an isTest shipment',
+  });
+  expect(flagged.status, 'could not designate the recipient as a simulation account').toBe(201);
+
+  const { reference } = await bookAndClaimToAwaitingCollection(customerPage, adminPage, recipientPage, recipientEmail, `Mdf709 ${stamp}`);
   console.log('[MDF709-GAP] booked, departed, arrived, handed off, claimed:', reference);
 
   const view = await getJson<Record<string, unknown>>(recipientPage, `/shipping/incoming/${encodeURIComponent(reference)}`);
@@ -202,7 +242,7 @@ test.fixme('AFTER MDF-709: a linked recipient sees the real collection code once
     recipientEmail,
   );
 
-  const { reference } = await bookAndClaimToAwaitingCollection(customerPage, adminPage, recipientPage, `Mdf709After ${stamp}`);
+  const { reference } = await bookAndClaimToAwaitingCollection(customerPage, adminPage, recipientPage, recipientEmail, `Mdf709After ${stamp}`);
 
   const customerSideCode = await getJson<{ collectionCode: string | null }>(customerPage, `/shipping/${encodeURIComponent(reference)}`);
   expect(customerSideCode.body.collectionCode, 'sanity: the sender-side code must exist at AWAITING_COLLECTION').toBeTruthy();
