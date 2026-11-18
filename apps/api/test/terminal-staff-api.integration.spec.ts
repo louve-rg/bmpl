@@ -43,11 +43,17 @@ const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).
 const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
-// FIN-SELF-LOCKOUT — both messages name WHO can act instead: another manager
-// OR an administrator. Owner's explicit call, 2026-11-18: the access cleanup
-// leaves Edward as San Pedro Elite's only manager, so "ask another manager"
-// alone is a dead end for exactly the person most likely to hit this message.
-const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager, or an administrator, can do this for you.';
+// FIN-SELF-LOCKOUT — each message names WHO can act instead, and the two
+// differ ON PURPOSE: no admin-console endpoint ever writes memberRole
+// (endMember/reactivateMember both leave it untouched), so only the
+// self-END message can truthfully name an administrator. This is NOT the
+// stale pre-b25bae6e wording Dwight's 5bed34b3 restored — it is a SECOND,
+// later correction from god after b25bae6e: the brief symmetric version
+// would have promised a capability ("an administrator can change your
+// role") that exists nowhere, which is the same defect as a dead button
+// expressed as text. See terminal.service.ts's comment on staffChangeRole
+// for the fuller reasoning this constant has to match.
+const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager can do this for you.';
 const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.';
 
 async function registerCustomer(email: string) {
@@ -464,12 +470,14 @@ describe('FIN-REGRESSION: the self-lockout and floor refusals are mutually disti
    * refusal would pass while the two self-lockout messages collapsed into
    * the floor's wording, or into each other. Compared LIVE, against each
    * other, never against a literal string this test writes itself -- the
-   * self-demote sentence already changed once tonight (b25bae6e added an
-   * "or an administrator" clause to match self-end's shape) and either
-   * could change again; a test pinned to one exact wording would break on
-   * the next such edit and prove nothing about the thing that actually
-   * matters: that three genuinely different failures render three
-   * genuinely different messages.
+   * self-demote sentence already changed TWICE tonight (b25bae6e added an
+   * "or an administrator" clause to match self-end's shape; a later
+   * correction from god removed it again, because no admin-console
+   * endpoint can actually change a role) and either message could change
+   * again; a test pinned to one exact wording would break on the next
+   * such edit and prove nothing about the thing that actually matters:
+   * that three genuinely different failures render three genuinely
+   * different messages.
    *
    * FLOOR_MESSAGE (the company-wide "at least one active manager" 409) is
    * deliberately NOT one of the three live triggers below. It cannot be —
