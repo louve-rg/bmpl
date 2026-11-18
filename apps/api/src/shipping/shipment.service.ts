@@ -5891,11 +5891,20 @@ export class ShipmentService {
    * parameter existed anywhere, so a counter clerk could not look up a
    * parcel by the reference a customer actually hands them.
    *
-   * Two distinct refusals, not one — a reference belonging to another
-   * terminal is REJECTED, never silently returned empty:
-   *   - no shipment with that reference anywhere -> NotFoundException (404)
-   *   - a real shipment that never touches one of the caller's hubs ->
-   *     ForbiddenException (403)
+   * SEC-SHIPMENT-REF-DISCLOSURE (Stanley, found while probing TERM-STAFF-API):
+   * this used to throw two distinguishable refusals — 404 for no such
+   * reference, 403 "not at one of your terminal locations" for a real
+   * shipment belonging to another company — which let an outsider tell a
+   * real reference from a made-up one by the refusal alone. Same principle
+   * already ruled on `TerminalService.revokeInvite`/`resendInvite`: those
+   * scope the lookup's own WHERE to `{ id, terminalCompanyId }` so a
+   * cross-company id and a nonexistent one hit the identical `findFirst`
+   * and the identical 404 — never two code paths to keep in sync. Fixed the
+   * same way here: the hub-membership filter moved INTO the query's WHERE
+   * (below), so "not mine" and "doesn't exist" are now one `findFirst`
+   * returning `null`, one `NotFoundException`, one message, always. A
+   * caller who IS entitled still gets the full record; a caller who is not
+   * cannot distinguish "wrong location" from "never existed," by design.
    * The "touches" test mirrors `terminalQueue`'s own superset filter above
    * (any leg's origin OR destination hub in `hubIds`) rather than the
    * narrower "final leg only" rule `shipmentHubForLocationCheck` uses for
@@ -5925,8 +5934,11 @@ export class ShipmentService {
     // or mixed-case entry for a shipment that genuinely exists used to come
     // back 404 "No shipment with that reference" — a false negative on the
     // one thing this route exists to answer.
-    const shipment = await this.prisma.shipment.findUnique({
-      where: { reference: reference.trim().toUpperCase() },
+    const shipment = await this.prisma.shipment.findFirst({
+      where: {
+        reference: reference.trim().toUpperCase(),
+        legs: { some: { OR: [{ originHubId: { in: hubIds } }, { destinationHubId: { in: hubIds } }] } },
+      },
       select: {
         id: true,
         reference: true,
@@ -5954,10 +5966,6 @@ export class ShipmentService {
       },
     });
     if (!shipment) throw new NotFoundException('No shipment with that reference.');
-    const touchesMyHub = shipment.legs.some(
-      (l) => (l.originHubId != null && hubIds.includes(l.originHubId)) || (l.destinationHubId != null && hubIds.includes(l.destinationHubId)),
-    );
-    if (!touchesMyHub) throw new ForbiddenException('This shipment is not at one of your terminal locations.');
     return {
       shipmentId: shipment.id,
       reference: shipment.reference,

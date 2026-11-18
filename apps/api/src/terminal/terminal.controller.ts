@@ -424,15 +424,17 @@ export class TerminalShipmentsController {
    * No new authorization axis: `ShipmentService.lookupForTerminal` does its
    * own hub-membership check against `myActiveHubIds`, mirroring the
    * location-scoping every other route on this controller already uses,
-   * and refuses with a REAL 403 for a shipment that exists but belongs to
-   * another terminal — never a quiet empty 200.
+   * and refuses with a real 404 for a shipment the caller is not entitled
+   * to — never a quiet empty 200.
    *
-   * MDF-716 (Stanley, accepting the 404/403 split as designed): that same
-   * split makes this route an existence oracle for a reference the caller
-   * does not hold — bounded, never removed, by the identical
-   * `@StrictThrottle()` every sibling write on this controller already
-   * carries. Missing it here was the same "depends on an author
-   * remembering" class of gap as the role check being opt-in.
+   * SEC-SHIPMENT-REF-DISCLOSURE (Stanley, superseding MDF-716's original
+   * "404/403 split is designed" note below): the split WAS an existence
+   * oracle, not merely a bounded one — a caller could tell a real
+   * cross-company reference from a made-up one by the refusal alone.
+   * `lookupForTerminal` now folds hub-membership into the lookup's own
+   * query, so "not mine" and "doesn't exist" are one code path, one 404,
+   * one message — the same principle `revokeInvite`/`resendInvite` already
+   * apply. `@StrictThrottle()` stays regardless, as defense in depth.
    */
   @StrictThrottle()
   @Get(':reference')
