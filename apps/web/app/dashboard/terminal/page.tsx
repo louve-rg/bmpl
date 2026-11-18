@@ -218,7 +218,10 @@ interface StaffCompanyLocation {
 interface StaffRoster {
   members: StaffMember[];
   pendingInvites: StaffInvite[];
-  locations: StaffCompanyLocation[];
+  // TERM-STAFF-ROBUST: optional, not required -- an API build that predates
+  // this field omits it entirely rather than sending `[]`, and the render
+  // below must survive that, not assume the contract is always current.
+  locations?: StaffCompanyLocation[];
 }
 
 interface LookupHubRef {
@@ -1746,7 +1749,18 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
     });
   }
 
-  const activeLocationCount = staff.locations.filter((l) => l.isActive).length;
+  /**
+   * TERM-STAFF-ROBUST: Stanley caught this screen crashing to the root error
+   * boundary against an API build that hasn't shipped the top-level
+   * `locations` field yet -- `staff.locations.filter(...)` on `undefined`,
+   * confirmed by reading the code, not guessed. `null` here means "the API
+   * didn't send a location list at all" and is kept distinct from `[]`
+   * ("it sent one and it's genuinely empty") throughout this component, so
+   * the two degrade differently rather than looking like the same thing.
+   */
+  const locations = staff.locations ?? null;
+  const activeLocationCount = locations ? locations.filter((l) => l.isActive).length : 0;
+  const locationsUnavailable = locations === null;
 
   return (
     <div>
@@ -1830,9 +1844,16 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 </>
               )}
 
+              {m.status === 'ACTIVE' && locationsUnavailable && (
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
+                  Location list is unavailable right now -- refresh to grant a location.
+                </p>
+              )}
+
               {m.status === 'ACTIVE' &&
+                !locationsUnavailable &&
                 (() => {
-                  const grantable = staff.locations.filter((l) => !m.locations.some((ml) => ml.id === l.id));
+                  const grantable = locations!.filter((l) => !m.locations.some((ml) => ml.id === l.id));
                   if (grantable.length === 0) return null;
                   return (
                     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -1896,13 +1917,21 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
         <Field
           label="Locations (at least one -- a role alone never grants access)"
           htmlFor="staff-invite-locations"
-          hint={activeLocationCount === 0 ? 'No active locations exist yet -- ask a BML administrator to attach one first.' : undefined}
+          hint={
+            locationsUnavailable
+              ? 'Location list is unavailable right now -- refresh to try again.'
+              : activeLocationCount === 0
+                ? 'No active locations exist yet -- ask a BML administrator to attach one first.'
+                : undefined
+          }
         >
           <div id="staff-invite-locations" className="space-y-1 rounded-bmpl-md border border-slate-200 p-2">
-            {staff.locations.length === 0 ? (
+            {locationsUnavailable ? (
+              <p className="text-xs text-[color:var(--bmpl-text-muted)]">Location list is unavailable right now -- refresh to try again.</p>
+            ) : locations!.length === 0 ? (
               <p className="text-xs text-[color:var(--bmpl-text-muted)]">No locations to grant.</p>
             ) : (
-              staff.locations.map((l) => (
+              locations!.map((l) => (
                 <label key={l.id} className={`flex items-center gap-2 text-sm ${l.isActive ? '' : 'text-[color:var(--bmpl-text-muted)]'}`}>
                   <input
                     type="checkbox"
