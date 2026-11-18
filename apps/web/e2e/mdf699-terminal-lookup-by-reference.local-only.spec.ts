@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
+import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
+import { ADMIN_STATE_PATH, CUSTOMER_STATE_PATH } from './support/local-only-shared-auth';
 
 /**
  * [LOCAL ONLY, MDF-705 follow-up] Written ahead of MDF-699 (Pam, API)
@@ -52,8 +53,6 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  * comment carries the gap-proof lineage for a reader who did not read git.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
-const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
-const ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
 const stamp = Date.now();
 
 async function postWithCsrf<T>(page: Page, path: string, body: unknown): Promise<{ status: number; body: T }> {
@@ -98,39 +97,27 @@ async function getJson<T>(page: Page, path: string): Promise<{ status: number; b
   }, path) as Promise<{ status: number; body: T }>;
 }
 
-async function adminLogin(page: Page): Promise<void> {
-  expect(ADMIN_PASSWORD, 'SEED_SUPER_ADMIN_PASSWORD not set -- hard stop, not a skip').toBeTruthy();
-  expect(await tryLogin(page, ADMIN_EMAIL, ADMIN_PASSWORD!), 'admin login failed -- hard stop, not a skip').toBeTruthy();
-}
-
 /**
  * MDF-705 follow-up (god, 2026-11-18): this file's 6 tests used to log in
  * as admin AND customer fresh in nearly every one -- 17 real `/auth/login`
  * POSTs in well under 60s, which collides with `/auth/login`'s own
  * `@StrictThrottle()` (limit 10/60s, `THROTTLE_AUTH_LIMIT`/
- * `THROTTLE_TTL_SECONDS`, `auth.controller.ts`/`throttle.decorators.ts`)
- * and failed tests 5/6 with "admin login failed" that had nothing to do
- * with the product. Fix is on this side, not the throttle (explicitly not
- * to be raised or special-cased): log in as admin once and as customer
- * once for the whole file, capture `storageState`, and hand every test a
- * context built FROM that state instead of a fresh login. Staff accounts
- * stay a real login per test -- each one is a genuinely distinct account
- * created by that test, so there is nothing to reuse there.
+ * `THROTTLE_TTL_SECONDS`, `auth.controller.ts`/`throttle.decorators.ts`).
+ * A per-file `beforeAll` (log in once per file, reuse via `storageState`)
+ * fixed THAT, but the fix still scaled with the number of dense local-only
+ * files sharing one `playwright.local-only.config.ts` invocation -- two
+ * files already combined to ~10 total calls, right at the limit (TERM-
+ * STAFF-INFRA, god, 2026-11-18, ahead of the staff-management feature
+ * adding a third). Fixed again, this time run-wide instead of per-file:
+ * `local-only-global-setup.ts` logs in as admin and customer exactly ONCE
+ * for the entire run and caches each as a storageState file on disk; this
+ * file just loads those files, performing zero `/auth/login` calls of its
+ * own. Staff accounts stay a real login per test -- each one is a
+ * genuinely distinct account created by that test, so there is nothing to
+ * reuse there, and that part does not scale with file count the same way.
  */
-let adminStorageState: Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>;
-let customerStorageState: Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>;
-
-test.beforeAll(async ({ browser }: { browser: Browser }) => {
-  const adminSetupCtx = await browser.newContext();
-  await adminLogin(await adminSetupCtx.newPage());
-  adminStorageState = await adminSetupCtx.storageState();
-  await adminSetupCtx.close();
-
-  const customerSetupCtx = await browser.newContext();
-  expect(await tryLogin(await customerSetupCtx.newPage(), UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
-  customerStorageState = await customerSetupCtx.storageState();
-  await customerSetupCtx.close();
-});
+const adminStorageState = ADMIN_STATE_PATH;
+const customerStorageState = CUSTOMER_STATE_PATH;
 
 // storageState restores cookies, not navigation history -- a context built
 // from it still starts on about:blank, which has no origin a relative
