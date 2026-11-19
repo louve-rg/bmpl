@@ -276,22 +276,37 @@ All of the above held up after a page refresh and after signing out and back
 in fresh — it is a real, saved change, not something that looks done and
 then reverts.
 
-### Four people on your Staff list, not three
+### Who else is on your Staff list
 
-Open the **Staff** tab and you'll see **"Members (4)"**, not three. You are
-one of the four. Of the other three, two — **Qa Manager** and **Qa
-Operator** — are our own quality-assurance accounts, and the third,
-**Stanley Fixture**, is a test employee from our own verification of this
-feature, with their access already **ended**. None of those three can be
-removed from your list without a database change nobody has authorised, so
-they will stay there — please leave all three alone.
+Open the **Staff** tab and the heading count includes every row that has
+ever had access here, active or ended — the screen's own note explains
+that directly. Trust the tab's own badge, not the heading count, for who
+can actually sign in today.
 
-**Do not click Restore on Stanley Fixture.** Most warnings in this guide
-are about something that merely looks wrong on screen. This is the one
-instruction where getting it wrong actually does something: that row
-still shows a Restore option, and clicking it would hand a working Operator
-account at your terminal to a test identity, not just bring back something
-harmless. Leave that row exactly as it is.
+Besides you, you'll see:
+
+- **Qa Manager** — active, with the Manager role. This is our own
+  quality-assurance account, not a colleague of yours. We tried to end
+  its access ourselves and the product correctly refused — a Manager
+  cannot end their own membership, the same protection that protects you.
+  Only you, or a BML administrator, can remove it, and we are not asking
+  you to. It has no reach into San Pedro Elite; it's simulation-only
+  access, and we'll clear it once the remaining testing on your demo is
+  finished.
+- **Qa Operator** — no longer active. Its access has already ended.
+- **Stanley Fixture** (Operator role) and **Stanley Manager Fixture**
+  (Manager role) — also no longer active, both test identities from our
+  own verification of this feature.
+
+**Do not click Restore on any of these ended rows — especially Stanley
+Manager Fixture.** Most warnings in this guide are about something that
+merely looks wrong on screen. This is the one instruction where getting
+it wrong actually does something: each still shows a Restore option, and
+clicking one hands that identity working access to your terminal again,
+not just something harmless coming back. Stanley Manager Fixture matters
+most — restoring it would give your company a second active Manager
+that's a test identity, with full authority over your staff and
+locations. Leave all three rows exactly as they are.
 
 **You cannot end your own access, or change your own role to Operator —
 and that's by design, not by luck.** The system refuses both outright,
