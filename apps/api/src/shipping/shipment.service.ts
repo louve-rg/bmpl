@@ -1906,6 +1906,19 @@ export class ShipmentService {
       if (leg.status !== 'READY' && leg.status !== 'IN_PROGRESS') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot depart.`);
       }
+      // MDF-907: `status` alone cannot tell "in transit, not yet arrived"
+      // apart from "already arrived, awaiting handoff" — both sit at
+      // IN_PROGRESS, because `arriveLeg` below does not advance status (only
+      // completeLeg's handoff does). Without this check, a leg that had
+      // already arrived still passed the status check above and silently
+      // re-stamped `departedAt` with `new Date()` — a false chronology
+      // (departedAt landing after arrivedAt) written into shipment history.
+      // Checked here, not folded into the status check, because the two
+      // guard different things: status asks "has this leg started", this
+      // asks "has it already finished this stage".
+      if (leg.arrivedAt) {
+        throw new BadRequestException('This leg has already arrived at its destination and cannot depart again.');
+      }
       // ShipmentLeg.routeId is nullable on the column, but a LINE_HAUL leg is
       // only ever created by the route planner (route-planner.ts), which
       // unconditionally sets it to the real route it planned — so this branch
@@ -1988,6 +2001,14 @@ export class ShipmentService {
     return this.transition(legId, actor, async (tx, leg) => {
       if (leg.kind !== 'LINE_HAUL') throw new BadRequestException('Only a transport leg arrives at a terminal.');
       if (leg.status !== 'IN_PROGRESS') throw new BadRequestException('That leg is not in transit.');
+      // MDF-907: same class of gap as `departLeg` above, same reason —
+      // `status` stays IN_PROGRESS from the first arrival all the way to
+      // handoff, so the status check alone cannot refuse a SECOND arrive.
+      // Without this, a repeat call silently re-stamped `arrivedAt`,
+      // rewriting a stage of history that had already happened.
+      if (leg.arrivedAt) {
+        throw new BadRequestException('This leg has already arrived.');
+      }
       await tx.shipmentLeg.update({ where: { id: leg.id }, data: { arrivedAt: new Date() } });
       return { action: 'SHIPMENT_LEG_ARRIVED' as const, note: null };
     });
