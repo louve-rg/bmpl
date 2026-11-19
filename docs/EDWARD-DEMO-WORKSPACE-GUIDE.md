@@ -327,9 +327,12 @@ checked directly against what the system actually allows, not assumed.
   product will tell you so rather than let you. There is no simple role
   toggle for this case: the only route is ending your membership and
   sending you a fresh invitation at the new role, which you would have to
-  accept again. It is a real change to how your account works, not a
-  quick switch, so if you ever genuinely need it while you remain the
-  only Manager, contact us and we will walk you through it.
+  accept yourself. Your terminal access is preserved through this, not
+  rebuilt from scratch — it's the same membership, picked back up at the
+  new role. The real cost is that you have to act: you are not a member
+  of your own company in the gap between the two steps, until you accept
+  the new invitation. So if you ever genuinely need this while you remain
+  the only Manager, contact us and we will walk you through it.
 - **Ending your own access, or removing your own last location, if you are
   the company's only active Manager.** The system refuses both the same
   way and for the same reason — it exists to stop the company being left
