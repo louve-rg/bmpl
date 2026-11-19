@@ -306,7 +306,7 @@ clicking one hands that identity working access to your terminal again,
 not just something harmless coming back. Stanley Manager Fixture matters
 most — restoring it would give your company a second active Manager
 that's a test identity, with full authority over your staff and
-locations. Leave all three rows exactly as they are.
+locations. Leave those rows exactly as they are.
 
 **You cannot end your own access, or change your own role to Operator —
 and that's by design, not by luck.** The system refuses both outright,
