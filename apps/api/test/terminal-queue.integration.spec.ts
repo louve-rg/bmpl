@@ -340,6 +340,61 @@ describe('TERM-8: arrival confirmation — distinct from handoff, previously adm
   });
 });
 
+/**
+ * MDF-907: a repeated depart or arrive must not rewrite a stage of a leg's
+ * history that already happened. Both `departLeg` and `arriveLeg` gate on
+ * `leg.status` alone — and neither call changes `status` away from
+ * `IN_PROGRESS` (only `completeLeg`'s handoff does, later) — so a SECOND
+ * call to either route, made any time before handoff, passed the existing
+ * status check and silently re-stamped its timestamp with `new Date()`.
+ * Observed live: a repeated depart on an already-arrived leg left
+ * `departedAt` sitting AFTER `arrivedAt` on the same row — a false
+ * chronology written into shipment history. The fix refuses the repeat
+ * rather than ignoring it, so a human sees why, and leaves the original
+ * timestamp exactly as it was.
+ */
+describe('MDF-907: a repeated depart/arrive must not rewrite an already-recorded stage', () => {
+  it('refuses a second depart once the leg has already arrived, and departedAt is unchanged', async () => {
+    const net = await makeNetwork();
+    const originStaff = await makeTerminalStaff([net.originHubId]);
+    const destStaff = await makeTerminalStaff([net.destinationHubId]);
+    const { lineHaul } = await bookedReadyToDepart(await fundedSender(), net);
+
+    expect((await post(originStaff.cookies, `terminal/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+    const afterArrival = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(afterArrival.departedAt).not.toBeNull();
+    expect(afterArrival.arrivedAt).not.toBeNull();
+
+    const repeat = await post(originStaff.cookies, `terminal/legs/${lineHaul.id}/depart`, {});
+    expect(repeat.status).toBe(400);
+    expect(repeat.body.message).toMatch(/already arrived/i);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.departedAt?.getTime()).toBe(afterArrival.departedAt!.getTime());
+    expect(after.departedAt!.getTime()).toBeLessThanOrEqual(after.arrivedAt!.getTime());
+  });
+
+  it('refuses a second arrive on the same leg, and arrivedAt is unchanged', async () => {
+    const net = await makeNetwork();
+    const originStaff = await makeTerminalStaff([net.originHubId]);
+    const destStaff = await makeTerminalStaff([net.destinationHubId]);
+    const { lineHaul } = await bookedReadyToDepart(await fundedSender(), net);
+
+    expect((await post(originStaff.cookies, `terminal/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+    const afterArrival = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(afterArrival.arrivedAt).not.toBeNull();
+
+    const repeat = await post(destStaff.cookies, `terminal/legs/${lineHaul.id}/arrive`);
+    expect(repeat.status).toBe(400);
+    expect(repeat.body.message).toMatch(/already arrived/i);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.arrivedAt?.getTime()).toBe(afterArrival.arrivedAt!.getTime());
+  });
+});
+
 describe('TERM-8: the existing handoff door still agrees with the queue', () => {
   it('a LINE_HAUL arrival moves it into the HANDOFF queue, and completing it clears both', async () => {
     const net = await makeNetwork();
