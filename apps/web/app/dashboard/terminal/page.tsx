@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select, StatusBadge } from '../../../components/ui';
+import type { MeView } from '../../../lib/types';
 
 /**
  * TERM-11: the terminal operator workspace. Contract read from Pam's own
@@ -398,6 +399,23 @@ export default function TerminalWorkspacePage() {
   const [noMembership, setNoMembership] = useState(false);
   const [workspaceErr, setWorkspaceErr] = useState<string | null>(null);
 
+  // FIN-COUNTS-HISTORY, item 3: `GET /terminal/me` carries no field naming
+  // the caller's own account -- confirmed by reading `myWorkspace`
+  // (terminal.service.ts:881-906) directly, it returns company/role/
+  // locations only. The already-public, already-used-elsewhere `/me`
+  // endpoint (same one `dashboard/profile/page.tsx` and `dashboard/roles/
+  // page.tsx` call client-side) is the one place this screen can get it
+  // without an apps/api change. A failed load just means the self-check
+  // below never matches (every control renders as it did before this
+  // card) rather than misidentifying anyone as themselves.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .get<MeView>('/me')
+      .then((me) => setCurrentUserId(me?.id ?? null))
+      .catch(() => setCurrentUserId(null));
+  }, []);
+
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
@@ -611,12 +629,40 @@ export default function TerminalWorkspacePage() {
     });
   }
 
+  /**
+   * FIN-COUNTS / FIN-HIST-LAG: every one of the five queue actions below used
+   * to refresh ONLY the queue. Confirmed against the API (shipment.service.ts):
+   * depart/handoff/collect each write a CustodyEvent that changes what
+   * `/terminal/custody` returns, and arrive flips `arrivedAt`, which is
+   * exactly `/terminal/inbound`'s own filter -- so Incoming and On Hand went
+   * stale the moment an action fired elsewhere, with no visible staleness
+   * signal, even though nothing in `/terminal/history` itself lags (it reads
+   * the shipment's live `status` column on every call, confirmed by reading
+   * `terminalHistory` directly -- there is no server-side cache to blame).
+   * Refreshing all four uniformly, rather than hand-mapping which of the five
+   * actions touches which specific resource, is deliberate: a wrong mapping
+   * reintroduces exactly this bug for one action and not the others, and an
+   * extra GET on a tab the manager is not even looking at costs nothing a
+   * stale screen doesn't already cost worse. History is skipped when the
+   * caller is not a MANAGER (the route 403s) or hasn't opened that tab yet
+   * (`history === null` -- no sense loading a cursor-paginated list eagerly
+   * on every action when nothing has asked for it even once).
+   */
+  async function refreshAfterAction() {
+    await Promise.all([
+      loadQueue(),
+      loadInbound(),
+      loadCustody(),
+      ...(workspace?.memberRole === 'MANAGER' && history !== null ? [loadHistory()] : []),
+    ]);
+  }
+
   async function depart(legId: string) {
     setBusy(legId);
     clearRowState(legId);
     try {
       await api.post(`/terminal/legs/${legId}/depart`, {});
-      await loadQueue();
+      await refreshAfterAction();
     } catch (e) {
       setRowErr((prev) => ({ ...prev, [legId]: errMessage(e, 'Could not mark this leg departed.') }));
     } finally {
@@ -629,7 +675,7 @@ export default function TerminalWorkspacePage() {
     clearRowState(legId);
     try {
       await api.post(`/terminal/legs/${legId}/arrive`);
-      await loadQueue();
+      await refreshAfterAction();
     } catch (e) {
       setRowErr((prev) => ({ ...prev, [legId]: errMessage(e, 'Could not confirm arrival.') }));
     } finally {
@@ -653,7 +699,7 @@ export default function TerminalWorkspacePage() {
         const { [legId]: _drop, ...rest } = prev;
         return rest;
       });
-      await loadQueue();
+      await refreshAfterAction();
     } catch (e) {
       setRowErr((prev) => ({ ...prev, [legId]: errMessage(e, 'Could not record this handoff.') }));
     } finally {
@@ -675,7 +721,7 @@ export default function TerminalWorkspacePage() {
         const { [legId]: _drop, ...rest } = prev;
         return rest;
       });
-      await loadQueue();
+      await refreshAfterAction();
     } catch (e) {
       setRowErr((prev) => ({ ...prev, [legId]: errMessage(e, 'Could not release this parcel.') }));
     } finally {
@@ -703,7 +749,7 @@ export default function TerminalWorkspacePage() {
         const { [shipmentId]: _drop, ...rest } = prev;
         return rest;
       });
-      await loadQueue();
+      await refreshAfterAction();
     } catch (e) {
       setRowErr((prev) => ({ ...prev, [shipmentId]: errMessage(e, 'Could not record this collection.') }));
     } finally {
@@ -1027,7 +1073,7 @@ export default function TerminalWorkspacePage() {
         ) : tab === 'CUSTODY' ? (
           <CustodyPanel rows={custody} loading={custodyLoading} error={custodyErr} hasMore={custodyHasMore} onRetry={() => void loadCustody()} />
         ) : tab === 'STAFF' ? (
-          <StaffRosterPanel staff={staff} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
+          <StaffRosterPanel staff={staff} currentUserId={currentUserId} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
         ) : tab === 'HISTORY' ? (
           <HistoryPanel
             rows={history}
@@ -1472,6 +1518,35 @@ function HistoryPanel({
 
   return (
     <div className="space-y-3">
+      {/* FIN-COUNTS-HISTORY: the owner's "six staged shipments, History
+          shows eight" finding -- not a data bug (Overview/Incoming/On Hand
+          correctly count only what's in progress; History is the full
+          all-time ledger, including setup/test records that never belonged
+          to any specific demonstration). This states that mechanical fact
+          on screen, in a shop manager's language, instead of leaving it to
+          a guide document to explain away -- the owner's own words were
+          "without us having to explain apparent inconsistencies." It does
+          NOT try to label which specific rows are which: there is no
+          reliable field to tell a demonstration record apart from a
+          verification-team test record (both carry the same "Demo" badge),
+          and hardcoding reference numbers into this screen would be an
+          invented rule that breaks the next time test data is regenerated.
+
+          Second sentence is FIN-HIST-LAG's own second defect, caught by
+          Stanley pulling a real record: terminalHistory reports the
+          SHIPMENT's own status, while the working tabs (Hand off, etc.)
+          report one LEG's custody state -- a leg that has arrived but
+          awaits handoff is correctly IN_TRANSIT at the shipment level AND
+          correctly "Arrived" on the Hand off tab, not a staleness bug. No
+          refresh fixes a vocabulary difference, so the label below says
+          plainly which thing each screen is describing, rather than
+          inventing a new status value or asking the API for one. */}
+      <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+        History lists every shipment that has ever touched your locations, including setup and test records -- in progress or finished, newest
+        first. Overview, Incoming, On Hand and the queue tabs only ever count what's still in progress, so a smaller number there is correct, not
+        missing data. The status shown here describes the whole shipment's journey, not the one step a working tab may be handling right now --
+        trust the tab you're actually working in for what to do next.
+      </p>
       {rows.map((row) => {
         const hubs = row.touchedHubs.map(hubLabel).filter(Boolean);
         return (
@@ -1484,9 +1559,12 @@ function HistoryPanel({
                   {row.senderName} → {row.recipientName}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                {row.isTest && <Badge tone="neutral">Demo</Badge>}
-                <StatusBadge status={row.status} />
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex items-center gap-1.5">
+                  {row.isTest && <Badge tone="neutral">Demo</Badge>}
+                  <StatusBadge status={row.status} />
+                </div>
+                <p className="text-[10px] uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Shipment status</p>
               </div>
             </div>
             {hubs.length > 0 && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">{hubs.join(' → ')}</p>}
@@ -1567,11 +1645,13 @@ function deliveryMessage(d: InviteDelivery, action: 'created' | 'resent'): { ton
  */
 function StaffRosterPanel({
   staff,
+  currentUserId,
   loading,
   error,
   onRetry,
 }: {
   staff: StaffRoster | null;
+  currentUserId: string | null;
   loading: boolean;
   error: string | null;
   onRetry: () => void;
@@ -1595,7 +1675,7 @@ function StaffRosterPanel({
 
   return (
     <div className="space-y-5">
-      <StaffMembersSection staff={staff} onChanged={onRetry} />
+      <StaffMembersSection staff={staff} currentUserId={currentUserId} onChanged={onRetry} />
       <StaffPendingInvitesSection staff={staff} onChanged={onRetry} />
     </div>
   );
@@ -1630,7 +1710,7 @@ function StaffRosterPanel({
  */
 const STAFF_MEMBER_ROLES: StaffMemberRole[] = ['MANAGER', 'OPERATOR'];
 
-function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChanged: () => void }) {
+function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: StaffRoster; currentUserId: string | null; onChanged: () => void }) {
   const [roleBusy, setRoleBusy] = useState<string | null>(null);
   const [endBusy, setEndBusy] = useState<string | null>(null);
   const [reactivateBusy, setReactivateBusy] = useState<string | null>(null);
@@ -1846,21 +1926,48 @@ function StaffMembersSection({ staff, onChanged }: { staff: StaffRoster; onChang
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge tone={m.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{m.memberRole}</Badge>
                   <Badge tone={m.status === 'ACTIVE' ? 'success' : 'neutral'}>{m.status}</Badge>
-                  {m.status === 'ACTIVE' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={roleBusy === m.userId}
-                      onClick={() => void changeRole(m.userId, m.memberRole === 'MANAGER' ? 'OPERATOR' : 'MANAGER')}
-                    >
-                      {roleBusy === m.userId ? 'Changing…' : m.memberRole === 'MANAGER' ? 'Set as operator' : 'Appoint as manager'}
-                    </Button>
-                  )}
-                  {m.status === 'ACTIVE' && (
-                    <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId, m.name)}>
-                      {endBusy === m.userId ? 'Ending…' : 'End membership'}
-                    </Button>
-                  )}
+                  {/* FIN-SELF-LOCKOUT: a Manager cannot change their own role
+                      -- Pam confirmed no admin-console endpoint can change a
+                      role AT ALL today (endMember/reactivateMember never
+                      write memberRole), so unlike ending a membership, there
+                      is no administrator to name here. Naming one anyway
+                      would promise a capability that does not exist anywhere
+                      in the product. The note REPLACES the control in place,
+                      not underneath it. Only a MANAGER ever reaches this tab,
+                      so the caller's own row is always memberRole MANAGER --
+                      "manager to operator" is the only direction this note
+                      ever needs to state. */}
+                  {m.status === 'ACTIVE' &&
+                    (m.userId === currentUserId ? (
+                      <span className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        You cannot change your own role from manager to operator. Another manager can do this for you.
+                      </span>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={roleBusy === m.userId}
+                        onClick={() => void changeRole(m.userId, m.memberRole === 'MANAGER' ? 'OPERATOR' : 'MANAGER')}
+                      >
+                        {roleBusy === m.userId ? 'Changing…' : m.memberRole === 'MANAGER' ? 'Set as operator' : 'Appoint as manager'}
+                      </Button>
+                    ))}
+                  {/* FIN-SELF-LOCKOUT: unlike role change, ending a
+                      membership DOES have an admin-console door (an
+                      administrator can end a membership, confirmed by god),
+                      so this half of the asymmetry names one. The two notes
+                      say different true things on purpose -- not a shared
+                      sentence covering both. */}
+                  {m.status === 'ACTIVE' &&
+                    (m.userId === currentUserId ? (
+                      <span className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.
+                      </span>
+                    ) : (
+                      <Button variant="ghost" size="sm" disabled={endBusy === m.userId} onClick={() => void endMember(m.userId, m.name)}>
+                        {endBusy === m.userId ? 'Ending…' : 'End membership'}
+                      </Button>
+                    ))}
                   {m.status === 'ENDED' && (
                     <Button variant="outline" size="sm" disabled={reactivateBusy === m.userId} onClick={() => void reactivateMember(m.userId)}>
                       {reactivateBusy === m.userId ? 'Reactivating…' : 'Reactivate'}

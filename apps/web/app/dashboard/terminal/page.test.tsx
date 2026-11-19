@@ -194,6 +194,12 @@ function jsonResponse(status: number, body: unknown, headers?: Record<string, st
 }
 
 type StubOpts = {
+  // FIN-COUNTS-HISTORY: the caller's own account, from the unrelated,
+  // already-public `/me` endpoint -- not `/terminal/me`'s own response,
+  // which carries no field naming who's asking. Defaults to a fixed id a
+  // test can compare a staff row's own userId against.
+  meId?: string;
+  meStatus?: number;
   workspaceStatus?: number;
   workspaceBody?: unknown;
   queueRows?: unknown[];
@@ -244,6 +250,9 @@ function stubFetch(opts: StubOpts = {}) {
       if (url.includes('/api/terminal/me')) {
         return jsonResponse(opts.workspaceStatus ?? 200, opts.workspaceBody ?? WORKSPACE);
       }
+      if (url.endsWith('/api/me')) {
+        return jsonResponse(opts.meStatus ?? 200, { id: opts.meId ?? 'user_me' });
+      }
       // TERM-STAFF-UI: exact-path + GET only -- the mutation routes below
       // (.../staff/:userId/role, .../locations/:id, .../invites/:id/resend
       // etc.) all share this same "/api/terminal/staff" prefix and must NOT
@@ -252,12 +261,17 @@ function stubFetch(opts: StubOpts = {}) {
         return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [], locations: [] });
       }
       if (url.includes('/api/terminal/inbound')) {
+        // FIN-COUNTS-HISTORY: counted, not just answered -- the refresh-
+        // after-action test proves THIS was re-fetched after an unrelated
+        // action, which a response-shape assertion alone can't show.
+        calls.push({ url, method, body: null });
         if (opts.inboundStatus && opts.inboundStatus !== 200) {
           return jsonResponse(opts.inboundStatus, opts.inboundErrorBody ?? { message: 'Could not load what is inbound.' });
         }
         return jsonResponse(200, { items: opts.inboundItems ?? [], hasMore: opts.inboundHasMore ?? false });
       }
       if (url.includes('/api/terminal/custody')) {
+        calls.push({ url, method, body: null });
         if (opts.custodyStatus && opts.custodyStatus !== 200) {
           return jsonResponse(opts.custodyStatus, opts.custodyErrorBody ?? { message: 'Could not load what you are holding.' });
         }
@@ -553,6 +567,59 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     expect(calls.filter((c) => c.url.includes('/release-to-courier'))).toHaveLength(1);
   });
 
+  /**
+   * FIN-COUNTS-HISTORY / FIN-HIST-LAG: before this fix, every one of the
+   * five queue actions refreshed ONLY /terminal/queue -- Incoming, On Hand
+   * and History (Stanley's "arrived at terminal, History still says IN
+   * TRANSIT" finding) went stale with no visible signal until their own tab
+   * was separately refreshed. A test that only checks the acting tab's own
+   * view updated (every test above this one) cannot catch that -- it has to
+   * count calls to the OTHER three endpoints.
+   */
+  it('refetches Incoming, On Hand and History (once a MANAGER has opened it), not only the queue, after any action', async () => {
+    const calls = stubFetch({
+      workspaceBody: MANAGER_WORKSPACE,
+      queueRows: [COLLECT_ROW],
+      inboundItems: [],
+      custodyItems: [],
+      historyItems: [{ shipmentId: 's1', reference: 'BML-1', status: 'IN_TRANSIT', parcel: '1 parcel', isTest: false, createdAt: '2026-11-01T00:00:00.000Z', senderName: 'A', recipientName: 'B', touchedHubs: [] }],
+    });
+    await mount();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // History is lazy -- only loaded once its own tab is opened at least
+    // once. Open it before the action so the refresh has something to do.
+    await clickTab('History');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await clickTab('Collect');
+
+    const inboundCallsBefore = calls.filter((c) => c.url.includes('/terminal/inbound')).length;
+    const custodyCallsBefore = calls.filter((c) => c.url.includes('/terminal/custody')).length;
+    const historyCallsBefore = calls.filter((c) => c.url.includes('/terminal/history')).length;
+
+    setValue(container!.querySelector('#collect-code-ship_1') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#collect-who-ship_1') as HTMLInputElement, 'Ana Cruz');
+    await clickButton('Record collection');
+
+    expect(calls.filter((c) => c.url.includes('/terminal/inbound')).length).toBeGreaterThan(inboundCallsBefore);
+    expect(calls.filter((c) => c.url.includes('/terminal/custody')).length).toBeGreaterThan(custodyCallsBefore);
+    expect(calls.filter((c) => c.url.includes('/terminal/history')).length).toBeGreaterThan(historyCallsBefore);
+  });
+
+  it('does not refetch History after an action when no MANAGER has ever opened that tab -- nothing to refresh, nothing wasted', async () => {
+    const calls = stubFetch({ queueRows: [COLLECT_ROW] });
+    await mount();
+
+    setValue(container!.querySelector('#collect-code-ship_1') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#collect-who-ship_1') as HTMLInputElement, 'Ana Cruz');
+    await clickButton('Record collection');
+
+    expect(calls.some((c) => c.url.includes('/terminal/history'))).toBe(false);
+  });
+
   it('groups a mixed queue by action and shows the hub on each row', async () => {
     stubFetch({ queueRows: [DEPART_ROW, HANDOFF_ROW, COLLECT_ROW] });
     await mount();
@@ -804,6 +871,90 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
   // these tests assert that, never a client-paraphrased string, matching
   // the owner's explicit rule that the API proves the boundary.
   describe('TERM-STAFF-UI — staff self-service: role change, membership, location grants, invite control', () => {
+    /**
+     * FIN-SELF-LOCKOUT (corrected by god after Pam read the admin
+     * endpoints): the two notes say DIFFERENT true things, not one shared
+     * sentence. endMember/reactivateMember never write memberRole, so no
+     * admin-console endpoint can change a role at all today -- the
+     * role-change note names no administrator, only another manager. Ending
+     * a membership genuinely does have an admin door, so that note names
+     * one. Naming an administrator next to role-change would promise a
+     * capability that exists nowhere in the product -- the owner's
+     * no-dead-buttons rule expressed in text instead of a disabled button.
+     * `meId` matches STAFF_ROSTER.members[0].userId ('user_1') -- everything
+     * else about Edward's own row (badges, locations) is untouched; only
+     * the two destructive/role controls are gone.
+     */
+    it("replaces End membership and the role-change control with two different notes -- only ending a membership names an administrator", async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Set as operator')).toBe(false);
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'End membership')).toBe(false);
+      expect(container!.textContent).toContain('You cannot change your own role from manager to operator. Another manager can do this for you.');
+      expect(container!.textContent).toContain(
+        'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.',
+      );
+    });
+
+    it("still offers End membership and the role-change control on a DIFFERENT manager's row, not just the signed-in one's own", async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'someone_else' });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Set as operator')).toBe(true);
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'End membership')).toBe(true);
+      expect(container!.textContent).not.toContain('You cannot change your own role');
+      expect(container!.textContent).not.toContain('You cannot end your own terminal company membership');
+    });
+
+    /**
+     * FIN-SELF-LOCKOUT: the asymmetry is the whole point of god's
+     * correction -- an administrator must never be named near the
+     * role-change note, because no admin-console endpoint can change a
+     * role at all today (Pam's finding). Asserted on its own, not just as
+     * part of the combined note test above, so a future edit that
+     * re-merges the two notes back into one shared sentence fails here
+     * specifically.
+     */
+    // The only admin-console route to a role change is end-membership plus a fresh invite
+    // at the new role. acceptInvite reuses the existing member row and upserts the invite's
+    // location grants rather than deleting any -- so the member row and their location
+    // access survive -- but it still requires the person to accept an invitation
+    // themselves, as someone who is not a member in between. "An administrator can change
+    // your role" would imply the administrator does it directly, which is not what happens.
+    // That is why no administrator is named here -- do not restore the word.
+    it('never mentions an administrator in the role-change note -- no admin endpoint can change a role today', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      const roleNote = Array.from(container!.querySelectorAll('span')).find((s) =>
+        s.textContent?.includes('You cannot change your own role'),
+      );
+      expect(roleNote).toBeDefined();
+      expect(roleNote!.textContent).not.toContain('administrator');
+    });
+
     it('appoints an ACTIVE operator as manager with one PATCH, body { memberRole: "MANAGER" }', async () => {
       const calls = stubFetch({
         workspaceBody: MANAGER_WORKSPACE,
@@ -1500,6 +1651,48 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('Belize City Hub');
       expect(container!.textContent).toContain('San Pedro Hub');
       expect(container!.textContent).toContain('Demo');
+    });
+
+    /**
+     * FIN-COUNTS-HISTORY: the owner's "we said six staged shipments, History
+     * shows eight" finding. Not a data bug -- confirmed against
+     * docs/EDWARD-DEMO-WORKSPACE-GUIDE.md, which already names the two
+     * extras as unrelated verification-team test records. The owner's
+     * objection was that a GUIDE explained it rather than the SCREEN -- this
+     * puts the true, general mechanism on screen instead: History is the
+     * complete all-time ledger, the other tabs only count what's in
+     * progress. It does not name which rows are which; there is no reliable
+     * field to do that without inventing one.
+     */
+    it('states on screen why History can list more shipments than Overview/Incoming/On Hand/Queue ever count', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [HISTORY_ROW] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('History lists every shipment that has ever touched your locations, including setup and test records');
+      expect(container!.textContent).toContain("Overview, Incoming, On Hand and the queue tabs only ever count what's still in progress");
+    });
+
+    /**
+     * FIN-HIST-LAG, the SECOND defect under that name (god stopped the PR
+     * to flag this -- Stanley pulled BML-FE5WKZQW live: shipment.status =
+     * IN_TRANSIT, its one leg genuinely arrived but not yet handed off).
+     * The refresh fix (tested elsewhere in this file) only kills the
+     * staleness half. This is the vocabulary half: History reports the
+     * SHIPMENT's status, a working tab reports one LEG's custody state,
+     * and both can be true at once and look like a contradiction. No
+     * refresh changes that -- only a label does, which is what this
+     * asserts.
+     */
+    it('labels the History status as the shipment-level status, so it does not read as a bare contradiction of a working tab', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [{ ...HISTORY_ROW, status: 'IN_TRANSIT' }] });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('Shipment status');
+      expect(container!.textContent).toContain(
+        "The status shown here describes the whole shipment's journey, not the one step a working tab may be handling right now",
+      );
     });
 
     it('shows an honest empty state when there is no history yet', async () => {
