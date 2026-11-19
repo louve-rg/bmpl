@@ -26,11 +26,9 @@ password yet, or don't remember it, use "Forgot password" on the login page
 and set it yourself from your own mailbox — nobody else can see or set a
 password for you.
 
-Once you're in, check for the plain "Demo" label next to your company name
-on screen — that is how your workspace tells you which world you are in, and
-you should never have to guess (Section 10). If you ever sign in and do not
-see that label, or the screen looks empty or unfamiliar in any other way,
-stop before clicking anything and tell us exactly what you saw.
+When you sign in, look for the plain "Demo" label next to your company
+name; if it is ever missing, stop before clicking anything and tell us
+exactly what you saw instead.
 
 ---
 
@@ -434,7 +432,10 @@ today — that part of your real account is genuinely set up, not missing or
 pending. What is not active is the terminal: San Pedro Elite's real
 terminal is deliberately switched off until it is separately authorised to
 go live, so you should not expect to find a working terminal for it today.
-There's nothing wrong with it and nothing broken.
+If its name ever appears on your screen in the meantime, it will have
+nothing in it to work with, because none of its locations are active yet
+either — an empty screen there, same as anywhere else in this product,
+means caught up or not yet switched on, never broken.
 
 Switched off is not the same as removed. Nowhere in this product does
 pausing a terminal location, or a terminal company, delete anything — the
