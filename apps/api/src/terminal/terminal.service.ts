@@ -774,15 +774,22 @@ export class TerminalService {
    * reason. Second (reversed, briefly): an administrator CAN reach a
    * role change INDIRECTLY, via `endMember` followed by a fresh invite
    * at the new role — so for a moment the message named one anyway.
-   * THAT WAS ALSO WRONG, and this is the actual principle: a message
-   * must not promise a mechanism whose side effects it does not
-   * disclose. The indirect route is not the same action under a
-   * different hand — it ENDS the member's standing, requires them to
-   * accept a brand-new invitation, and does not carry their existing
-   * `TerminalCompanyMemberLocation` grants across (contrast
-   * `staffDeactivateMember` below: `endMember` through the admin door
-   * does EXACTLY what the self-service door would have done, no hidden
-   * side effect, so that message correctly DOES name an administrator).
+   * THAT WAS ALSO WRONG TOO, but on a narrower point — checked against
+   * `acceptInvite` (2026-11-18): the member row is reused (updated in
+   * place, not duplicated) and existing `TerminalCompanyMemberLocation`
+   * grants are upserted, never deleted, so they DO survive the indirect
+   * route. The actual principle still holds: a message must not promise
+   * a mechanism whose side effects it does not disclose. The indirect
+   * route is not the same action under a different hand — it ENDS the
+   * member's standing and requires THEM, not the administrator, to accept
+   * a brand-new invitation before the role actually changes. "An
+   * administrator can do this for you" implies the administrator
+   * performs it; here the member must act themselves, and is not a
+   * member in between. That gap is what makes this message withhold the
+   * administrator, not any loss of data (contrast `staffDeactivateMember`
+   * below: `endMember` through the admin door does EXACTLY what the
+   * self-service door would have done, no fresh acceptance required of
+   * anyone, so that message correctly DOES name an administrator).
    * A sole manager who hits this message has a genuine dead end for a
    * same-standing role change — that is honestly stated here, not
    * hidden behind a workaround with undisclosed consequences; the

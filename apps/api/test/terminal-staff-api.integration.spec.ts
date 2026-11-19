@@ -44,19 +44,24 @@ const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
 // FIN-SELF-LOCKOUT — each message names WHO can act instead, and the two
-// differ ON PURPOSE. FINAL state (2026-11-18), after three passes on this
+// differ ON PURPOSE. FINAL state (2026-11-18), after four passes on this
 // one sentence, all the owner's: a role change has no DIRECT admin path,
 // and the INDIRECT one (endMember + a fresh invite at the new role) is not
-// the same action under a different hand — it ends the membership, forces
-// a fresh invite-accept, and does not carry location grants across. A
-// message must not promise a mechanism whose side effects it does not
-// disclose, so this message names no administrator at all, honestly
-// leaving a sole manager with no same-standing role-change route (the
-// workaround and its cost belong in Edward's operating guide, not a
-// one-line refusal). Ending a membership has no such gap — endMember
-// through the admin door does exactly what self-service would have — so
-// SELF_END_MESSAGE correctly keeps both halves. See terminal.service.ts's
-// comment on staffChangeRole for the fuller history of this sentence.
+// the same action under a different hand — it ends the membership and
+// requires the MEMBER, not the administrator, to accept a fresh invite
+// before the role actually changes (checked against acceptInvite: the
+// member row and their location grants survive this route intact — that
+// part was a wrong example, now corrected). A message must not promise a
+// mechanism whose side effects it does not disclose, so naming an
+// administrator here would imply the administrator does it, when in fact
+// the member must act themselves — this message names no administrator at
+// all, honestly leaving a sole manager with no same-standing role-change
+// route (the workaround and its cost belong in Edward's operating guide,
+// not a one-line refusal). Ending a membership has no such gap — endMember
+// through the admin door does exactly what self-service would have, no
+// fresh acceptance required of anyone — so SELF_END_MESSAGE correctly
+// keeps both halves. See terminal.service.ts's comment on staffChangeRole
+// for the fuller history of this sentence.
 const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager can do this for you.';
 const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.';
 
