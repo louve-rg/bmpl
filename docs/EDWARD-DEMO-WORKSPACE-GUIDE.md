@@ -113,14 +113,13 @@ the delivery (**BML-86EBCC3F**).
 
 ### Two more you'll see in History that are not yours
 
-Your **History** tab will actually list **eight** entries, not six. Two of
-them — **BML-FE5WKZQW** and **BML-GWEUUB35** — are demonstration shipments
-created to test arrival and collection at the terminal. They are not part
-of your demonstration. We cannot remove
-them without a database change we are not prepared to make, and they are
-safe to ignore. We are telling you plainly so that counting eight does not
-read as something wrong with your demonstration, or as parcels you have
-lost track of.
+Two entries in your **History** tab — **BML-FE5WKZQW** and
+**BML-GWEUUB35** — are demonstration shipments created to test arrival
+and collection at the terminal. They are not part of your demonstration.
+We cannot remove them without a database change we are not prepared to
+make, and they are safe to ignore. History itself explains, on screen,
+why its own count will always run ahead of what you see elsewhere — see
+Section 7.
 
 ---
 
@@ -199,9 +198,12 @@ Four things worth knowing about these two screens:
   learning anything about another terminal's parcels is what stops anyone
   else from learning about yours.
 - **A finished parcel disappears from every screen except History and
-  Lookup.** The counts on Overview, Incoming, On Hand and Collect only ever
-  count parcels still in progress, so seeing two there while History lists
-  eight is correct — it is not lost data.
+  Lookup.** Overview, Incoming, On Hand and Collect only ever count
+  parcels still in progress, while History is the complete record of
+  everything that has ever touched your locations — the History screen
+  itself has a note explaining exactly this, so a smaller number
+  everywhere else is correct, not lost data. Trust that note for the
+  specifics; the exact counts change as your demo does.
 - **History can lag by one label.** A parcel that has arrived at your
   terminal but not yet been handed off to you can still show as "In
   Transit" in History, even while the **Hand off** tab correctly shows it as
@@ -307,8 +309,11 @@ deliberate, not an omission. The administrator route to a role change
 needs you yourself to accept a fresh invitation (Section 9), so there's no
 one who can simply do it for you behind the scenes the way there is for
 ending access. Either way, you can use your own row on the Staff tab with
-confidence: this protection holds on its own, regardless of who else is
-active on your account.
+confidence: this has been confirmed directly against the live production
+system, with two other active Managers in place at the time, and both
+self-targeted attempts were refused with exactly the messages above. The
+protection holds on its own, regardless of who else is active on your
+account.
 
 ---
 
