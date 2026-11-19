@@ -931,9 +931,12 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
      * specifically.
      */
     // The only admin-console route to a role change is end-membership plus a fresh invite
-    // at the new role -- that requires a fresh acceptance, so it is not the direct action
-    // this note would be promising. That is why no administrator is named here. Naming one
-    // would promise a direct action we do not perform -- do not restore the word.
+    // at the new role. acceptInvite reuses the existing member row and upserts the invite's
+    // location grants rather than deleting any -- so the member row and their location
+    // access survive -- but it still requires the person to accept an invitation
+    // themselves, as someone who is not a member in between. "An administrator can change
+    // your role" would imply the administrator does it directly, which is not what happens.
+    // That is why no administrator is named here -- do not restore the word.
     it('never mentions an administrator in the role-change note -- no admin endpoint can change a role today', async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER, meId: 'user_1' });
       await mount();
