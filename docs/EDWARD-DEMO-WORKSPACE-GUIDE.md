@@ -346,10 +346,19 @@ checked directly against what the system actually allows, not assumed.
   included: it only marks the membership ended, nothing is deleted, and
   restoring it brings your terminal access back with it.
 - **Removing your own last location, if you are the company's only
-  active Manager.** The system refuses this to stop the company being
-  left with nobody holding a location to work from. You likely won't hit
-  this on purpose, but if you ever do by accident, that refusal is the
-  system working correctly, not something broken.
+  active Manager.** This refusal is precise: it only fires when you are
+  a Manager, you are the only active Manager in the company, and the
+  location you're removing is your last one. With a second active
+  Manager in place, either of you can have a last location removed
+  freely. You'll see your own message if you hit it: *"This would leave
+  the company's only manager without access to any location."* You
+  likely won't hit this on purpose, but if you ever do by accident,
+  that refusal is the system working correctly, not something broken —
+  and even then, you are never actually locked out: granting a location
+  doesn't require the person granting it to hold one themselves, so you
+  could grant yourself a location straight back immediately. Your
+  authority as Manager comes from your membership and your role, not
+  from holding a location — losing one doesn't reduce it.
 - **Unlocking a parcel after too many wrong codes.** If a collection or
   hand-off code is entered incorrectly enough times, the system locks that
   parcel as a precaution against guessing. Only a BML administrator can clear
