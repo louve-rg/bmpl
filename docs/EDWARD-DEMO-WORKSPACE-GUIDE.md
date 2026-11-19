@@ -1,10 +1,12 @@
 # Running your demo Terminal Workspace
 
 This guide is about your **demonstration workspace only** — a simulation
-environment, labelled "Demo" wherever it appears on screen. Nothing you do
-here touches San Pedro Elite, your real SP-EL-TER terminal, a real customer,
-or real money. Treat anything this guide describes as something you can try
-freely, because none of it is real. Section 9 explains how the two relate.
+environment, labelled "Demo" wherever it appears on screen, built on its own
+hubs, its own route and its own test customer, so it is a complete, working
+environment rather than a stripped-down preview. Nothing you do here touches
+San Pedro Elite, your real SP-EL-TER terminal, a real customer, or real
+money. Treat anything this guide describes as something you can try freely,
+because none of it is real. Section 10 explains how the two relate.
 
 This guide describes behaviour our own quality-assurance team has watched
 work end to end on the live, deployed site, using our own test accounts —
@@ -23,6 +25,12 @@ at the login page above with your own email address. If you don't have a
 password yet, or don't remember it, use "Forgot password" on the login page
 and set it yourself from your own mailbox — nobody else can see or set a
 password for you.
+
+Once you're in, check for the plain "Demo" label next to your company name
+on screen — that is how your workspace tells you which world you are in, and
+you should never have to guess (Section 10). If you ever sign in and do not
+see that label, or the screen looks empty or unfamiliar in any other way,
+stop before clicking anything and tell us exactly what you saw.
 
 ---
 
@@ -339,10 +347,12 @@ BML administrator — no matter who you are or what role you hold. This is
 checked directly against what the system actually allows, not assumed.
 
 - **Adding a new counter location to your company, or closing an existing
-  one.** Both need a BML administrator. What you *can* do yourself is decide
-  which of your existing locations each of your employees may work at
-  (Section 8). Put simply: **which of your locations a person can work at is
-  yours to set; adding or closing a location is ours.**
+  one.** Both need a BML administrator. "Closing" pauses a location rather
+  than deleting it — the same reversible pattern as ending someone's access
+  (Section 8). What you *can* do yourself is decide which of your existing
+  locations each of your employees may work at (Section 8). Put simply:
+  **which of your locations a person can work at is yours to set; adding or
+  closing a location is ours.**
 - **Managing anyone outside your own company, or giving anyone platform
   administrator powers.** You cannot see or touch another company's staff,
   and you cannot grant anyone — including yourself — any administrator
@@ -410,16 +420,33 @@ checked directly against what the system actually allows, not assumed.
 ## 10. Your demo workspace and your real terminal
 
 Your demo workspace and your real SP-EL-TER terminal are two separate,
-unconnected places in the system. Nothing you click, invite, receive or
+unconnected places in the system — built on entirely different records, not
+just different screens. Your demo runs on its own pair of terminals, each
+with its own code: **DEMO San Pedro Terminal** (DEMO-SP-TER) and **DEMO
+Belize City Interchange** (DEMO-BZ-DC), joined by a priced boat route
+between them, with its own test customer and its own demo parcels. None of
+that is San Pedro Elite or SP-EL-TER. Nothing you click, invite, receive or
 release in the demo touches San Pedro Elite's real staff, real parcels or
 real customers, in either direction.
 
-Your real terminal is not active yet. There's nothing wrong with it and
-nothing broken — it simply hasn't been switched on for live operation, so
-you won't find a workspace to sign into for it today. When it does go
-live, it will look and work exactly like the one this guide describes,
-because the demo runs the same code as the real product. Nothing in this
-guide will need to be relearned.
+You already hold an active Manager membership of San Pedro Elite itself
+today — that part of your real account is genuinely set up, not missing or
+pending. What is not active is the terminal: San Pedro Elite's real
+terminal is deliberately switched off until it is separately authorised to
+go live, so you should not expect to find a working terminal for it today.
+There's nothing wrong with it and nothing broken.
+
+Switched off is not the same as removed. Nowhere in this product does
+pausing a terminal location, or a terminal company, delete anything — the
+same is true of ending someone's own access (Section 8), which is why that
+is always reversible. Whatever it takes to bring San Pedro Elite's terminal
+live starts from what already exists today, not from scratch. We are not
+promising a date, and we are not promising that turning it on will be a
+single step — only that nothing about today's pause is destructive.
+
+When it does go live, it will look and work exactly like the one this
+guide describes, because the demo runs the same code as the real product.
+Nothing in this guide will need to be relearned.
 
 Until then, if you ever see a "Demo" label on a shipment, a company, or a
 screen, that's your workspace telling you plainly which world you're in —

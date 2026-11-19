@@ -15,7 +15,7 @@ For where the project actually stands:
 
 ## What is here, and why it is wrong
 
-Archived 2026-09-03.
+Archived 2026-09-03 unless noted otherwise.
 
 | File | Written | Why it is archived |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ Archived 2026-09-03.
 | `PHASE-1.5A-VERIFICATION.md` | Jul 2026 | Verification report for local integration work, when the integration suite was 36 tests. It is now 691 across 55 spec files. |
 | `PHASE-1.5C-STATUS.md` | Jul 2026 | Status of a cloud-deployment preparation phase that has since completed and been superseded many times over. |
 | `CHANGED_FILES.md` | Jul 2026 | A file-by-file changelog of one phase. `git log` is the live version of this. |
+| `EDWARD-TERMINAL-ONBOARDING.md` | Oct 2026, archived 2026-11-19 (MDF-893) | A pre-deployment planning draft for Edward's onboarding, written before collection codes, the invitation flow, or the demo/real "Demo" label existed in the product. Edward has since been invited and onboarded; the document actually sent to him is `../EDWARD-DEMO-WORKSPACE-GUIDE.md`. |
 
 Some items in `REMAINING_WORK.md` **are** still genuinely outstanding — ESLint
 configuration, a nonce-based CSP, push notifications, antivirus scanning,

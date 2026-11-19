@@ -1,5 +1,15 @@
 # Terminal Workspace — onboarding pack for Edward (draft, for the owner's review)
 
+**Archived 2026-11-19 (MDF-893). Superseded — do not send, do not cite as
+current.** This was a pre-deployment planning draft, written before
+collection codes, the invitation flow and the demo/real "Demo" label
+existed in the product; several of its own statements (collection "does not
+exist yet", the label "does not exist on screen yet") are now false. Edward
+has since been invited and onboarded, and the document actually sent to him
+is [`../EDWARD-DEMO-WORKSPACE-GUIDE.md`](../EDWARD-DEMO-WORKSPACE-GUIDE.md).
+Kept here only for the reasoning it recorded at the time. The rest of this
+file is unchanged from the original draft below.
+
 **Not yet sent to anyone.** This is written for a client to read, not a
 developer — plain language, no file paths, no jargon — but it has not gone
 to Edward and should not until the owner decides to send it. His confirmed
