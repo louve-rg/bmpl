@@ -283,25 +283,30 @@ removed from your list without a database change nobody has authorised, so
 they will stay there — please leave all three alone.
 
 **Do not click Restore on Stanley Fixture.** Most warnings in this guide
-are about something that merely looks wrong on screen. This is one of two
-instructions where getting it wrong actually does something: that row
+are about something that merely looks wrong on screen. This is the one
+instruction where getting it wrong actually does something: that row
 still shows a Restore option, and clicking it would hand a working Operator
 account at your terminal to a test identity, not just bring back something
 harmless. Leave that row exactly as it is.
 
-**Do not end your own access, and do not change your own role to
-Operator.** This guide earlier told you the system always keeps a company
-with at least one active Manager and refuses to let the last one demote or
-remove themselves. That protection is real, but it only stops you from
-being the *last* active Manager — and because our Qa Manager account is
-also an active Manager on your company right now, the system currently
-sees two of you, so it will **not** stop you from ending your own access or
-demoting yourself today. Doing either would lock you out of staff
-management, and ending your own access would lock you out of the workspace
-entirely — and you would not be able to undo it yourself. If that ever
-happens, contact us and we will restore your access. This is the second of
-the two instructions in this document where getting it wrong does
-something rather than merely looking odd — leave your own row alone.
+**You cannot end your own access, or change your own role to Operator —
+and that's by design, not by luck.** The system refuses both outright,
+enforced by the server itself rather than a disabled button, no matter how
+many other Managers are active on your company. If you try either, you'll
+see exactly this:
+
+- Changing your own role: *"You cannot change your own role from manager
+  to operator. Another manager can do this for you."*
+- Ending your own access: *"You cannot end your own terminal company
+  membership. Another manager, or an administrator, can do this for you."*
+
+Notice the role-change message doesn't name an administrator — that's
+deliberate, not an omission. The administrator route to a role change
+needs you yourself to accept a fresh invitation (Section 9), so there's no
+one who can simply do it for you behind the scenes the way there is for
+ending access. Either way, you can use your own row on the Staff tab with
+confidence: this protection holds on its own, regardless of who else is
+active on your account.
 
 ---
 
