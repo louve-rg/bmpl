@@ -263,10 +263,12 @@ your workspace is where you manage your own team.
   revoke, nothing does. Removing one location only ends their access to
   that location — it never ends their membership or changes their role.
 - **The one-Manager floor.** Your company must always have at least one
-  active Manager. We watched this refuse, in a real browser: a sole Manager
-  cannot demote themselves to Operator, cannot end their own access, and
-  cannot remove their own last location. Section 9 says more about what
-  this means for you specifically.
+  active Manager — that protection is real, and it's what stops your own
+  last location being removed while you're the only Manager holding it
+  (Section 9). Ending your own access or changing your own role to
+  Operator used to depend on this same floor; they no longer do. Both are
+  now refused outright, for any Manager, regardless of how many others are
+  active — see below in this section for exactly what that looks like.
 
 All of the above held up after a page refresh and after signing out and back
 in fresh — it is a real, saved change, not something that looks done and
@@ -326,27 +328,28 @@ checked directly against what the system actually allows, not assumed.
   and you cannot grant anyone — including yourself — any administrator
   power over BML's platform. This isn't a restriction worth worrying about;
   it's why your staff list is genuinely your own and nobody else's.
-- **Changing your own role away from Manager, if you are the company's only
-  active Manager.** This needs another Manager to do it for you — you
-  cannot step yourself down to Operator while you're the only one, and the
-  product will tell you so rather than let you. There is no simple role
-  toggle for this case: the only route is ending your membership and
-  sending you a fresh invitation at the new role, which you would have to
-  accept yourself. Your terminal access is preserved through this, not
-  rebuilt from scratch — it's the same membership, picked back up at the
-  new role. The real cost is that you have to act: you are not a member
-  of your own company in the gap between the two steps, until you accept
-  the new invitation. So if you ever genuinely need this while you remain
-  the only Manager, contact us and we will walk you through it.
-- **Ending your own access, or removing your own last location, if you are
-  the company's only active Manager.** The system refuses both the same
-  way and for the same reason — it exists to stop the company being left
-  with nobody in charge. You likely won't hit this on purpose, but if you
-  ever do by accident, that refusal is the system working correctly, not
-  something broken. If you ever genuinely need either done while you're
-  the only Manager, contact us — ending a membership is fully reversible,
-  location access included: it only marks the membership ended, nothing
-  is deleted, and restoring it brings your terminal access back with it.
+- **Changing your own role away from Manager.** This needs another
+  Manager to do it for you, full stop — not only when you're the only
+  one. See Section 8 for exactly what the product tells you if you try.
+  There is no simple role toggle either way: the only route is ending
+  your membership and sending you a fresh invitation at the new role,
+  which you would have to accept yourself. Your terminal access is
+  preserved through this, not rebuilt from scratch — it's the same
+  membership, picked back up at the new role. The real cost is that you
+  have to act: you are not a member of your own company in the gap
+  between the two steps, until you accept the new invitation. If you
+  ever genuinely need this, contact us and we will walk you through it.
+- **Ending your own access.** Refused outright, full stop — not only
+  when you're the only Manager. See Section 8 for exactly what the
+  product tells you if you try. If you ever genuinely need it, contact
+  us — ending a membership is fully reversible, location access
+  included: it only marks the membership ended, nothing is deleted, and
+  restoring it brings your terminal access back with it.
+- **Removing your own last location, if you are the company's only
+  active Manager.** The system refuses this to stop the company being
+  left with nobody holding a location to work from. You likely won't hit
+  this on purpose, but if you ever do by accident, that refusal is the
+  system working correctly, not something broken.
 - **Unlocking a parcel after too many wrong codes.** If a collection or
   hand-off code is entered incorrectly enough times, the system locks that
   parcel as a precaution against guessing. Only a BML administrator can clear
