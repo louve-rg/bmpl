@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { hashPassword, hashToken, issueToken } from '@bmpl/authentication';
+import { isSelfAction } from '@bmpl/authorization';
 import { templates } from '@bmpl/notifications';
 import type {
   AcceptTerminalInviteInput,
@@ -706,8 +707,22 @@ export class TerminalService {
    * The last-ACTIVE-MANAGER floor, same guard shape on every door that can
    * remove a MANAGER's standing, different trigger per door — applies
    * identically whether the caller is acting on themselves or on another
-   * manager; there is no separate "is this me" rule, per the owner's
-   * directive.
+   * manager: this floor alone never distinguished "is this me," and still
+   * doesn't.
+   *
+   * FIN-SELF-LOCKOUT (2026-11-18) supersedes the owner's EARLIER directive
+   * that this comment used to cite verbatim ("there is no separate 'is
+   * this me' rule"). That was true of THIS floor and remains true of it —
+   * the floor is still one condition, about the COMPANY, blind to who the
+   * actor is. What changed is that a SECOND, separate guard now sits in
+   * front of it in `staffChangeRole`/`staffDeactivateMember`: the ACTOR
+   * may never act on their own standing through those self-service doors
+   * at all, regardless of how many managers exist, so the floor below can
+   * fire on a self-action but a self-action usually never reaches it
+   * anymore — the self guard answers first. Two guards, never merged: do
+   * not fold the self check into this method's `wouldRemoveOneManager`
+   * condition, and do not delete this comment's history when touching
+   * either guard again.
    */
   private async assertManagerFloorHolds(tx: Prisma.TransactionClient, companyId: string, wouldRemoveOneManager: boolean): Promise<void> {
     if (!wouldRemoveOneManager) return;
@@ -734,9 +749,63 @@ export class TerminalService {
    * so a demote-to-the-same-role request against the last manager is
    * refused exactly like a real demote would be, never silently accepted
    * as "nothing changed."
+   *
+   * FIN-SELF-LOCKOUT (2026-11-18, the owner's reversal of his own earlier
+   * "no separate is-this-me rule" — see `assertManagerFloorHolds`'s
+   * comment below for that history): a MANAGER demoting THEMSELVES to
+   * OPERATOR is refused unconditionally, before the floor check even
+   * runs — a different guard from `assertManagerFloorHolds`, not a
+   * special case of it. The floor is about the COMPANY (never zero
+   * active managers) and fires regardless of who the target is; this is
+   * about the ACTOR and fires regardless of how many managers exist —
+   * even with a second active manager standing by and zero floor risk,
+   * self-demotion is still refused. They CAN both be true of the same
+   * request (a lone manager demoting themselves trips the floor too),
+   * but the self guard is checked first, so the caller sees the mistake
+   * that is actually theirs — they tried to act on their own standing —
+   * never the company-wide floor text, which would be true but tell them
+   * nothing about why they were actually stopped. The message says who
+   * CAN do it: ONLY another manager — never an administrator, and this
+   * went through two wrong answers before landing here (2026-11-18), both
+   * the owner's, worth recording so the next edit doesn't repeat them.
+   * First: no admin-console endpoint writes `memberRole` at all
+   * (`endMember`/`reactivateMember` never touch it), so naming an
+   * administrator seemed simply false — true, but not the whole
+   * reason. Second (reversed, briefly): an administrator CAN reach a
+   * role change INDIRECTLY, via `endMember` followed by a fresh invite
+   * at the new role — so for a moment the message named one anyway.
+   * THAT WAS ALSO WRONG TOO, but on a narrower point — checked against
+   * `acceptInvite` (2026-11-18): the member row is reused (updated in
+   * place, not duplicated) and existing `TerminalCompanyMemberLocation`
+   * grants are upserted, never deleted, so they DO survive the indirect
+   * route. The actual principle still holds: a message must not promise
+   * a mechanism whose side effects it does not disclose. The indirect
+   * route is not the same action under a different hand — it ENDS the
+   * member's standing and requires THEM, not the administrator, to accept
+   * a brand-new invitation before the role actually changes. "An
+   * administrator can do this for you" implies the administrator
+   * performs it; here the member must act themselves, and is not a
+   * member in between. That gap is what makes this message withhold the
+   * administrator, not any loss of data (contrast `staffDeactivateMember`
+   * below: `endMember` through the admin door does EXACTLY what the
+   * self-service door would have done, no fresh acceptance required of
+   * anyone, so that message correctly DOES name an administrator).
+   * A sole manager who hits this message has a genuine dead end for a
+   * same-standing role change — that is honestly stated here, not
+   * hidden behind a workaround with undisclosed consequences; the
+   * workaround belongs in Edward's operating guide, where there's room
+   * to explain what it actually costs, not in a one-line refusal. There
+   * is no ownership-transfer workflow in this codebase, so there is no
+   * legitimate case where a manager must be allowed to demote themselves
+   * — the refusal has no exception path by design. A MANAGER may still
+   * freely promote themselves to MANAGER (a no-op) or be demoted by a
+   * DIFFERENT manager; only self-targeted self-demotion is blocked here.
    */
   async staffChangeRole(actorId: string, targetUserId: string, dto: ChangeTerminalCompanyMemberRoleInput) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    if (isSelfAction(actorId, targetUserId) && dto.memberRole === 'OPERATOR') {
+      throw new ForbiddenException('You cannot change your own role from manager to operator. Another manager can do this for you.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
         where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },
@@ -829,11 +898,27 @@ export class TerminalService {
     });
   }
 
-  /** Self-serve mirror of `endMember`, guarded by the same floor as
-   *  `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
-   *  refused, whether the caller is ending themself or someone else. */
+  /**
+   * Self-serve mirror of `endMember`, guarded by the same last-ACTIVE-MANAGER
+   * floor as `staffChangeRole` — ending the company's sole ACTIVE MANAGER is
+   * refused regardless of who is ending whom.
+   *
+   * FIN-SELF-LOCKOUT (2026-11-18): on top of that floor, a MANAGER ending
+   * THEIR OWN membership is refused unconditionally, checked first and
+   * before the floor — same two-guards-not-one reasoning as
+   * `staffChangeRole` above, fires regardless of how many managers exist.
+   * A company with several active managers never trips the floor, but a
+   * manager still cannot end their own access through this door; only a
+   * DIFFERENT manager through this same door, or an administrator through
+   * the admin console's `endMember`, can — unlike the role-change guard
+   * above, an administrator genuinely can do this one, so the message
+   * says so.
+   */
   async staffDeactivateMember(actorId: string, targetUserId: string) {
     const caller = await this.assertActiveMemberRole(actorId, ['MANAGER']);
+    if (isSelfAction(actorId, targetUserId)) {
+      throw new ForbiddenException('You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.terminalCompanyMember.findUnique({
         where: { terminalCompanyId_userId: { terminalCompanyId: caller.terminalCompanyId, userId: targetUserId } },

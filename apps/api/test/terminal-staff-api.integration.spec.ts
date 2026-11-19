@@ -18,6 +18,13 @@
  *    like a location that does not exist at all — proving reach is
  *    impossible by construction, not merely blocked by a check that could
  *    be bypassed with a different id shape.
+ *  - FIN-SELF-LOCKOUT: self-demote (role change) and self-end (deactivate)
+ *    are refused UNCONDITIONALLY for the actor acting on themselves, by a
+ *    guard separate from and checked before the last-manager floor above —
+ *    proven both in the lone-manager case (where the floor would also
+ *    fire, but the self message wins) and with a second active manager
+ *    standing by (where the floor alone would not fire, proving this is
+ *    not a floor special case).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -36,6 +43,27 @@ const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).
 const ROLE_MESSAGE = 'This action requires the terminal manager role.';
 const FLOOR_MESSAGE = 'This company must always have at least one active manager.';
 const LOCATION_FLOOR_MESSAGE = "This would leave the company's only manager without access to any location.";
+// FIN-SELF-LOCKOUT — each message names WHO can act instead, and the two
+// differ ON PURPOSE. FINAL state (2026-11-18), after four passes on this
+// one sentence, all the owner's: a role change has no DIRECT admin path,
+// and the INDIRECT one (endMember + a fresh invite at the new role) is not
+// the same action under a different hand — it ends the membership and
+// requires the MEMBER, not the administrator, to accept a fresh invite
+// before the role actually changes (checked against acceptInvite: the
+// member row and their location grants survive this route intact — that
+// part was a wrong example, now corrected). A message must not promise a
+// mechanism whose side effects it does not disclose, so naming an
+// administrator here would imply the administrator does it, when in fact
+// the member must act themselves — this message names no administrator at
+// all, honestly leaving a sole manager with no same-standing role-change
+// route (the workaround and its cost belong in Edward's operating guide,
+// not a one-line refusal). Ending a membership has no such gap — endMember
+// through the admin door does exactly what self-service would have, no
+// fresh acceptance required of anyone — so SELF_END_MESSAGE correctly
+// keeps both halves. See terminal.service.ts's comment on staffChangeRole
+// for the fuller history of this sentence.
+const SELF_DEMOTE_MESSAGE = 'You cannot change your own role from manager to operator. Another manager can do this for you.';
+const SELF_END_MESSAGE = 'You cannot end your own terminal company membership. Another manager, or an administrator, can do this for you.';
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -161,16 +189,49 @@ describe('TERM-STAFF-API: PATCH /terminal/staff/:userId/role', () => {
     expect(res.body.memberRole).toBe('OPERATOR');
   });
 
-  it('a lone MANAGER cannot demote themselves to OPERATOR — self-demotion is restricted by the SAME floor, not a separate "is it me" rule', async () => {
+  /**
+   * FIN-SELF-LOCKOUT: a MANAGER demoting THEMSELVES is refused
+   * unconditionally — a SEPARATE guard from the last-manager floor, checked
+   * first, with its OWN message. A lone manager self-demoting trips BOTH
+   * guards (floor count is also 1), but the self guard answers first, so
+   * the caller sees the mistake that is theirs to fix ("ask another
+   * manager"), never the company-wide floor text. Supersedes the old
+   * "restricted by the SAME floor, not a separate 'is it me' rule" framing
+   * this test used to assert — the owner's directive now requires exactly
+   * the separate "is it me" rule that comment said didn't exist.
+   */
+  it('a lone MANAGER cannot demote themselves to OPERATOR — refused by the self guard, not the floor', async () => {
     const { company, loc } = await makeCompanyWithLocation('SelfDemoteLast');
     const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
 
     const res = await patch(manager.cookies, `terminal/staff/${manager.userId}/role`, { memberRole: 'OPERATOR' });
-    expect(res.status).toBe(409);
-    expect(res.body.message).toBe(FLOOR_MESSAGE);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_DEMOTE_MESSAGE);
+    expect(res.body.message).not.toBe(FLOOR_MESSAGE);
 
     const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
       where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(row.memberRole).toBe('MANAGER');
+  });
+
+  /**
+   * The genuinely new case the floor alone could never prove: with a SECOND
+   * active manager standing by (so the floor would not fire), self-demotion
+   * is still refused — the guard is unconditional for self, not a
+   * last-manager special case.
+   */
+  it('a MANAGER cannot demote themselves even with another active manager standing by', async () => {
+    const { company, loc } = await makeCompanyWithLocation('SelfDemoteNotLast');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await patch(m1.cookies, `terminal/staff/${m1.userId}/role`, { memberRole: 'OPERATOR' });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_DEMOTE_MESSAGE);
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m1.userId } },
     });
     expect(row.memberRole).toBe('MANAGER');
   });
@@ -308,16 +369,71 @@ describe('TERM-STAFF-API: deactivate / reactivate', () => {
     expect(res.body).toEqual({ ended: true });
   });
 
-  it('deactivating the company\'s ONLY active manager is refused — including ending oneself', async () => {
+  /**
+   * FIN-REGRESSION delta: the role-change door above already proves this
+   * boundary ("with exactly two managers, demoting one... succeeds"); the
+   * deactivate door never had the equivalent. Added for symmetry and
+   * because it is the only way left to exercise the floor's NON-firing
+   * boundary against a genuinely different (non-self) target now that
+   * FIN-SELF-LOCKOUT's self guard answers every self case first — see the
+   * mutual-distinctness test at the end of this file for why the floor's
+   * FIRING branch can no longer be reached by a non-self actor at all.
+   */
+  it('with exactly two managers, deactivating one (non-self) succeeds — one manager remaining is not the floor', async () => {
+    const { company, loc } = await makeCompanyWithLocation('TwoManagersDeactivate');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    const m2 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await post(m1.cookies, `terminal/staff/${m2.userId}/deactivate`, {});
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ ended: true });
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m2.userId } },
+    });
+    expect(row.status).toBe('ENDED');
+  });
+
+  /**
+   * FIN-SELF-LOCKOUT: ending ONESELF is refused by its OWN guard, checked
+   * before the last-manager floor — same two-guards-not-one reasoning as
+   * the role-change self-demote tests above. A lone manager self-ending
+   * trips both guards (floor count is also 1); the self guard answers
+   * first. Supersedes the old "refused ... including ending oneself"
+   * framing this test used to assert as a single floor outcome.
+   */
+  it('a lone MANAGER cannot end their own membership — refused by the self guard, not the floor', async () => {
     const { company, loc } = await makeCompanyWithLocation('DeactivateLast');
     const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
 
     const res = await post(manager.cookies, `terminal/staff/${manager.userId}/deactivate`, {});
-    expect(res.status).toBe(409);
-    expect(res.body.message).toBe(FLOOR_MESSAGE);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_END_MESSAGE);
+    expect(res.body.message).not.toBe(FLOOR_MESSAGE);
 
     const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
       where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(row.status).toBe('ACTIVE');
+  });
+
+  /**
+   * The genuinely new case the floor alone could never prove: with a
+   * SECOND active manager standing by (so the floor would not fire),
+   * self-ending is still refused — unconditional for self, not a
+   * last-manager special case.
+   */
+  it('a MANAGER cannot end their own membership even with another active manager standing by', async () => {
+    const { company, loc } = await makeCompanyWithLocation('SelfEndNotLast');
+    const m1 = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const res = await post(m1.cookies, `terminal/staff/${m1.userId}/deactivate`, {});
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(SELF_END_MESSAGE);
+
+    const row = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: m1.userId } },
     });
     expect(row.status).toBe('ACTIVE');
   });
@@ -354,6 +470,60 @@ describe('TERM-STAFF-API: deactivate / reactivate', () => {
     const reactivateRes = await post(operator.cookies, `terminal/staff/${other.userId}/reactivate`, {});
     expect(reactivateRes.status).toBe(403);
     expect(reactivateRes.body.message).toBe(ROLE_MESSAGE);
+  });
+});
+
+describe('FIN-REGRESSION: the self-lockout and floor refusals are mutually distinct, by substance not by a pinned sentence', () => {
+  /**
+   * The owner's own concern, named explicitly: a test that accepts any
+   * refusal would pass while the two self-lockout messages collapsed into
+   * the floor's wording, or into each other. Compared LIVE, against each
+   * other, never against a literal string this test writes itself -- the
+   * self-demote sentence already changed TWICE tonight (b25bae6e added an
+   * "or an administrator" clause to match self-end's shape; a later
+   * correction from god removed it again, because no admin-console
+   * endpoint can actually change a role) and either message could change
+   * again; a test pinned to one exact wording would break on the next
+   * such edit and prove nothing about the thing that actually matters:
+   * that three genuinely different failures render three genuinely
+   * different messages.
+   *
+   * FLOOR_MESSAGE (the company-wide "at least one active manager" 409) is
+   * deliberately NOT one of the three live triggers below. It cannot be —
+   * `assertManagerFloorHolds` is only ever reached from staffChangeRole/
+   * staffDeactivateMember on the NON-SELF branch (the self guard throws
+   * first for any self-target, before the transaction that calls it even
+   * opens), and a non-self target can never bring the active-manager count
+   * to <=1: the caller must themselves be an ACTIVE MANAGER of that same
+   * company to reach either method at all, so caller != target already
+   * means at least two managers are counted. That was true before
+   * FIN-SELF-LOCKOUT too — the floor's FIRING branch was always only
+   * reachable by a lone manager acting on themselves, which the self guard
+   * now intercepts first. So FLOOR_MESSAGE is checked only as the fixed
+   * string already declared above, confirming no live message below
+   * accidentally collapses onto it — not as a fourth live trigger, because
+   * no live request through these two doors can produce it anymore.
+   */
+  it('self-demote, self-end, and the location floor each produce a DIFFERENT live refusal message', async () => {
+    const demoteFixture = await makeCompanyWithLocation('DistinctSelfDemote');
+    const demoteManager = await inviteAndAccept(demoteFixture.company.id, [demoteFixture.loc.id], 'MANAGER');
+    const selfDemoteRes = await patch(demoteManager.cookies, `terminal/staff/${demoteManager.userId}/role`, { memberRole: 'OPERATOR' });
+    expect(selfDemoteRes.status).toBe(403);
+
+    const endFixture = await makeCompanyWithLocation('DistinctSelfEnd');
+    const endManager = await inviteAndAccept(endFixture.company.id, [endFixture.loc.id], 'MANAGER');
+    const selfEndRes = await post(endManager.cookies, `terminal/staff/${endManager.userId}/deactivate`, {});
+    expect(selfEndRes.status).toBe(403);
+
+    const locFixture = await makeCompanyWithLocation('DistinctLocationFloor');
+    const locManager = await inviteAndAccept(locFixture.company.id, [locFixture.loc.id], 'MANAGER');
+    const locationFloorRes = await del(locManager.cookies, `terminal/staff/${locManager.userId}/locations/${locFixture.loc.id}`);
+    expect(locationFloorRes.status).toBe(409);
+
+    const messages: unknown[] = [selfDemoteRes.body.message, selfEndRes.body.message, locationFloorRes.body.message];
+    expect(messages.every((m) => typeof m === 'string' && m.length > 0)).toBe(true);
+    expect(new Set(messages).size).toBe(3);
+    expect(messages).not.toContain(FLOOR_MESSAGE);
   });
 });
 
