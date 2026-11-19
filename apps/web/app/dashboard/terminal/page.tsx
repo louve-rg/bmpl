@@ -1895,9 +1895,24 @@ function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: Staff
   const activeLocationCount = locations ? locations.filter((l) => l.isActive).length : 0;
   const locationsUnavailable = locations === null;
 
+  // FIN-COUNTS: Stanley saw "Staff 4" on the tab badge beside "Members (5)"
+  // on this same panel -- both correct (the badge is the active headcount
+  // per activeStaffCount above; this heading lists every row, ended members
+  // included), but two different numbers for the same word reads as a
+  // contradiction without this line. Label fix only -- the ended row stays
+  // visible either way, never hidden to make the numbers match.
+  const endedMemberCount = staff.members.length - staff.members.filter((m) => m.status === 'ACTIVE').length;
+
   return (
     <div>
-      <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Members ({staff.members.length})</h2>
+      <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">
+        Members ({staff.members.length})
+        {endedMemberCount > 0 && (
+          <span className="ml-1 text-xs font-normal text-[color:var(--bmpl-text-muted)]">
+            — includes {endedMemberCount} whose access has ended; the tab badge counts active members only
+          </span>
+        )}
+      </h2>
       {staff.members.length === 0 ? (
         <EmptyState
           title="No staff yet"
