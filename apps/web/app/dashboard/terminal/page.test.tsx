@@ -781,6 +781,32 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await clickTab('Staff');
       expect(container!.textContent).toContain('ACTIVE');
       expect(container!.textContent).toContain('ENDED');
+
+      // FIN-COUNTS: Stanley saw "Staff 2" on this exact badge beside
+      // "Members (5)" on this exact panel and read it as a contradiction.
+      // Both numbers stay as they are -- the heading just has to say what
+      // it's counting.
+      expect(container!.textContent).toContain('Members (5)');
+      expect(container!.textContent).toContain('includes 3 whose access has ended');
+    });
+
+    it('does not add the ended-members note to the Members heading when every member is ACTIVE -- nothing to explain', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: { members: [{ ...STAFF_ROSTER.members[0] }], pendingInvites: [], locations: [] },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(container!.textContent).toContain('Members (1)');
+      expect(container!.textContent).not.toContain('whose access has ended');
     });
 
     it("renders each member's name, email, role and status, and each pending invite's email, role, location count and expiry -- never a token", async () => {
