@@ -4,7 +4,7 @@ This guide is about your **demonstration workspace only** — a simulation
 environment, labelled "Demo" wherever it appears on screen. Nothing you do
 here touches San Pedro Elite, your real SP-EL-TER terminal, a real customer,
 or real money. Treat anything this guide describes as something you can try
-freely, because none of it is real.
+freely, because none of it is real. Section 9 explains how the two relate.
 
 This guide describes behaviour our own quality-assurance team has watched
 work end to end on the live, deployed site, using our own test accounts —
@@ -26,12 +26,59 @@ password for you.
 
 ---
 
-## 2. The demonstration shipments
+## 2. Navigating your workspace
 
-Your demo workspace has six sample parcels staged in it, each at a different
-point in its journey, so you have something to look at and act on
-immediately. Here is each one, described exactly as your own screens show
-it.
+Once you're signed in, your workspace is organized into **six sections**:
+**Overview, Incoming, On Hand, Queue, Lookup,** and **History**. Each is
+its own tab across the top of your screen — except **Queue**, which isn't
+one tab at all. It shows up as **five separate tabs**, one for each
+specific thing you might need to do next: **Depart, Arrive, Hand off,
+Release,** and **Collect**. Count every tab across the top and you'll get
+more than six — that's six sections, with Queue spread across five of
+them. None of that extra counting means anything is wrong; it's just how
+one section can need more than one button.
+
+A number on a tab is a live count of what's currently waiting on it — a
+tab with no number has nothing waiting right now, which is the normal,
+caught-up state, not a sign anything is broken.
+
+Here is each section:
+
+- **Overview** — a summary of what's moving through your terminal right
+  now, including the "Collection at the counter" card for anything ready
+  to be picked up.
+- **Incoming** — parcels on their way to you that haven't arrived yet.
+- **On Hand** — parcels physically in your building right now.
+- **Queue** — the five tabs where you actually act on a parcel:
+  - **Depart** — line-haul legs starting their trip from your terminal,
+    waiting for you to confirm they've actually left.
+  - **Arrive** — line-haul legs waiting for you to confirm they've
+    actually reached your terminal.
+  - **Hand off** — parcels waiting for you to take custody from the
+    person delivering them, using the code they read to you.
+  - **Release** — parcels waiting for you to release to a courier
+    continuing their journey.
+  - **Collect** — parcels waiting for the person collecting them in
+    person.
+- **Lookup** — find any one parcel of yours by its reference number,
+  wherever it currently is.
+- **History** — every parcel that has passed through your terminal, with
+  its outcome (Section 7). **Visible to Managers only** — if you're an
+  Operator and don't see this tab, that's correct, not a problem with
+  your account.
+
+As a Manager, you also have one tab beyond these six sections: **Staff**
+— managing who on your team has access, and to what (Section 8). Like
+History, **Staff is visible to Managers only.**
+
+---
+
+## 3. What's staged in your demo right now
+
+Your demo workspace has six sample parcels staged in it, each at a
+different point in its journey, so you have something to look at and act
+on immediately. Here is each one, described exactly as your own screens
+show it.
 
 ### The two you can act on today
 
@@ -51,7 +98,7 @@ it.
 ### The four that are already finished
 
 These four are **delivered**, with nothing left to do, and you'll only find
-them on the **History** tab (Section 3):
+them on the **History** tab (Section 6):
 
 - **BML-5R62N72B** — delivered 17 Nov, 23:01.
 - **BML-YGDTR3VW** — delivered 17 Nov, 23:03.
@@ -66,16 +113,81 @@ the delivery (**BML-86EBCC3F**).
 
 ### Two more you'll see in History that are not yours
 
-Your **History** tab will actually list **eight** entries, not six. Two of
-them — **BML-FE5WKZQW** and **BML-GWEUUB35** — are test entries our own
-verification team created while confirming the staff-management feature in
-Section 4 works. They are not part of your demonstration. We cannot remove
-them without a database change we are not prepared to make, and they are
-safe to ignore. We are telling you plainly so that counting eight does not
-read as something wrong with your demonstration, or as parcels you have
-lost track of.
+Two entries in your **History** tab — **BML-FE5WKZQW** and
+**BML-GWEUUB35** — are demonstration shipments created to test arrival
+and collection at the terminal. They are not part of your demonstration.
+We cannot remove them without a database change we are not prepared to
+make, and they are safe to ignore. History itself explains, on screen,
+why its own count will always run ahead of what you see elsewhere — see
+Section 7.
 
-### Four things worth knowing about these screens
+---
+
+## 4. Receiving shipments and taking custody
+
+**Receiving a parcel** starts with the **Incoming** tab, which shows
+what's on its way to you before it has actually arrived. Confirming it has
+physically arrived is your own action, on the **Arrive** tab — it needs
+nothing from anyone else, just your own confirmation that the leg has
+reached your terminal.
+
+**Taking and holding custody.** The **On Hand** tab is the honest answer to
+"what is physically in my building right now." A parcel stays there until
+you hand it onward or someone collects it — see Section 5 for the two code-
+gated actions that move a parcel into or out of your custody.
+
+A finished parcel disappears from Overview, Incoming, On Hand and every
+other live-count screen the moment it's done — those tabs only ever count
+parcels still in progress. You'll still find it afterward on **History**
+and **Lookup** (Section 6), so a parcel leaving these screens is normal,
+not lost data.
+
+---
+
+## 5. Validating a collection code and completing a hand-off
+
+Two actions move a parcel into or out of your custody, and both work the
+same way: someone else reads you a code from their own device, and you
+type it in. You are never shown either code yourself in advance — only the
+other person can see it — because the point of the code is proving the
+right person is standing in front of you.
+
+- **Hand off** — taking custody from the person delivering a parcel to
+  you (a courier, or the next leg of its journey). Use the **Hand off**
+  tab and enter the code they show you.
+- **Collect** — releasing a parcel to the person who has come to pick it
+  up. Use the **Collect** tab, and ask for the code on their own device
+  and their name, as the screen itself tells you to.
+
+A wrong code is refused and tells you how many attempts are left before
+the system locks that parcel's collection as a precaution. See Section 8
+for what happens if that happens — unlocking it is not something you can
+do yourself.
+
+---
+
+## 6. Releasing a parcel to a courier
+
+When a parcel is picked up by a courier continuing its journey, use the
+**Release** tab and enter the code the courier shows you, the same way as
+Section 5's two actions. Once released, the parcel leaves your custody and
+the system keeps tracking its movement from there.
+
+---
+
+## 7. Reviewing tracking and history
+
+**Tracking a parcel's progress.** Every parcel's current stage, and what is
+still expected to happen to it, is visible from its own card wherever it
+appears on your screen — you do not need a separate tracking step.
+
+**Reading history.** The **History** tab lists every parcel that has passed
+through your terminal, with its outcome. This tab, like the **Staff** tab in
+Section 7, is visible to Managers only — an Operator account does not see
+either one. For one specific parcel, by its reference number, **Lookup**
+works the same way but is visible to every member regardless of role.
+
+Four things worth knowing about these two screens:
 
 - **You cannot open a History row.** To see a parcel's full leg-by-leg
   timeline, type its reference number into the **Lookup** tab instead —
@@ -86,9 +198,12 @@ lost track of.
   learning anything about another terminal's parcels is what stops anyone
   else from learning about yours.
 - **A finished parcel disappears from every screen except History and
-  Lookup.** The counts on Overview, Incoming, On Hand and Collect only ever
-  count parcels still in progress, so seeing two there while History lists
-  eight is correct — it is not lost data.
+  Lookup.** Overview, Incoming, On Hand and Collect only ever count
+  parcels still in progress, while History is the complete record of
+  everything that has ever touched your locations — the History screen
+  itself has a note explaining exactly this, so a smaller number
+  everywhere else is correct, not lost data. Trust that note for the
+  specifics; the exact counts change as your demo does.
 - **History can lag by one label.** A parcel that has arrived at your
   terminal but not yet been handed off to you can still show as "In
   Transit" in History, even while the **Hand off** tab correctly shows it as
@@ -97,60 +212,12 @@ lost track of.
 
 ---
 
-## 3. The daily job
-
-Your workspace is organized as a row of tabs across the top, each showing
-how many items are currently waiting on you. A tab showing no count has
-nothing waiting right now — that is the normal, caught-up state, not a sign
-anything is broken. New work appears the moment it needs your attention.
-
-**Receiving a parcel.** Open the **Incoming** tab to see what's on its way to
-you. Checking a parcel in is two separate steps on purpose: first you confirm
-it has physically arrived (your own action, needing nothing from anyone
-else); then you record the handoff, which needs a short code the person
-delivering it reads aloud to you from their own device. Until that second
-step happens, the parcel is "arrived" but not yet in your custody — custody
-only changes hands when both people are present and the code is entered.
-
-**Taking and holding custody.** The **On Hand** tab is the honest answer to
-"what is physically in my building right now." A parcel stays there until
-you hand it onward or someone collects it.
-
-**Releasing to the person collecting it.** When someone arrives to collect a
-parcel in person, use the collection action and type in the code they show
-you. You are never shown that code yourself in advance — only the recipient
-can see it and read it to you — because the point of the code is proving the
-right person is standing in front of you. A wrong code is refused and tells
-you how many attempts are left before the system locks that parcel's
-collection as a precaution; see Section 5 for what happens if that happens.
-
-**Releasing to a courier.** When a parcel is picked up by a courier
-continuing its journey, use the release action and enter the code the
-courier shows you. Once released, the parcel leaves your custody and the
-system keeps tracking its movement from there.
-
-**Tracking a parcel's progress.** Every parcel's current stage, and what is
-still expected to happen to it, is visible from its own card wherever it
-appears on your screen — you do not need a separate tracking step.
-
-**Reading history.** The **History** tab lists every parcel that has passed
-through your terminal, with its outcome. This tab, like the **Staff** tab in
-Section 4, is visible to Managers only — an Operator account does not see
-either one.
-
-Some movements are deliberately not yours to make. A parcel's long-haul leg
-between terminals — the boat or truck trip itself — is handled by BML's own
-operations staff or carrier, not by a terminal counter. You will not see a
-control for that step; it is hidden rather than shown and then refused.
-
----
-
-## 4. Inviting and managing your employees
+## 8. Inviting and managing your staff
 
 This feature deployed today. Everything described below has been watched
 working end to end on the live, deployed site by our own quality-assurance
 team — including, for the invitation itself, by a second real test account
-standing in for a brand-new employee. As the Manager, a new **Staff** tab on
+standing in for a brand-new employee. As the Manager, the **Staff** tab on
 your workspace is where you manage your own team.
 
 - **Inviting someone.** Enter their email, choose whether they join as a
@@ -160,7 +227,7 @@ your workspace is where you manage your own team.
   anything is even sent; a malformed email address is refused with a
   readable message. After sending, the screen tells you plainly whether the
   invitation email actually went out or was only simulated by this demo
-  environment (see Section 5).
+  environment (see Section 9).
 - **What actually happens for the person you invite.** We tested this end
   to end: a Manager invited someone who had no account at all. That person
   opened the invitation, chose their own name and password, and signed in
@@ -198,71 +265,120 @@ your workspace is where you manage your own team.
   revoke, nothing does. Removing one location only ends their access to
   that location — it never ends their membership or changes their role.
 - **The one-Manager floor.** Your company must always have at least one
-  active Manager. We watched this refuse, in a real browser: a sole Manager
-  cannot demote themselves to Operator, cannot end their own access, and
-  cannot remove their own last location. Section 5 says more about what
-  this means for you specifically.
+  active Manager — that protection is real, and it's what stops your own
+  last location being removed while you're the only Manager holding it
+  (Section 9). Ending your own access or changing your own role to
+  Operator used to depend on this same floor; they no longer do. Both are
+  now refused outright, for any Manager, regardless of how many others are
+  active — see below in this section for exactly what that looks like.
 
 All of the above held up after a page refresh and after signing out and back
 in fresh — it is a real, saved change, not something that looks done and
 then reverts.
 
-### Four people on your Staff list, not three
+### Who else is on your Staff list
 
-Open the **Staff** tab and you'll see **"Members (4)"**, not three. You are
-one of the four. Of the other three, two — **Qa Manager** and **Qa
-Operator** — are our own quality-assurance accounts, and the third,
-**Stanley Fixture**, is a test employee from our own verification of this
-feature, with their access already **ended**. None of those three can be
-removed from your list without a database change nobody has authorised, so
-they will stay there — please leave all three alone.
+Open the **Staff** tab and the heading count includes every row that has
+ever had access here, active or ended — the screen's own note explains
+that directly. Trust the tab's own badge, not the heading count, for who
+can actually sign in today.
 
-**Do not click Restore on Stanley Fixture.** Most warnings in this guide
-are about something that merely looks wrong on screen. This is one of two
-instructions where getting it wrong actually does something: that row
-still shows a Restore option, and clicking it would hand a working Operator
-account at your terminal to a test identity, not just bring back something
-harmless. Leave that row exactly as it is.
+Besides you, you'll see:
 
-**Do not end your own access, and do not change your own role to
-Operator.** This guide earlier told you the system always keeps a company
-with at least one active Manager and refuses to let the last one demote or
-remove themselves. That protection is real, but it only stops you from
-being the *last* active Manager — and because our Qa Manager account is
-also an active Manager on your company right now, the system currently
-sees two of you, so it will **not** stop you from ending your own access or
-demoting yourself today. Doing either would lock you out of staff
-management, and ending your own access would lock you out of the workspace
-entirely — and you would not be able to undo it yourself. If that ever
-happens, contact us and we will restore your access. This is the second of
-the two instructions in this document where getting it wrong does
-something rather than merely looking odd — leave your own row alone.
+- **Qa Manager** — active, with the Manager role. This is our own
+  quality-assurance account, not a colleague of yours. We tried to end
+  its access ourselves and the product correctly refused — a Manager
+  cannot end their own membership, the same protection that protects you.
+  Only you, or a BML administrator, can remove it, and we are not asking
+  you to. It has no reach into San Pedro Elite; it's simulation-only
+  access, and we'll clear it once the remaining testing on your demo is
+  finished.
+- **Qa Operator** — no longer active. Its access has already ended.
+- **Stanley Fixture** (Operator role) and **Stanley Manager Fixture**
+  (Manager role) — also no longer active, both test identities from our
+  own verification of this feature.
+
+**Do not click Restore on any of these ended rows — especially Stanley
+Manager Fixture.** Most warnings in this guide are about something that
+merely looks wrong on screen. This is the one instruction where getting
+it wrong actually does something: each still shows a Restore option, and
+clicking one hands that identity working access to your terminal again,
+not just something harmless coming back. Stanley Manager Fixture matters
+most — restoring it would give your company a second active Manager
+that's a test identity, with full authority over your staff and
+locations. Leave those rows exactly as they are.
+
+**You cannot end your own access, or change your own role to Operator —
+and that's by design, not by luck.** The system refuses both outright,
+enforced by the server itself rather than a disabled button, no matter how
+many other Managers are active on your company. If you try either, you'll
+see exactly this:
+
+- Changing your own role: *"You cannot change your own role from manager
+  to operator. Another manager can do this for you."*
+- Ending your own access: *"You cannot end your own terminal company
+  membership. Another manager, or an administrator, can do this for you."*
+
+Notice the role-change message doesn't name an administrator — that's
+deliberate, not an omission. The administrator route to a role change
+needs you yourself to accept a fresh invitation (Section 9), so there's no
+one who can simply do it for you behind the scenes the way there is for
+ending access. Either way, you can use your own row on the Staff tab with
+confidence: this has been confirmed directly against the live production
+system, with two other active Managers in place at the time, and both
+self-targeted attempts were refused with exactly the messages above. The
+protection holds on its own, regardless of who else is active on your
+account.
 
 ---
 
-## 5. What you cannot do alone
+## 9. Actions that need someone else
 
-These actions need someone else — a customer, a courier, or a BML
-administrator — no matter who you are or what role you hold. This is
+These actions need someone else — a customer, a courier, a carrier, or a
+BML administrator — no matter who you are or what role you hold. This is
 checked directly against what the system actually allows, not assumed.
 
 - **Adding a new counter location to your company, or closing an existing
   one.** Both need a BML administrator. What you *can* do yourself is decide
   which of your existing locations each of your employees may work at
-  (Section 4). Put simply: **which of your locations a person can work at is
+  (Section 8). Put simply: **which of your locations a person can work at is
   yours to set; adding or closing a location is ours.**
 - **Managing anyone outside your own company, or giving anyone platform
   administrator powers.** You cannot see or touch another company's staff,
   and you cannot grant anyone — including yourself — any administrator
   power over BML's platform. This isn't a restriction worth worrying about;
   it's why your staff list is genuinely your own and nobody else's.
-- **Removing your own last manager, or your own last location, if you are
-  currently the company's only active Manager.** The system will refuse to
-  let you end your own access, step down from Manager, or remove your own
-  last location while you're the only one holding the role — it exists to
-  stop the company being left with nobody in charge. You likely won't hit
-  this on purpose, but if you ever do by accident, that refusal is the
-  system working correctly, not something broken.
+- **Changing your own role away from Manager.** This needs another
+  Manager to do it for you, full stop — not only when you're the only
+  one. See Section 8 for exactly what the product tells you if you try.
+  There is no simple role toggle either way: the only route is ending
+  your membership and sending you a fresh invitation at the new role,
+  which you would have to accept yourself. Your terminal access is
+  preserved through this, not rebuilt from scratch — it's the same
+  membership, picked back up at the new role. The real cost is that you
+  have to act: you are not a member of your own company in the gap
+  between the two steps, until you accept the new invitation. If you
+  ever genuinely need this, contact us and we will walk you through it.
+- **Ending your own access.** Refused outright, full stop — not only
+  when you're the only Manager. See Section 8 for exactly what the
+  product tells you if you try. If you ever genuinely need it, contact
+  us — ending a membership is fully reversible, location access
+  included: it only marks the membership ended, nothing is deleted, and
+  restoring it brings your terminal access back with it.
+- **Removing your own last location, if you are the company's only
+  active Manager.** This refusal is precise: it only fires when you are
+  a Manager, you are the only active Manager in the company, and the
+  location you're removing is your last one. With a second active
+  Manager in place, either of you can have a last location removed
+  freely. You'll see your own message if you hit it: *"This would leave
+  the company's only manager without access to any location."* You
+  likely won't hit this on purpose, but if you ever do by accident,
+  that refusal is the system working correctly, not something broken —
+  and even then, you are never actually locked out: granting a location
+  doesn't require the person granting it to hold one themselves, so you
+  could grant yourself a location straight back immediately. Your
+  authority as Manager comes from your membership and your role, not
+  from holding a location — losing one doesn't reduce it.
 - **Unlocking a parcel after too many wrong codes.** If a collection or
   hand-off code is entered incorrectly enough times, the system locks that
   parcel as a precaution against guessing. Only a BML administrator can clear
@@ -275,9 +391,12 @@ checked directly against what the system actually allows, not assumed.
 - **Completing a collection or hand-off without the other person present.**
   Both the collection step and the courier hand-off step require a code only
   the other person can supply, so neither can be completed by you alone.
-- **The long-haul leg between terminals.** The boat or road trip that moves a
-  parcel between terminals is operated by BML or its carrier, not triggered
-  from your counter.
+- **Choosing or operating the vehicle for the long-haul leg between
+  terminals.** The boat or road trip itself — which vehicle, when it
+  actually leaves, the journey in between — is run by BML or its carrier,
+  not from your counter. Your part is only confirming, on the **Depart**
+  and **Arrive** tabs, that a leg has actually left or reached your
+  terminal (Section 4) — that confirmation is yours, the trip itself isn't.
 - **Guaranteeing an invitation email actually arrives.** If the screen tells
   you an invitation was only simulated rather than actually sent, the new
   employee will not receive anything in their inbox. Tell us if that
@@ -288,7 +407,27 @@ checked directly against what the system actually allows, not assumed.
 
 ---
 
-## 6. Remaining limitations
+## 10. Your demo workspace and your real terminal
+
+Your demo workspace and your real SP-EL-TER terminal are two separate,
+unconnected places in the system. Nothing you click, invite, receive or
+release in the demo touches San Pedro Elite's real staff, real parcels or
+real customers, in either direction.
+
+Your real terminal is not active yet. There's nothing wrong with it and
+nothing broken — it simply hasn't been switched on for live operation, so
+you won't find a workspace to sign into for it today. When it does go
+live, it will look and work exactly like the one this guide describes,
+because the demo runs the same code as the real product. Nothing in this
+guide will need to be relearned.
+
+Until then, if you ever see a "Demo" label on a shipment, a company, or a
+screen, that's your workspace telling you plainly which world you're in —
+you should never have to guess.
+
+---
+
+## 11. Remaining limitations
 
 Described plainly, not softened:
 
@@ -296,7 +435,7 @@ Described plainly, not softened:
   holding custody, releasing to a collecting customer, releasing to a
   courier, and collecting are all available to both roles identically today.
   The only difference a role currently makes is that the **Staff** tab
-  (Section 4) and the **History** tab (Section 3) are visible to Managers
+  (Section 8) and the **History** tab (Section 7) are visible to Managers
   only. If you expected an Operator to be restricted from the day-to-day
   actions themselves, that restriction does not exist yet.
 - **No live map or GPS tracking of any vehicle, boat, or courier.** Nothing
