@@ -6,7 +6,9 @@ matrix per critical workflow, confirmation of the exact deployed version(s)
 tested, the list of remaining limitations, and the structure the GO/NO-GO
 recommendation sits in. (The other three are `docs/TEST-ACCOUNTS.md`,
 `docs/TERMINAL-DEMO-DATA-LABELLING.md`, and
-`docs/EDWARD-TERMINAL-ONBOARDING.md` — MDF-707.)
+`docs/history/EDWARD-TERMINAL-ONBOARDING.md` — MDF-707. Archived to that
+path 2026-11-19, MDF-893: a pre-deployment draft, superseded by the guide
+actually sent to Edward.)
 
 **What this document is not.** It is not a status exercise, and it does not
 issue verdicts. Every PASS / FAIL / BLOCKED / NOT TESTED verdict below is
