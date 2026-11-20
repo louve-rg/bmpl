@@ -434,15 +434,23 @@ that is San Pedro Elite or SP-EL-TER. Nothing you click, invite, receive or
 release in the demo touches San Pedro Elite's real staff, real parcels or
 real customers, in either direction.
 
-You already hold an active Manager membership of San Pedro Elite itself
-today — that part of your real account is genuinely set up, not missing or
-pending. What is not active is the terminal: San Pedro Elite's real
-terminal is deliberately switched off until it is separately authorised to
-go live, so you should not expect to find a working terminal for it today.
-If its name ever appears on your screen in the meantime, it will have
-nothing in it to work with, because none of its locations are active yet
-either — an empty screen there, same as anywhere else in this product,
-means caught up or not yet switched on, never broken.
+**Your demo access is set up, and we checked it ourselves.** You hold an
+active Manager membership at the demo terminal, confirmed on the live site
+on 18 November, with no invitation left to accept.
+
+**Your San Pedro Elite account is a separate question, and we are not going
+to guess at it.** San Pedro Elite and its SP-EL-TER terminal are real
+records of yours, and nothing in this work has written to either of them.
+Whether your own login already holds a Manager membership at San Pedro
+Elite is something we have not checked — we hold no access to that part of
+your live data — so we are not telling you either way, and it will be
+confirmed as part of switching the real terminal on. What we can tell you
+is that San Pedro Elite's terminal is deliberately switched off today, and
+none of its locations are active, so you should not expect to find a
+working terminal for it. If its name appears on your screen in the
+meantime, it will have nothing in it to work with — an empty screen there,
+same as anywhere else in this product, means caught up or not yet switched
+on, never broken.
 
 Switched off is not the same as removed. Nowhere in this product does
 pausing a terminal location, or a terminal company, delete anything — the
