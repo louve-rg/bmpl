@@ -963,15 +963,43 @@ export class TerminalService {
     return this.resendInvite(actorId, caller.terminalCompanyId, inviteId);
   }
 
+  /**
+   * MDF-918: was `findFirst`, no `orderBy` — a caller ACTIVE at two terminal
+   * companies at once (schema-permitted, see `assertActiveMemberRole`'s own
+   * comment above) got whichever row Postgres happened to return. Real
+   * case: Edward Broaster is ACTIVE Manager at both the demo company and
+   * his real company, San Pedro Elite, whose only location is inactive.
+   *
+   * Plain `orderBy createdAt asc` (the fix `assertActiveMemberRole` uses)
+   * is NOT enough here — it is deterministic but deterministically WRONG
+   * for Edward: his real company predates the demo one, so oldest-first
+   * reliably lands him on an empty, unlabelled workspace with no
+   * indication why. Instead: among ACTIVE memberships, prefer one where
+   * the MEMBER holds an active location grant — deliberately the exact
+   * same expression (`m.locations.some((ml) => ml.location.isActive)`) the
+   * response field below computes, not a company-level proxy for it (a
+   * company can have an active location this particular member holds no
+   * grant to — company-workable and member-workable can disagree) — and
+   * tie-break/fall back to oldest-first, same convention as everywhere
+   * else in this file.
+   *
+   * Residual, not fixed here: once Edward's real company gets its location
+   * reactivated AND he holds a grant to it, he holds two genuinely WORKABLE
+   * companies and this still just picks the older one. That is the point a
+   * switcher becomes necessary — a deliberate non-feature of this card
+   * (MDF-918) — not a remaining bug in this pick.
+   */
   async myWorkspace(userId: string) {
-    const member = await this.prisma.terminalCompanyMember.findFirst({
+    const memberships = await this.prisma.terminalCompanyMember.findMany({
       where: { userId, status: 'ACTIVE', terminalCompany: { isActive: true } },
       include: {
         terminalCompany: { select: { id: true, businessName: true, isTest: true } },
         locations: { include: { location: { include: { hub: { select: { id: true, code: true, name: true, district: true, city: true } } } } } },
       },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!member) throw new ForbiddenException('No active terminal company membership.');
+    if (memberships.length === 0) throw new ForbiddenException('No active terminal company membership.');
+    const member = memberships.find((m) => m.locations.some((ml) => ml.location.isActive)) ?? memberships[0]!;
     return {
       companyId: member.terminalCompany.id,
       companyName: member.terminalCompany.businessName,

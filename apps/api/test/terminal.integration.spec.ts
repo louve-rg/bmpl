@@ -517,3 +517,118 @@ describe('TERM-6: slice 1 close-out — company edit, direct reactivate, per-mem
     expect((await post(cookies, `admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId: loc.id })).status).toBe(403);
   });
 });
+
+/**
+ * MDF-918: `myWorkspace` (GET /terminal/me) ran an unordered `findFirst`
+ * across a caller's ACTIVE memberships, so a person active at two terminal
+ * companies at once got whichever row Postgres happened to return. Real
+ * case: Edward Broaster is an ACTIVE Manager at both the demo company and
+ * his real company, San Pedro Elite, whose only location is inactive.
+ *
+ * The fix is NOT just an `orderBy createdAt asc` (the one-line fix
+ * `assertActiveMemberRole` already uses, below) — ordering alone would
+ * deterministically land Edward on whichever company is OLDER, which is his
+ * real one, producing an empty, unlabelled workspace with no explanation.
+ * Instead: prefer whichever ACTIVE membership's company has at least one
+ * ACTIVE location, tie-break/fallback oldest-first.
+ */
+describe('MDF-918: GET /terminal/me picks a workable company, not whichever the database returns first', () => {
+  async function makeTerminalCompany(prefix: string) {
+    const hub = await makeHub(`${prefix}-${uniq()}`);
+    const company = (
+      await post(admin, 'admin/terminal/companies', { businessName: `${prefix} Co`, contactEmail: `${prefix.toLowerCase()}_${uniq()}@example.com` })
+    ).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    return { hub, company, loc };
+  }
+
+  /** Invites `email` into `companyId`'s one location. The location must
+   *  still be ACTIVE at invite time (both invite creation and acceptance
+   *  check that) — a location is deactivated AFTER joining, never before,
+   *  the same sequence Edward's real company actually went through. First
+   *  join creates the account (needs a password); every join after reuses
+   *  it (same shape as the dual-company accept in
+   *  terminal-staff-api.integration.spec.ts). */
+  async function joinCompany(companyId: string, locationId: string, email: string, isFirstJoin: boolean) {
+    await post(admin, `admin/terminal/companies/${companyId}/invites`, { email, memberRole: 'OPERATOR', locationIds: [locationId] });
+    const token = await readLastEmailLinkToken(email);
+    const body = isFirstJoin ? { token, password: 'MemberPass123', firstName: 'M', lastName: 'E' } : { token };
+    const accept = await request(ctx.server).post('/api/terminal/invites/accept').send(body);
+    expect(accept.status).toBe(201);
+  }
+
+  it('prefers the company with an active location when it is the NEWER membership', async () => {
+    const dead = await makeTerminalCompany('MDF908Dead1');
+    const live = await makeTerminalCompany('MDF908Live1');
+    const email = `mdf908_${uniq()}@example.com`;
+
+    await joinCompany(dead.company.id, dead.loc.id, email, true); // older membership
+    expect((await del(admin, `admin/terminal/companies/${dead.company.id}/locations/${dead.loc.id}`)).status).toBe(200);
+    await joinCompany(live.company.id, live.loc.id, email, false); // newer membership
+
+    const cookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'MemberPass123' }));
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(200);
+    expect(me.body.companyId).toBe(live.company.id);
+  });
+
+  it('prefers the company with an active location when it is the OLDER membership — proves this is not just oldest-first', async () => {
+    const live = await makeTerminalCompany('MDF908Live2');
+    const dead = await makeTerminalCompany('MDF908Dead2');
+    const email = `mdf908_${uniq()}@example.com`;
+
+    await joinCompany(live.company.id, live.loc.id, email, true); // older membership
+    await joinCompany(dead.company.id, dead.loc.id, email, false); // newer membership
+    expect((await del(admin, `admin/terminal/companies/${dead.company.id}/locations/${dead.loc.id}`)).status).toBe(200);
+
+    const cookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'MemberPass123' }));
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(200);
+    expect(me.body.companyId).toBe(live.company.id);
+  });
+
+  it("prefers the membership where the MEMBER holds an active grant over one where the company merely has an active location somewhere — company-level and member-level 'workable' can disagree", async () => {
+    // Both companies have an active location. The OLDER membership's
+    // location stays active at the COMPANY level, but this member's own
+    // grant to it is revoked afterward — the company looks workable, this
+    // member's workspace there is not. The NEWER membership keeps its
+    // grant intact.
+    const noGrant = await makeTerminalCompany('MDF918NoGrant');
+    const hasGrant = await makeTerminalCompany('MDF918HasGrant');
+    const email = `mdf918_${uniq()}@example.com`;
+
+    await joinCompany(noGrant.company.id, noGrant.loc.id, email, true); // older membership
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+    expect((await del(admin, `admin/terminal/companies/${noGrant.company.id}/members/${user.id}/locations/${noGrant.loc.id}`)).status).toBe(200);
+    await joinCompany(hasGrant.company.id, hasGrant.loc.id, email, false); // newer membership
+
+    const cookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'MemberPass123' }));
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(200);
+    expect(me.body.companyId).toBe(hasGrant.company.id);
+  });
+
+  it('falls back to oldest-first when NEITHER membership has an active location, and an empty locations array is not an error', async () => {
+    const older = await makeTerminalCompany('MDF908FallA');
+    const newer = await makeTerminalCompany('MDF908FallB');
+    const email = `mdf908_${uniq()}@example.com`;
+
+    await joinCompany(older.company.id, older.loc.id, email, true);
+    await joinCompany(newer.company.id, newer.loc.id, email, false);
+    expect((await del(admin, `admin/terminal/companies/${older.company.id}/locations/${older.loc.id}`)).status).toBe(200);
+    expect((await del(admin, `admin/terminal/companies/${newer.company.id}/locations/${newer.loc.id}`)).status).toBe(200);
+
+    const cookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'MemberPass123' }));
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(200);
+    expect(me.body.companyId).toBe(older.company.id);
+    expect(me.body.locations).toEqual([]);
+  });
+
+  it('a caller with no active membership anywhere still gets the existing refusal', async () => {
+    const cookies = await registerCustomer(`mdf908_noaccess_${uniq()}@example.com`);
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(403);
+    expect(me.body.message).toBe('No active terminal company membership.');
+  });
+});
