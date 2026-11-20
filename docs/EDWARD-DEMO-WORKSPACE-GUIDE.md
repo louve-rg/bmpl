@@ -28,7 +28,9 @@ password for you.
 
 When you sign in, look for the plain "Demo" label next to your company
 name; if it is ever missing, stop before clicking anything and tell us
-exactly what you saw instead.
+exactly what you saw instead. If that happens, your workspace will also show
+up empty rather than showing anyone else's parcels — so a missing label
+means something to tell us about, never something to worry about.
 
 ---
 
