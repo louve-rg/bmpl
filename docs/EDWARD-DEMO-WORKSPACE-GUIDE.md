@@ -8,9 +8,14 @@ San Pedro Elite, your real SP-EL-TER terminal, a real customer, or real
 money. Treat anything this guide describes as something you can try freely,
 because none of it is real. Section 10 explains how the two relate.
 
-This guide describes behaviour our own quality-assurance team has watched
-work end to end on the live, deployed site, using our own test accounts —
-not something you have tried yourself.
+Most of what this guide describes, our own quality-assurance team has
+watched work on the live, deployed site, using our own test accounts — not
+something you have tried yourself. Receiving, collecting and releasing a
+parcel to a courier were checked on an identical copy of the same code
+rather than on the live site, because checking them live would have meant
+creating real shipments. Staff invitations and access controls are the one
+part we have not re-checked since the last change to that code, so if
+anything there ever looks different from what this guide says, tell us.
 
 ---
 
