@@ -248,6 +248,17 @@ export interface LegView {
   kind: LegKind;
   mode: TransportMode;
   status: LegStatus;
+  /**
+   * MDF-926: optional — `isLegActionable` never reads it, so every existing
+   * caller that builds a `LegView` without this field (it is cast, not
+   * assigned, at every call site) keeps working unchanged. Only
+   * `deriveShipmentStatus`'s own LINE_HAUL branch below reads it, and only
+   * to tell "departed, still moving" apart from "arrived, waiting on
+   * handoff" — the one leg kind where `status` alone cannot, since
+   * `arriveLeg` deliberately stamps this without advancing `status` (that
+   * only happens at handoff; see shipment.service.ts's own `arriveLeg`).
+   */
+  arrivedAt?: Date | string | null;
 }
 
 /**
@@ -291,7 +302,16 @@ export function deriveShipmentStatus(legs: readonly LegView[], endsAtHub: boolea
     return current.status === 'IN_PROGRESS' ? 'FIRST_MILE' : 'AWAITING_PICKUP';
   }
   if (current.kind === 'LINE_HAUL') {
-    if (current.status === 'IN_PROGRESS') return 'IN_TRANSIT';
+    // MDF-926: IN_PROGRESS alone does not distinguish "just departed" from
+    // "arrived hours ago, sitting at the destination hub waiting for a
+    // handoff" — both read IN_PROGRESS because arrival only stamps
+    // `arrivedAt`; it does not advance `status` (see arriveLeg's own
+    // comment in shipment.service.ts). AT_DESTINATION_HUB already exists for
+    // exactly this fact (reachable before this fix only via a LATER leg
+    // looking back at an already-completed LINE_HAUL) — this routes the
+    // shipment's OWN current LINE_HAUL leg to it too, the case
+    // docs/DELIVERY-LIFECYCLE.md already documents as the intended order.
+    if (current.status === 'IN_PROGRESS') return current.arrivedAt ? 'AT_DESTINATION_HUB' : 'IN_TRANSIT';
     // Waiting to depart: at the origin hub if it actually got there, otherwise
     // still being collected.
     return priorDone ? 'AT_ORIGIN_HUB' : 'AWAITING_PICKUP';

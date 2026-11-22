@@ -987,6 +987,33 @@ describe('collecting from a terminal', () => {
         expect(customerView.body.collectionPinAttemptsRemaining).toBeNull();
       });
 
+      // MDF-926: nulling the lockout-mechanics fields above (the test just
+      // above this one) was never the whole fix — the customer's own
+      // collectionCode kept returning the real code the entire time,
+      // unaware the backend had started refusing it. Someone hands that
+      // code to whoever is collecting, or travels to the counter with it
+      // themselves, and is refused with no warning anywhere in their own
+      // tracking view. This closes that without reopening the lockout
+      // mechanics the test above deliberately keeps staff-only.
+      it('nulls the customer-facing code once locked, and says why instead of going silent', async () => {
+        const { s } = await locked();
+        const customerView = await get(customer, `shipping/${s.reference}`);
+        expect(customerView.body.collectionCode, 'a locked code must not keep reading as valid to the customer').toBeNull();
+        expect(customerView.body.collectionHoldMessage, 'the customer must be told why, in plain words').toMatch(
+          /staff|administrator|support/i,
+        );
+        // The lockout mechanics themselves stay exactly as staff-only as the
+        // sibling test above already pins — this test adds the code/message
+        // pair beside that, it does not loosen it.
+        expect(customerView.body.collectionVerificationStatus).toBeNull();
+        expect(customerView.body.collectionPinAttemptsRemaining).toBeNull();
+
+        // STAFF keep the real mechanics; the coarse message is harmless
+        // alongside them and costs nothing to also carry.
+        const staffView = await get(admin, `admin/logistics/shipments/${s.reference}`);
+        expect(staffView.body.collectionCode).toBeNull();
+      });
+
       it('unlocks a locked shipment, and a collection succeeds afterward', async () => {
         const { s, real } = await locked();
         const r = await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'Confirmed with the recipient by phone; code is correct.' });

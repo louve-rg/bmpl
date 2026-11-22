@@ -143,6 +143,49 @@ describe('deriveShipmentStatus', () => {
     expect(deriveShipmentStatus(d2d('COMPLETED', 'READY', 'PENDING'), false)).toBe('AT_ORIGIN_HUB');
     expect(deriveShipmentStatus(d2d('IN_PROGRESS', 'READY', 'PENDING'), false)).toBe('FIRST_MILE');
   });
+
+  describe('MDF-926: a LINE_HAUL leg that has arrived is not the same fact as one still in transit', () => {
+    // Before this card, `current.status === 'IN_PROGRESS'` on a LINE_HAUL leg
+    // meant IN_TRANSIT unconditionally, whether the truck had just left the
+    // origin or had been sitting, arrived, at the destination for hours
+    // waiting on handoff — arriveLeg stamps `arrivedAt` but deliberately
+    // never advances `status` (that only happens at handoff). AT_DESTINATION_HUB
+    // already exists, already has a label ("Arrived at the destination
+    // terminal"), and docs/DELIVERY-LIFECYCLE.md already documents
+    // IN_TRANSIT -> AT_DESTINATION_HUB as the intended order — it was simply
+    // unreachable for a shipment's OWN current LINE_HAUL leg, only ever
+    // reached via a later LAST_MILE leg looking back at an already-completed
+    // one (the existing 'COMPLETED','COMPLETED','READY' case above).
+    it('reports IN_TRANSIT while the LINE_HAUL leg has departed but not yet arrived', () => {
+      const legs = [leg(1, 'LINE_HAUL', 'IN_PROGRESS')];
+      expect(deriveShipmentStatus(legs, true)).toBe('IN_TRANSIT');
+    });
+
+    it('reports AT_DESTINATION_HUB once that same leg has arrived, before handoff', () => {
+      const legs = [{ ...leg(1, 'LINE_HAUL', 'IN_PROGRESS'), arrivedAt: new Date('2026-01-01T00:00:00Z') }];
+      expect(deriveShipmentStatus(legs, true)).toBe('AT_DESTINATION_HUB');
+    });
+
+    it('does not apply arrivedAt to any other leg kind — FIRST_MILE/LAST_MILE/DIRECT have no such concept', () => {
+      const firstMile = [{ ...leg(1, 'FIRST_MILE', 'IN_PROGRESS'), arrivedAt: new Date('2026-01-01T00:00:00Z') }];
+      expect(deriveShipmentStatus(firstMile, true)).toBe('FIRST_MILE');
+      const lastMile = [
+        leg(1, 'FIRST_MILE', 'COMPLETED'),
+        { ...leg(2, 'LAST_MILE', 'IN_PROGRESS'), arrivedAt: new Date('2026-01-01T00:00:00Z') },
+      ];
+      expect(deriveShipmentStatus(lastMile, false)).toBe('OUT_FOR_DELIVERY');
+    });
+
+    it('a stale arrivedAt left over from a previous attempt does not leak forward once the leg departs again', () => {
+      // Not reachable through the real lifecycle today (arrivedAt is never
+      // cleared once set), but the derivation must not trust a leftover
+      // timestamp once the leg is no longer actually IN_PROGRESS at all —
+      // covered for completeness, same discipline the rest of this function
+      // already applies (read the status that is actually current).
+      const legs = [{ ...leg(1, 'LINE_HAUL', 'READY'), arrivedAt: new Date('2026-01-01T00:00:00Z') }];
+      expect(deriveShipmentStatus(legs, true)).toBe('AWAITING_PICKUP');
+    });
+  });
 });
 
 describe('shipmentStatusLabel (TERM-ORIGIN-RECEIPT-CLAIMS-CUSTODY-WITH-NO-RECORD)', () => {

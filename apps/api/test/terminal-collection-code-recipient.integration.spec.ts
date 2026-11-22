@@ -352,3 +352,80 @@ describe('MDF-709 piece 4: STAFF still never sees the collection code (re-assert
   });
 });
 
+/**
+ * MDF-926: `serialize()`'s own CUSTOMER audience got the FAILED-lockout
+ * null-and-explain treatment in this card's first fix. These two routes
+ * are different, narrower endpoints — `recipientCollectionCode` and
+ * `revealCollectionCode` above — that never got the same gate, so a
+ * locked-out recipient asking either one was still handed the real,
+ * no-longer-valid PIN. The lockout exists to stop guessing; handing the
+ * code out anyway makes it meaningless for the two paths an actual
+ * recipient uses (the sender/staff serialize() path was the least exposed
+ * of the three). Both close the same way: null the code, add one coarse
+ * sentence, never a count or a status string — a reveal token holder is
+ * the LEAST authenticated of the three readers, so the oracle discipline
+ * matters most here.
+ */
+describe('MDF-926 piece 5: a locked-out recipient gets neither code through either path, and the same coarse sentence', () => {
+  async function lockOut(shipmentId: string) {
+    const real = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { collectionPin: true } }).then((s) => s.collectionPin!);
+    const wrong = real === '0000' ? '1111' : '0000';
+    for (let i = 0; i < 6; i++) {
+      await post(admin, `admin/logistics/shipments/${shipmentId}/collect`, { collectedByName: 'Maria Cruz', code: wrong });
+    }
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })).collectionVerificationStatus).toBe('FAILED');
+    return real;
+  }
+
+  it('a linked recipient reading their own code once locked gets null and the sentence, never the real code', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const booked = await bookDoorToHub(senderCookies, net);
+    const recipient = await claimedRecipient(booked, `reciplocked_${uniq()}@example.com`);
+    await driveToAwaitingCollection(booked.id);
+    const real = await lockOut(booked.id);
+
+    const res = await get(recipient.cookies, `shipping/incoming/${booked.reference}/collection-code`);
+    expect(res.status).toBe(200);
+    // Exact key set, not just "the two fields I expect are absent" -- a
+    // test that enumerates what must be PRESENT fails on ANY future field
+    // added to this response, named or not, instead of relying on the
+    // author having imagined every leak shape in advance.
+    expect(Object.keys(res.body).sort()).toEqual(['collectionCode', 'collectionHoldMessage', 'reference']);
+    expect(res.body.collectionCode).toBeNull();
+    expect(res.body.collectionHoldMessage).toMatch(/staff|administrator|support/i);
+    expect(JSON.stringify(res.body)).not.toContain(real);
+  });
+
+  it('the unlinked reveal path answers the same way once locked, even for a token requested before the lockout', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const destEmail = `revealocked_${uniq()}@example.com`;
+    const booked = await bookDoorToHub(senderCookies, net, destEmail);
+    await driveToAwaitingCollection(booked.id);
+
+    // Real-world order: the recipient (or anyone holding the same link)
+    // emails themselves a reveal token, THEN burns the five wrong attempts
+    // at the counter before ever using it.
+    const reqRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/request`);
+    expect(reqRes.status).toBe(201);
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email: destEmail });
+    const revealToken = /: ([A-Z0-9]{10})/.exec(inbox.body.body)?.[1];
+    expect(revealToken).toBeDefined();
+
+    const real = await lockOut(booked.id);
+
+    const revealRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(revealRes.status).toBe(201);
+    // Exact key set -- the same closed assertion as the linked-recipient
+    // test above. A reveal token holder is the least-authenticated of the
+    // three readers, so this is the one response that must never acquire
+    // an attempt count, a remaining-tries hint, or the raw verification
+    // status, under ANY future field name, not just the two named here.
+    expect(Object.keys(revealRes.body).sort()).toEqual(['collectionCode', 'collectionHoldMessage', 'reference']);
+    expect(revealRes.body.collectionCode).toBeNull();
+    expect(revealRes.body.collectionHoldMessage).toMatch(/staff|administrator|support/i);
+    expect(JSON.stringify(revealRes.body)).not.toContain(real);
+  });
+});
+

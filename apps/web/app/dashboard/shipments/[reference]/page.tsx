@@ -105,8 +105,9 @@ export default function TrackShipmentPage() {
           {/* REL-CODE-UNREACHABLE-NO-CONTACT: the only way a recipient with
               no email or phone on file ever learns their collection code —
               the sender reads it here and passes it on. Renders nothing
-              when there is no code (SenderCollectionCode's own guard). */}
-          <SenderCollectionCode code={shipment.collectionCode} />
+              when there is no code and no hold message (SenderCollectionCode's
+              own guard). */}
+          <SenderCollectionCode code={shipment.collectionCode} holdMessage={shipment.collectionHoldMessage} />
 
           {!shipment.cancelledAt && <AvailabilityWindows shipment={shipment} onUpdated={setShipment} />}
 

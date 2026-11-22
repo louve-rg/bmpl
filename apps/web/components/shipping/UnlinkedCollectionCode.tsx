@@ -84,6 +84,15 @@ function clearStoredCooldown(token: string): void {
  * sibling: the request step shows the SAME message whatever the API
  * actually did. Never add a "no email on file" message here.
  *
+ * MDF-926: this is the LEAST authenticated of the three collection-code
+ * readers -- no account, no session, just a mailed token -- so when the
+ * code has locked out after 5 wrong attempts, the same coarse sentence
+ * from `collectionHoldMessage` renders in the code's own slot, same gate
+ * as `RecipientCollectionCode`/`SenderCollectionCode`. Before this fix the
+ * code simply went null here with nothing in its place, same dead-end the
+ * other two components had. Never add a count, remaining-tries, or raw
+ * status alongside it -- that constraint is strongest on this exact path.
+ *
  * The emailed token is NOT the collection code and must never be presented
  * as one — the backend's own email text (shipment.service.ts,
  * `requestCollectionCodeEmail`) warns the recipient never to hand it to a
@@ -100,6 +109,7 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
   const [revealing, setRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
   const [collectionCode, setCollectionCode] = useState<string | null>(null);
+  const [holdMessage, setHoldMessage] = useState<string | null>(null);
 
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(() => readStoredCooldown(token));
   const [now, setNow] = useState(() => Date.now());
@@ -140,6 +150,7 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
     try {
       const result = await shippingApi.revealCollectionCode(token, revealInput.trim().toUpperCase());
       setCollectionCode(result.collectionCode);
+      setHoldMessage(result.collectionHoldMessage);
       setPhase('revealed');
     } catch (e) {
       setRevealError((e as ApiError).message || 'That code is invalid or has expired. Request a new one.');
@@ -158,6 +169,8 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
       {phase === 'revealed' ? (
         collectionCode ? (
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{collectionCode}</p>
+        ) : holdMessage ? (
+          <p className="mt-3 text-sm text-slate-600">{holdMessage}</p>
         ) : (
           <p className="mt-3 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
         )
