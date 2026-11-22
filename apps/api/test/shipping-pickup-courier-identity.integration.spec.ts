@@ -23,7 +23,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, expectUnchangedBy, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -362,5 +362,100 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
+  });
+});
+
+/**
+ * MDF-926 item 3. Test 5 above proves /start's own wrong-courier 403 leaves
+ * the leg untouched when NOTHING has written to it yet. This describe block
+ * asks the harder question: does that same 403, reached through
+ * /release-to-courier instead of /start directly, still leave the leg
+ * untouched when a DIFFERENT write (the pickup fields) already ran first?
+ *
+ * Until this fix, the answer was no. staffReleaseToCourier ran its own
+ * conditional updateMany (courierStatus -> PICKUP_CONFIRMED, pickedUpAt) as
+ * its own commit, THEN called startLeg() separately -- a second, independent
+ * transaction for status -> IN_PROGRESS/startedAt/custody. A grandfathered
+ * leg's `presentedCourierUserId` is never checked against the assigned
+ * driver before that first write (the PIN check that normally catches a
+ * wrong courier is skipped entirely for a grandfathered leg -- see
+ * shipping-pickup-pin.integration.spec.ts for the same flag's own precedent),
+ * so the SAME "you are not the courier assigned to this leg" rejection test
+ * 5 exercises on /start landed, on this path, AFTER the pickup fields had
+ * already committed: a leg stuck with courierStatus PICKUP_CONFIRMED and
+ * pickedUpAt set, but status still READY and startedAt still null. No other
+ * caller's own guard reads that leg as "not yet picked up" again -- every
+ * one of them requires courierStatus to still be DRIVER_ACCEPTED -- so it
+ * needed a person to notice and hand-repair the row.
+ *
+ * Folding both writes into one transaction (confirmAndStartLeg,
+ * shipment.service.ts) closes this: either both land, or neither does.
+ * This does NOT heal any leg already stuck in that half-applied state
+ * before this deploys -- there is no backfill here, and no production
+ * access exists to sweep for one. It only stops a NEW one from being
+ * created.
+ */
+describe('MDF-926 item 3: a release-to-courier refused for the wrong courier leaves the leg completely untouched, never half-picked-up', () => {
+  async function flyLineHaul(legId: string) {
+    expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${legId}/arrive`)).status).toBe(201);
+    const pin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } })).handoffPin!;
+    expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin, receivedByName: 'Terminal desk' })).status).toBe(201);
+  }
+
+  it('leaves courierStatus, pickedUpAt, status and startedAt exactly as they were when the presented courier does not match the assigned one', async () => {
+    const sender = await fundedSender();
+    const courierFirstMile = await makeCourier('STANN_CREEK');
+    const courierLastMile = await makeCourier('BELIZE'); // San Pedro is BELIZE district
+    const courierWrong = await makeCourier('BELIZE'); // real, unrelated driver -- never assigned to this leg
+    const shipment = await book(sender.cookies);
+    const { firstMile, lineHauls, lastMile } = await journey(shipment.id);
+
+    // Drive the parcel all the way to the terminal that holds the last-mile leg.
+    await dispatch.dispatchLeg(firstMile.id);
+    expect((await legRow(firstMile.id)).assignedDriverProfileId).toBe(courierFirstMile.driverProfileId);
+    expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
+    expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
+    expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
+    const firstMileHandoffPin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id }, select: { handoffPin: true } })).handoffPin!;
+    expect(
+      (await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMileHandoffPin, receivedByName: 'Terminal desk' })).status,
+    ).toBe(201);
+    for (const haul of lineHauls) {
+      await flyLineHaul(haul.id);
+    }
+
+    // The last-mile leg is now READY and assigned, waiting at the terminal for staff release.
+    await dispatch.dispatchLeg(lastMile.id);
+    const assigned = await legRow(lastMile.id);
+    expect(assigned.assignedDriverProfileId).toBe(courierLastMile.driverProfileId);
+    expect((await post(courierLastMile.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
+    expect((await legRow(lastMile.id)).courierStatus).toBe('DRIVER_ACCEPTED');
+
+    // Simulate exactly what the migration's own default-flip produces for a
+    // row that already existed (same precedent as
+    // shipping-pickup-pin.integration.spec.ts's own grandfather test): this
+    // isolates the ONE path where presentedCourierUserId is never checked
+    // against the assigned driver before the pickup write lands.
+    await ctx.prisma.shipmentLeg.update({ where: { id: lastMile.id }, data: { pickupPinGrandfathered: true } });
+
+    await expectUnchangedBy(
+      () => ctx.prisma.shipmentLeg.findUniqueOrThrow({
+        where: { id: lastMile.id },
+        select: { courierStatus: true, pickedUpAt: true, status: true, startedAt: true },
+      }),
+      () => post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: '0000', presentedCourierUserId: courierWrong.userId }),
+      /not the courier assigned/i,
+    );
+
+    // The real courier's own release still works afterward -- this did not
+    // leave the leg in some OTHER broken state, just untouched.
+    expect((await post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: '0000' })).status).toBe(201);
+    const released = await legRow(lastMile.id);
+    expect(released.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(released.pickedUpAt).not.toBeNull();
+    expect(released.status).toBe('IN_PROGRESS');
+    expect(released.startedAt).not.toBeNull();
   });
 });

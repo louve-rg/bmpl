@@ -283,22 +283,16 @@ export class ShipmentDriverService {
       await this.shipments.verifyPickupPin(legId, dto.pin, actor);
     }
 
-    // Conditional, not an update by id: staff may flag the exception in the
-    // same window the driver is confirming pickup. The database, not the read
-    // above, is the arbiter.
-    const claimed = await this.prisma.shipmentLeg.updateMany({
-      where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
-      data: {
-        courierStatus: 'PICKUP_CONFIRMED',
-        pickedUpAt: new Date(),
-        ...(enforcesPickupPin ? { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' } : {}),
-      },
-    });
-    if (claimed.count === 0) {
-      throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be picked up.');
-    }
-    // Records custody, moves the leg to IN_PROGRESS and recomputes the shipment.
-    await this.shipments.startLeg(legId, { userId: actor.userId, label: 'Driver' });
+    // MDF-926 item 3: the pickup write (courierStatus/pickedUpAt) and the
+    // leg-start write (status/startedAt/custody, recomputing the shipment)
+    // now land in ONE transaction via confirmAndStartLeg — see its own doc
+    // comment for why the two were never safe to run as separate commits.
+    await this.shipments.confirmAndStartLeg(
+      legId,
+      enforcesPickupPin ? { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' } : {},
+      'This leg has an open exception and must be resolved by staff before it can be picked up.',
+      { userId: actor.userId, label: 'Driver' },
+    );
     // A photo attached before this call already recorded the pickup itself
     // (BMPL-189) — this transition still applies (courierStatus, custody,
     // notification), but the audit trail only gets one SHIPMENT_LEG_PICKED_UP
