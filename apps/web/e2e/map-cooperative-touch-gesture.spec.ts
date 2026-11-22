@@ -123,15 +123,19 @@ async function newTouchContext(browser: Browser): Promise<{ context: BrowserCont
 
 /**
  * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): watch item, not an
- * observed failure. `openEmbeddedCheckoutMap` clicks the same kind of
- * Delivery-radio locator, on the same mocked /checkout page, that made
- * address-saved-label-overflow.spec.ts fail once in CI with the test's own
- * 30000ms global timeout exceeded (not an action wait -- raising only a
- * locator/click timeout would not help). Every call this page makes
- * (/api/cart) is already page.route()-mocked -- no real backend latency is
- * in the critical path here either. This file has never failed in CI; the
- * raise is pre-emptive single-worker CI runner variance insurance, not a
- * reaction to a slow product.
+ * observed failure -- this file has never failed in CI. `openEmbeddedCheckoutMap`
+ * clicks the same kind of Delivery-radio locator, on the same mocked
+ * /checkout page, that made address-saved-label-overflow.spec.ts fail twice
+ * in CI with a locator wait that ran out its full test timeout. That spec's
+ * trace showed the real mechanism: client-side JS not getting a turn for
+ * most of a minute, in two unrelated components at once, every network
+ * request still returning 200, zero console/page errors -- environmental,
+ * not a defect in that page's own code, low-level cause not pinned. Nothing
+ * about that mechanism is specific to the OTHER spec's code, so this file is
+ * equally exposed by construction, not by anything observed here. Both the
+ * 60s test.setTimeout() below and `retries: process.env.CI ? 1 : 0` in
+ * playwright.config.ts are pre-emptive insurance against that risk, not a
+ * response to a failure in this file.
  */
 test.describe('embedded map cooperative touch gesture', () => {
   test('one-finger swipe scrolls the page, not the map', async ({ browser }) => {
