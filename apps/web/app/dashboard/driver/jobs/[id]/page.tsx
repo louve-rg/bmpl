@@ -184,7 +184,7 @@ export default function DriverJobDetailPage() {
             {ACTIVE_JOB_STATUSES.has(job.status) && (
               <MessageButton kind="delivery" id={job.id} with="customer" />
             )}
-            <StatusBadge status={job.status} />
+            <StatusBadge status={job.status} label={job.statusLabel} />
           </>
         }
       />
