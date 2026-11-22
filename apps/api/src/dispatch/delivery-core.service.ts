@@ -241,6 +241,22 @@ export class DeliveryCoreService {
     return d.timeline.map((t) => ({ event: t.event, fromStatus: t.fromStatus, toStatus: t.toStatus, actorRole: t.actorRole, note: t.note, createdAt: t.createdAt }));
   }
 
+  /**
+   * MDF-927: `timeline()`'s `note` is whichever actor's own free text landed
+   * on that transition — an admin's cancellationReason, a driver's
+   * declineReason or exceptionReason, ... None of that is safe for an
+   * audience other than the actor who wrote it (and staff/admin, who already
+   * see it all operationally): a driver's own exceptionReason is surfaced
+   * separately as its own field for exactly that driver, and the customer
+   * gets the fixed, status-derived statusLabel instead of anyone's words. So
+   * DRIVER and CUSTOMER both get the event/status/time shape with every
+   * actor's note stripped, never the unfiltered timeline ADMIN and VENDOR
+   * receive.
+   */
+  private redactedTimeline(d: DeliveryWithGraph) {
+    return this.timeline(d).map(({ note: _note, ...rest }) => rest);
+  }
+
   assignmentHistory(d: DeliveryWithGraph) {
     return d.assignments.map((a) => ({
       id: a.id,
@@ -360,6 +376,8 @@ export class DeliveryCoreService {
 
       return {
         ...base,
+        // See redactedTimeline()'s own comment: never another actor's words.
+        timeline: this.redactedTimeline(d),
         // Area only until accepted; full fulfilment details afterwards.
         deliveryAddress: driverAddress,
         /** Whether `deliveryAddress` is the full address or the area-only view. */
@@ -407,6 +425,8 @@ export class DeliveryCoreService {
       // always returns the full set of steps, reached or not.
       return {
         ...base,
+        // See redactedTimeline()'s own comment: never another actor's words.
+        timeline: this.redactedTimeline(d),
         deliveryAddress,
         items,
         podPhotoUrls,

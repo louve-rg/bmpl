@@ -257,12 +257,18 @@ describe('MDF-927: driver-reported delivery exception', () => {
     expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/report-exception`, { reason: 'Recipient address does not exist' })).body.status).toBe('EXCEPTION');
 
     // Admin resolves it with their OWN, staff-authored note.
-    const cancel = await post(adminCookies, `admin/deliveries/${order.deliveryId}/cancel`, { reason: 'Confirmed bad address with vendor — customer will be asked to re-book' });
+    const staffReason = 'Confirmed bad address with vendor — customer will be asked to re-book';
+    const cancel = await post(adminCookies, `admin/deliveries/${order.deliveryId}/cancel`, { reason: staffReason });
     expect(cancel.status).toBe(201);
 
-    // The admin's own payload carries their note.
-    const adminView = await get(adminCookies, `admin/deliveries/${order.deliveryId}`);
-    expect(adminView.body.cancellationReason).toBe('Confirmed bad address with vendor — customer will be asked to re-book');
+    // Confirm the staff reason was actually recorded (so the "never reaches
+    // the driver" check below is proving something, not vacuously true of
+    // text that was never written anywhere). cancellationReason itself is
+    // not exposed through any audience's serialize() payload — a
+    // pre-existing, deliberate absence this change does not touch — so the
+    // row is read directly rather than through the admin API.
+    const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    expect(row.cancellationReason).toBe(staffReason);
 
     // The driver's own view carries their OWN report, but never the admin's note,
     // and never a pickup/delivery PIN (unchanged, pre-existing guarantee).
