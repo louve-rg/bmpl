@@ -4916,6 +4916,32 @@ export class ShipmentService {
           opts.audience === 'STAFF' && l.courierStatus === 'ASSIGNED' && l.offerExpiresAt == null && l.acceptedAt == null
             ? l.assignedAt
             : null,
+        // P2-PARITY-API: the same two raw markers and the one derived reason
+        // `listForOps` (:1669-1670, :1748-1754) already sends on the ops
+        // board, now also on this single-shipment detail page — same admin
+        // audience both times, so this is staff-gated like every other
+        // operational field above, not a new redaction decision. Before this,
+        // the board could call a leg "No driver found" while this page showed
+        // only the bare leg status for the SAME leg — the admin saw two
+        // different descriptions of one fact depending which screen they
+        // were on. `needsDriverReason`'s precedence (EXHAUSTED checked before
+        // UNAVAILABLE) and its null-on-closed-leg rule are copied verbatim
+        // from `listForOps` rather than re-derived, for the same reason
+        // `manualAssignmentPendingSince` above already does — if these two
+        // expressions ever disagree, that is the bug this field exists to
+        // prevent.
+        dispatchExhaustedAt: opts.audience === 'STAFF' ? l.dispatchExhaustedAt : null,
+        dispatchUnavailableAt: opts.audience === 'STAFF' ? l.dispatchUnavailableAt : null,
+        needsDriverReason:
+          opts.audience === 'STAFF'
+            ? LEG_NEVER_NEEDS_DRIVER_STATUSES.includes(l.status)
+              ? null
+              : l.dispatchExhaustedAt != null
+                ? ('EXHAUSTED' as const)
+                : l.dispatchUnavailableAt != null
+                  ? ('UNAVAILABLE' as const)
+                  : null
+            : null,
         // The carrier org operating this LINE_HAUL leg, staff-only — see the
         // batched resolution just above `legs` for why operatorName always
         // travels with the id rather than the admin console showing a bare one.
@@ -6004,6 +6030,17 @@ export class ShipmentService {
    * `isTest` carries the same simulation-boundary label MDF-707/MDF-700
    * require on `myWorkspace`/`terminalQueue` — a lookup result is exactly
    * where a clerk could otherwise mistake a demo parcel for a real one.
+   *
+   * P2-PARITY-API: `statusLabel` is the one addition to this allowlist since
+   * the comment above was written. AWAITING_PICKUP means two opposite things
+   * depending on `service` (see `shipmentStatusLabel`'s own doc) and this
+   * endpoint selected neither `service` nor the label, so the raw enum
+   * title-cased by the terminal page's `StatusBadge` could not tell a clerk
+   * whether a courier is en route or the sender still has to walk the parcel
+   * in. Sending the server-computed label (not the raw `service` value)
+   * keeps the correction in the one function every other audience already
+   * goes through, rather than giving the terminal page its own copy of the
+   * rule to drift out of sync with.
    */
   async lookupForTerminal(reference: string, hubIds: string[]) {
     // TERM-SEARCH-CASE: every generated reference is uppercase
@@ -6022,6 +6059,7 @@ export class ShipmentService {
         id: true,
         reference: true,
         status: true,
+        service: true,
         description: true,
         pieces: true,
         isTest: true,
@@ -6049,6 +6087,9 @@ export class ShipmentService {
       shipmentId: shipment.id,
       reference: shipment.reference,
       status: shipment.status,
+      // P2-PARITY-API: server-computed, not the raw `service` enum — see the
+      // doc above this method for why.
+      statusLabel: shipmentStatusLabel(shipment.status, shipment.service),
       description: shipment.description,
       pieces: shipment.pieces,
       isTest: shipment.isTest,
