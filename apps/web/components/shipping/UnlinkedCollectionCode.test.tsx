@@ -174,6 +174,10 @@ describe('UnlinkedCollectionCode — reveal step', () => {
     expect(el.textContent).toContain('Our team needs to confirm it with you directly');
     expect(el.textContent).not.toContain('No collection code to show for this parcel right now.');
     expect(el.textContent).not.toMatch(/attempt|remaining|tries left/i);
+
+    // MDF-942: that sentence must give a way to act on it, not just name the problem.
+    const link = el.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
   });
 
   it('shows the server’s own message on an invalid or expired token, and lets them try again', async () => {

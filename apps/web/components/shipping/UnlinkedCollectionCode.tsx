@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { shippingApi } from '../../lib/shipping';
 import type { ApiError } from '../../lib/api';
 import { Alert, Button } from '../ui';
+import { CollectionHoldMessageText } from './CollectionHoldMessage';
 
 const COOLDOWN_MS = 5 * 60_000; // mirrors the API's own 5-minute per-shipment cooldown
 
@@ -170,7 +171,9 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
         collectionCode ? (
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{collectionCode}</p>
         ) : holdMessage ? (
-          <p className="mt-3 text-sm text-slate-600">{holdMessage}</p>
+          <p className="mt-3 text-sm text-slate-600">
+            <CollectionHoldMessageText message={holdMessage} />
+          </p>
         ) : (
           <p className="mt-3 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
         )
