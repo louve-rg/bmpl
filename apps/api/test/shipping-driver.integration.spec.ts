@@ -517,6 +517,32 @@ describe('the driver sees one queue', () => {
     const item = queue.body.items.find((i: { id: string }) => i.id === first.id);
     expect(item.recommendedPosition).toBeNull();
   });
+
+  it('does not route a leg that is flagged with an exception, even though the driver still holds it (SHIP-S1B)', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+
+    // Baseline: before the exception, this committed job IS routed.
+    const before = await get(driver.cookies, 'driver/jobs/queue');
+    expect(before.body.items.find((i: { id: string }) => i.id === first.id).recommendedPosition).toBe(1);
+
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Road washed out.' })).status).toBe(201);
+
+    // SHIP-S1B: EXCEPTION stays in DRIVER_OPEN_STATUSES (MDF-927) — the leg
+    // is still on the driver's plate, still listed here — but there is no
+    // legal next physical step for it, the same reason a marketplace
+    // delivery's own EXCEPTION is already excluded from recommendRoute two
+    // branches above. Before this fix the shipment-leg branch had no
+    // matching exclusion, so a flagged leg kept being routed to — the exact
+    // contradiction #834 closed in the detail view, still live in the feed
+    // that sends the driver there.
+    const after = await get(driver.cookies, 'driver/jobs/queue');
+    const item = after.body.items.find((i: { id: string }) => i.id === first.id);
+    expect(item).toBeTruthy();
+    expect(item.recommendedPosition).toBeNull();
+  });
 });
 
 describe('what the driver is shown', () => {
