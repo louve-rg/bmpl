@@ -57,7 +57,10 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeader title="Settings" description="Manage your profile, contact information, and password." />
+      <PageHeader
+        title="Settings"
+        description="Manage your profile, contact information, password, active sessions, and account deletion."
+      />
 
       <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Profile &amp; contact information</h2>
       <ContactInfoForm me={me} onSaved={setMe} />
