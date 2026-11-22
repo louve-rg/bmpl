@@ -506,6 +506,17 @@ enum AuditAction {
   // floor, open order, in-progress delivery) never reaches this action at
   // all, by design — a refusal is not an attempt that gets logged as one.
   USER_ACCOUNT_DELETED
+  // ---- Session self-service (MDF-951) ----
+  // "Sign out everywhere else" (ACCT-SESSIONS, SessionService.
+  // revokeOthersForUser) is a BULK security action — it can end every
+  // other live session on the account in one call, unlike LOGOUT (one
+  // device, itself) or revoking a single named session (one device, by
+  // id) — and it had no audit trail at all. Deliberately a NEW action
+  // rather than reusing USER_ACCOUNT_DELETED's session-revocation or
+  // going unaudited like plain logout: this is the one self-service
+  // session action whose blast radius is "every other device", and that
+  // is exactly the shape worth a record.
+  SESSIONS_REVOKED_OTHERS
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

@@ -7,6 +7,7 @@ import {
 } from '@bmpl/authentication';
 import type { RoleCode } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
 
@@ -32,6 +33,7 @@ interface SessionUser {
 export class SessionService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -196,11 +198,31 @@ export class SessionService {
    * user, deliberately leaving `exceptSessionId` (the caller's own current
    * session, making this very call) untouched — the whole point of the
    * action is that the browser calling it stays signed in.
+   *
+   * MDF-951: audited, unlike `logout`/single-session `revokeOwn`. This is
+   * the one self-service session action whose blast radius is "every
+   * other device the account has signed into" in one call — a BULK
+   * security action, not the one-device shape `logout` and `revokeOwn`
+   * each have, which is why those stay unaudited and this does not.
+   * Fires even when `revokedCount` is 0: "I asked and there was nothing to
+   * revoke" is itself evidence someone checked, not noise to skip.
    */
-  async revokeOthersForUser(userId: string, exceptSessionId: string): Promise<{ revokedCount: number }> {
+  async revokeOthersForUser(
+    userId: string,
+    exceptSessionId: string,
+    meta: { ipAddress?: string } = {},
+  ): Promise<{ revokedCount: number }> {
     const result = await this.prisma.session.updateMany({
       where: { userId, revokedAt: null, id: { not: exceptSessionId } },
       data: { revokedAt: new Date() },
+    });
+    await this.audit.record({
+      action: 'SESSIONS_REVOKED_OTHERS',
+      actorId: userId,
+      targetUserId: userId,
+      newValue: { revokedCount: result.count },
+      ipAddress: meta.ipAddress,
+      sessionId: exceptSessionId,
     });
     return { revokedCount: result.count };
   }

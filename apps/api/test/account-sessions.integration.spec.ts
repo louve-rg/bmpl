@@ -225,12 +225,26 @@ describe('ACCT-SESSIONS: revoke others', () => {
     const after = await listSessions(current);
     expect(after).toHaveLength(1);
     expect(after[0]!.current).toBe(true);
+
+    // MDF-951: a bulk security action -- unlike plain logout or revoking
+    // one named session, "sign out everywhere else" is audited.
+    const userId = (await ctx.prisma.user.findUniqueOrThrow({ where: { email } })).id;
+    const log = await ctx.prisma.auditLog.findFirst({ where: { action: 'SESSIONS_REVOKED_OTHERS', targetUserId: userId } });
+    expect(log).toBeTruthy();
+    expect(log?.actorId).toBe(userId);
+    expect(log?.newValue).toEqual({ revokedCount: 2 });
   });
 
-  it('reports zero revoked when there is nothing else to revoke', async () => {
-    const cookies = await register('sessions-revoke-others-none@example.bz', 'SessionsPass123');
+  it('reports zero revoked when there is nothing else to revoke, and still audits the call', async () => {
+    const email = 'sessions-revoke-others-none@example.bz';
+    const cookies = await register(email, 'SessionsPass123');
     const res = await request(ctx.server).post('/api/me/sessions/revoke-others').set('Cookie', cookies);
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ ok: true, revokedCount: 0 });
+
+    const userId = (await ctx.prisma.user.findUniqueOrThrow({ where: { email } })).id;
+    const log = await ctx.prisma.auditLog.findFirst({ where: { action: 'SESSIONS_REVOKED_OTHERS', targetUserId: userId } });
+    expect(log).toBeTruthy();
+    expect(log?.newValue).toEqual({ revokedCount: 0 });
   });
 });
