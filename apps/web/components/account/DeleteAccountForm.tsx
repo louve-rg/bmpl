@@ -39,6 +39,16 @@ import { Alert, Button, Card, Field, Input } from '../ui';
  * A 429 (StrictThrottle, same as the other sensitive account routes) gets
  * its own copy rather than whatever raw text the throttler guard returns,
  * per the owner's instruction not to show "a generic failure" here.
+ *
+ * ACKNOWLEDGEMENT, NOT JUST DISCLOSURE (acceptance round 1): the owner
+ * directive asks for "explicit consequence confirmation," which is a
+ * different requirement from showing the consequences honestly -- a
+ * browser-autofilled password turns this into a single keypress otherwise.
+ * `window.confirm` is the same control the product already uses for its
+ * other recoverable-but-not-trivial account action, "End membership"
+ * (apps/web/app/dashboard/terminal/page.tsx's `endMember`) -- reused here
+ * rather than inventing a second confirmation pattern (a checkbox) for the
+ * same kind of decision.
  */
 export function DeleteAccountForm() {
   const router = useRouter();
@@ -49,6 +59,7 @@ export function DeleteAccountForm() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!window.confirm('Delete your account? This anonymizes your profile and cannot be undone.')) return;
     setError(null);
     setReasons(null);
     setSubmitting(true);
@@ -77,6 +88,31 @@ export function DeleteAccountForm() {
         disabled. It does <strong>not</strong> erase your history: completed orders and shipments keep their stored
         recipient name and address, by policy, and will show &ldquo;Deleted User&rdquo; in place of your account
         going forward. This cannot be undone.
+      </p>
+      {/*
+       * Required (acceptance round 1): every sentence here is sourced to a
+       * line in users.service.ts's deleteAccount/anonymizePersonalData, not
+       * assumed -- a paragraph that over-promises consequences is as wrong
+       * as one that hides them.
+       *   - storefront suspension: deleteAccount calls VendorService.
+       *     moderate(..., 'suspend', ...) on an APPROVED storefront before
+       *     anonymizing anything.
+       *   - driver/passenger-driver going offline: anonymizePersonalData
+       *     sets DriverProfile/PassengerDriverProfile isActive:false,
+       *     availability:'OFFLINE'.
+       *   - identity documents and CVs removed: anonymizePersonalData
+       *     orphans every RoleApplicationDocument's and JobSeekerResume's
+       *     storageKey, and deleteAccount deletes the underlying objects
+       *     afterward.
+       *   - messages left as-is: anonymizePersonalData's own doc comment
+       *     states Message.body/MessageAttachment are deliberately left
+       *     alone -- a two-sided conversation is not solely this account's
+       *     record to rewrite.
+       */}
+      <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
+        A few other things happen immediately, without asking again: a live storefront is suspended; a driver or
+        passenger-driver profile goes offline; any identity documents or CVs you uploaded are deleted; and messages
+        you&rsquo;ve already sent stay visible to the people you sent them to, exactly as sent.
       </p>
       <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         You will be signed out of every device immediately, including this one.
