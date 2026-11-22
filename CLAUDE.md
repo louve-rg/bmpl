@@ -175,11 +175,34 @@ not to fill an empty screen:
 - Which towns are connected to which, or by what
 - Distances, travel times or coverage areas
 
-Production currently has **no transport network** — `/api/shipping/hubs` is `[]`,
-`/api/shipping/modes` is `[]`, and `courier_lanes` is empty. **That is the
-correct state**, not a bug to fix with seed data. Real hubs and routes require
-carrier onboarding; a courier lane requires an approved commercial rate. Both
-are business decisions entered by operations through the admin console.
+**Production is no longer an empty network — that was true once, and is the
+origin of this section, but it stopped being true before this sentence was
+last corrected.** A direct, unauthenticated production read on 2026-11-06
+found `GET /api/shipping/hubs` returning two real (`isTest: false`) hubs —
+`MZBE` (Belize City Municipal, AIRSTRIP) and `SPR` (San Pedro Airstrip,
+AIRSTRIP) — and `GET /api/shipping/modes` returning `[AIR]`, not `[]`. A
+separate, read-only production check on 2026-11-18 counted nine
+`LogisticsHub` rows in total; three were identified by name as the
+`DEMO-SP-TER` / `DEMO-BZ-DC` / `DEMO-OUT-TER` simulation hubs (`isTest: true`);
+the rest were not individually identified in that check.
+
+**Both readings are dated snapshots, not a live value, and nobody is keeping
+them current.** No production credential exists on this floor and none is to
+be sought, so treat the numbers above as "true as of the date given," not as
+today's count — get a fresh authorized read before relying on an exact figure.
+**The `courier_lanes` row count in production cannot be confirmed from this
+repo at all; no reading of it has been recorded anywhere this floor can see,
+and this file does not guess at one.**
+
+None of this changes the rule, and it is not conditional on the network being
+non-empty: real hubs and routes still require carrier onboarding, and a
+courier lane still requires an approved commercial rate, both business
+decisions entered by operations through the admin console — never invented,
+seeded or inferred here, whatever the current count turns out to be. Watch
+for the inverse mistake too: a shared local/dev database can hold rows named
+to look like rehearsal fixtures (e.g. hubs named "Rehearsal…") while carrying
+`isTest: false` — judge a row by its `isTest` flag, never by its name, and
+never by what a local database holds in place of a production read.
 
 ### The planner never guesses geography
 
