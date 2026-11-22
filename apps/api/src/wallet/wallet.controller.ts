@@ -1,6 +1,6 @@
-import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { walletTopUpSchema, type WalletTopUpInput } from '@bmpl/validation';
+import { paginationSchema, walletTopUpSchema, type Pagination, type WalletTopUpInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
@@ -44,8 +44,8 @@ export class WalletController {
   }
 
   @Get('transactions')
-  transactions(@CurrentUser() user: AuthContext) {
-    return this.wallet.listForUser(user.userId);
+  transactions(@CurrentUser() user: AuthContext, @Query(ZodBody(paginationSchema)) pagination: Pagination) {
+    return this.wallet.listForUser(user.userId, pagination);
   }
 
   @Get('transactions/:id')

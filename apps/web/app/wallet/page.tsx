@@ -18,11 +18,16 @@ import type { ApiError } from '../../lib/api';
  */
 
 const QUICK_AMOUNTS = [2000, 5000, 10000, 20000];
+const TRANSACTIONS_PAGE_SIZE = 20;
 
 export default function WalletPage() {
   const router = useRouter();
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [rows, setRows] = useState<WalletTransactionRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [rowsLoading, setRowsLoading] = useState(false);
+  const [rowsError, setRowsError] = useState(false);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [amount, setAmount] = useState('50.00');
@@ -46,11 +51,26 @@ export default function WalletPage() {
   const [testFunding, setTestFunding] = useState<TestFundingStatus | null>(null);
   const [claiming, setClaiming] = useState(false);
 
+  /** Server-paginated — a `page` beyond the end just comes back with an empty `rows`, never a client-side slice. */
+  const loadTransactions = useCallback(async (p: number) => {
+    setRowsLoading(true);
+    setRowsError(false);
+    try {
+      const t = await walletApi.transactions(p, TRANSACTIONS_PAGE_SIZE);
+      setRows(t.rows);
+      setTotal(t.total);
+      setPage(t.page);
+    } catch {
+      setRowsError(true);
+    } finally {
+      setRowsLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     try {
-      const [s, t] = await Promise.all([walletApi.summary(), walletApi.transactions()]);
+      const s = await walletApi.summary();
       setSummary(s);
-      setRows(t);
       setState('ready');
       // Separately and best-effort: the wallet must still render if this
       // temporary endpoint is gone, which is exactly what happens the moment
@@ -59,8 +79,13 @@ export default function WalletPage() {
     } catch (e) {
       if ((e as ApiError).status === 401) router.push(`/login?next=${encodeURIComponent('/wallet')}`);
       else setState('error');
+      return;
     }
-  }, [router]);
+    // A mutation (top-up, test credit) always lands its new row at the top of
+    // page 1, so a full reload always goes back there rather than staying on
+    // whatever page the customer happened to be reading.
+    await loadTransactions(1);
+  }, [router, loadTransactions]);
 
   /** TEMPORARY UAT FEATURE — see the panel below. */
   async function claimTestFunds() {
@@ -239,37 +264,74 @@ export default function WalletPage() {
 
             <section className="mt-8">
               <h2 className="text-sm font-semibold text-belize-navy">Transactions</h2>
-              {rows.length === 0 ? (
+              {rowsLoading && rows.length === 0 ? (
+                <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                  <Spinner className="h-4 w-4" /> Loading…
+                </div>
+              ) : rowsError ? (
+                <Alert tone="warning" className="mt-3">
+                  We could not load your transactions just now. Try again in a moment.
+                </Alert>
+              ) : rows.length === 0 ? (
                 <div className="mt-3">
                   <EmptyState title="Nothing yet" description="Money you add and orders you pay for will appear here." />
                 </div>
               ) : (
-                <ul className="mt-3 space-y-2">
-                  {rows.map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="break-words text-sm font-medium text-slate-900">{describeTransaction(t)}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          {new Date(t.postedAt ?? t.createdAt).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' })}
-                          {t.isTest && ' · simulation'}
-                        </p>
+                <>
+                  <ul className="mt-3 space-y-2">
+                    {rows.map((t) => (
+                      <li key={t.id}>
+                        <Link
+                          href={`/wallet/${t.id}`}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-blue/40 hover:shadow-bmpl-md"
+                        >
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-medium text-slate-900">{describeTransaction(t)}</p>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {new Date(t.postedAt ?? t.createdAt).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' })}
+                              {t.isTest && ' · simulation'}
+                            </p>
+                          </div>
+                          {/* Signed from the customer's point of view: what happened
+                              to THEIR balance, not the ledger's symmetry. */}
+                          <p
+                            className={`shrink-0 text-sm font-semibold tabular-nums ${
+                              t.direction === 'IN' ? 'text-emerald-700' : 'text-slate-900'
+                            }`}
+                          >
+                            {t.direction === 'IN' ? '+' : '−'}
+                            {bzd(Math.abs(t.signedMinor))}
+                          </p>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  {total > TRANSACTIONS_PAGE_SIZE && (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+                      <span>
+                        Showing {(page - 1) * TRANSACTIONS_PAGE_SIZE + 1}–{Math.min(page * TRANSACTIONS_PAGE_SIZE, total)} of {total}
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={rowsLoading || page <= 1}
+                          onClick={() => void loadTransactions(page - 1)}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={rowsLoading || page * TRANSACTIONS_PAGE_SIZE >= total}
+                          onClick={() => void loadTransactions(page + 1)}
+                        >
+                          Next
+                        </Button>
                       </div>
-                      {/* Signed from the customer's point of view: what happened
-                          to THEIR balance, not the ledger's symmetry. */}
-                      <p
-                        className={`shrink-0 text-sm font-semibold tabular-nums ${
-                          t.direction === 'IN' ? 'text-emerald-700' : 'text-slate-900'
-                        }`}
-                      >
-                        {t.direction === 'IN' ? '+' : '−'}
-                        {bzd(Math.abs(t.signedMinor))}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+                    </div>
+                  )}
+                </>
               )}
             </section>
 

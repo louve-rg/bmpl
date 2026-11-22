@@ -31,6 +31,37 @@ export interface WalletTransactionRow {
   createdAt: string;
 }
 
+/** The paginated shape `GET /wallet/transactions` returns — real pagination, not a raised cap. */
+export interface WalletTransactionHistory {
+  rows: WalletTransactionRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** One ledger line of a transaction, exactly as the server posted it — never resummed in the browser. */
+export interface WalletTransactionEntry {
+  direction: 'CREDIT' | 'DEBIT';
+  amountMinor: number;
+  accountType: string;
+  isCustomer: boolean;
+}
+
+/** `GET /wallet/transactions/:id` — the detail view. Ownership is enforced server-side: a transaction with none of your entries 404s rather than being filtered client-side. */
+export interface WalletTransactionDetail {
+  id: string;
+  type: string;
+  status: string;
+  currency: string;
+  isTest: boolean;
+  reference: string | null;
+  description: string | null;
+  postedAt: string | null;
+  createdAt: string;
+  entries: WalletTransactionEntry[];
+  balanced: boolean;
+}
+
 /**
  * TEMPORARY UAT FEATURE — self-issued simulation funds.
  *
@@ -58,7 +89,9 @@ export interface TestFundingResult {
 
 export const walletApi = {
   summary: () => api.get<WalletSummary>('/wallet'),
-  transactions: () => api.get<WalletTransactionRow[]>('/wallet/transactions'),
+  transactions: (page = 1, pageSize = 20) =>
+    api.get<WalletTransactionHistory>(`/wallet/transactions?page=${page}&pageSize=${pageSize}`),
+  transaction: (id: string) => api.get<WalletTransactionDetail>(`/wallet/transactions/${encodeURIComponent(id)}`),
   topUp: (amountMinor: number) => api.post<WalletSummary>('/wallet/top-up', { amountMinor }),
   testFundingStatus: () => api.get<TestFundingStatus>('/wallet/test-funding'),
   claimTestFunds: () => api.post<TestFundingResult>('/wallet/test-fund', {}),
@@ -82,7 +115,7 @@ export function bzd(minor: number): string {
  * looking at their own money: nobody thinks "ESCROW_HOLD", they think "held for
  * an order".
  */
-export function describeTransaction(t: WalletTransactionRow): string {
+export function describeTransaction(t: { type: string; description: string | null }): string {
   switch (t.type) {
     case 'TOPUP':
       // The server's own words when it has them: "Self-Service Test Credit"

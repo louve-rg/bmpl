@@ -545,33 +545,45 @@ export class WalletService {
     };
   }
 
-  /** The customer's own transaction history, newest first. */
-  async listForUser(userId: string, take = 50) {
-    const rows = await this.prisma.walletTransaction.findMany({
-      where: { entries: { some: { account: { userId } } } },
-      orderBy: { createdAt: 'desc' },
-      take,
-      include: { entries: { include: { account: { select: { id: true, type: true, userId: true } } } } },
-    });
-    return rows.map((t) => {
-      const mine = t.entries.filter((e) => e.account.userId === userId);
-      // Signed from the CUSTOMER's point of view: a credit to their account is
-      // money in, a debit is money out. The raw entries are symmetrical; the
-      // customer only cares about their own side of them.
-      const signedMinor = mine.reduce((acc, e) => acc + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
-      return {
-        id: t.id,
-        type: t.type,
-        status: t.status,
-        currency: t.currency,
-        description: t.description,
-        isTest: t.isTest,
-        signedMinor: money(signedMinor),
-        direction: signedMinor >= 0n ? ('IN' as const) : ('OUT' as const),
-        postedAt: t.postedAt,
-        createdAt: t.createdAt,
-      };
-    });
+  /** The customer's own transaction history, newest first, server-paginated. */
+  async listForUser(userId: string, pagination: { page?: number; pageSize?: number } = {}) {
+    const page = pagination.page ?? 1;
+    const pageSize = pagination.pageSize ?? 20;
+    const where: Prisma.WalletTransactionWhereInput = { entries: { some: { account: { userId } } } };
+    const [rows, total] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { entries: { include: { account: { select: { id: true, type: true, userId: true } } } } },
+      }),
+      this.prisma.walletTransaction.count({ where }),
+    ]);
+    return {
+      rows: rows.map((t) => {
+        const mine = t.entries.filter((e) => e.account.userId === userId);
+        // Signed from the CUSTOMER's point of view: a credit to their account is
+        // money in, a debit is money out. The raw entries are symmetrical; the
+        // customer only cares about their own side of them.
+        const signedMinor = mine.reduce((acc, e) => acc + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+        return {
+          id: t.id,
+          type: t.type,
+          status: t.status,
+          currency: t.currency,
+          description: t.description,
+          isTest: t.isTest,
+          signedMinor: money(signedMinor),
+          direction: signedMinor >= 0n ? ('IN' as const) : ('OUT' as const),
+          postedAt: t.postedAt,
+          createdAt: t.createdAt,
+        };
+      }),
+      total,
+      page,
+      pageSize,
+    };
   }
 
 
