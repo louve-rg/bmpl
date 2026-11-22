@@ -60,6 +60,32 @@ describe('MDF-925/MDF-923 -- the password-changed notice', () => {
 
     expect(container.textContent).not.toContain('something-made-up');
   });
+
+  it('strips ?reason= from the URL after reading it, so a reload does not re-show it', async () => {
+    window.history.replaceState(null, '', '/login?reason=password-changed');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(window.location.search).toBe('');
+    expect(window.location.pathname).toBe('/login');
+  });
+
+  it('keeps ?next= when stripping ?reason=, so a failed sign-in retry still returns to the right page', async () => {
+    window.history.replaceState(null, '', '/login?reason=password-changed&next=%2Fdashboard%2Fsettings');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(new URLSearchParams(window.location.search).get('reason')).toBeNull();
+    expect(new URLSearchParams(window.location.search).get('next')).toBe('/dashboard/settings');
+  });
 });
 
 describe('SEC-LOGIN-PASSWORD-IN-URL', () => {

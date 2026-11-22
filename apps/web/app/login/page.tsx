@@ -26,8 +26,19 @@ export default function LoginPage() {
   // already established the pattern of reading the query string only from
   // browser-only code (window.location.search), never from render output.
   useEffect(() => {
-    const reason = new URLSearchParams(window.location.search).get('reason');
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('reason');
     setNotice((reason && REASON_MESSAGES[reason]) || null);
+    // Strip ?reason= once read -- otherwise a reload (or a bookmark, or the
+    // back button) re-shows "Your password was changed" to someone who did
+    // not just change it. replaceState, not a router navigation: this must
+    // not remount the page or touch ?next=, which a failed sign-in still
+    // needs on the retry.
+    if (reason) {
+      params.delete('reason');
+      const query = params.toString();
+      window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
+    }
   }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {

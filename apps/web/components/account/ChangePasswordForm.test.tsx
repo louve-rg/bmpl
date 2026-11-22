@@ -82,11 +82,12 @@ describe('ChangePasswordForm (MDF-925/MDF-923)', () => {
     expect(apiPost).not.toHaveBeenCalled();
   });
 
-  it('submits currentPassword and newPassword to POST /auth/change-password', async () => {
+  it('submits currentPassword and newPassword to POST /auth/change-password -- confirmPassword never leaves the browser', async () => {
     mount();
     await flush();
     setValue('currentPassword', 'old-password-1');
     setValue('newPassword', 'new-password-2');
+    setValue('confirmPassword', 'new-password-2');
     submit();
     await flush();
 
@@ -101,6 +102,7 @@ describe('ChangePasswordForm (MDF-925/MDF-923)', () => {
     await flush();
     setValue('currentPassword', 'old-password-1');
     setValue('newPassword', 'new-password-2');
+    setValue('confirmPassword', 'new-password-2');
     submit();
     await flush();
 
@@ -108,6 +110,20 @@ describe('ChangePasswordForm (MDF-925/MDF-923)', () => {
     expect(router.refresh).toHaveBeenCalled();
     expect(container!.textContent).not.toContain('saved');
     expect(container!.textContent).not.toContain('success');
+  });
+
+  it('refuses a mismatched confirmation client-side, without ever calling the API', async () => {
+    mount();
+    await flush();
+    setValue('currentPassword', 'old-password-1');
+    setValue('newPassword', 'new-password-2');
+    setValue('confirmPassword', 'typo-password-2');
+    submit();
+    await flush();
+
+    expect(container!.textContent).toContain('New password and confirmation do not match.');
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it('shows the bare current-password refusal (no errors array) by its own message', async () => {

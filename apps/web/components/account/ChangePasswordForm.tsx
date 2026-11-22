@@ -22,6 +22,13 @@ import { Button, Card, Field, Input } from '../ui';
  * back to the bare `message` otherwise, exactly the "tell them apart by
  * shape, not status code" rule the contract states. No special-casing
  * needed here.
+ *
+ * "Confirm new password" is client-side only, not duplicated server
+ * validation: a typo in a field nobody can see signs the account out
+ * everywhere and leaves them holding a password they cannot reproduce, so
+ * this catches it before the API ever sees the mismatched value. No
+ * existing auth form in this repo has one to reuse (register, reset-password
+ * -- checked both) -- this is a new, isolated addition for this form only.
  */
 export function ChangePasswordForm() {
   const router = useRouter();
@@ -31,12 +38,18 @@ export function ChangePasswordForm() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    setSubmitting(true);
     const form = new FormData(e.currentTarget);
+    const newPassword = form.get('newPassword');
+    const confirmPassword = form.get('confirmPassword');
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirmation do not match.');
+      return;
+    }
+    setSubmitting(true);
     try {
       await api.post('/auth/change-password', {
         currentPassword: form.get('currentPassword'),
-        newPassword: form.get('newPassword'),
+        newPassword,
       });
       router.push('/login?reason=password-changed');
       router.refresh();
@@ -66,6 +79,9 @@ export function ChangePasswordForm() {
             required
             placeholder="At least 10 characters, with a letter and a number"
           />
+        </Field>
+        <Field label="Confirm new password" htmlFor="confirmPassword">
+          <Input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" required />
         </Field>
         <div className="pt-2">
           <Button type="submit" disabled={submitting}>
