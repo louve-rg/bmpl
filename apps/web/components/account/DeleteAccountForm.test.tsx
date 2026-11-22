@@ -111,6 +111,19 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
     expect(container!.textContent).not.toContain('permanently delete your account');
   });
 
+  // WEB-DELETE-COPY-NAMES-WHAT-STAYS: the paragraph named orders/shipments as
+  // kept but said nothing about the wallet -- neither deleteAccount nor
+  // anonymizePersonalData touches WalletAccount/WalletTransaction, so a
+  // deleted account's full transaction history survives exactly like a past
+  // order does. A reader must not be left to assume a zero-balance wallet
+  // has nothing left to retain.
+  it('names the wallet\'s past transaction history as kept, the same way it names orders and shipments', async () => {
+    mount();
+    await flush();
+
+    expect(container!.textContent).toContain('your wallet keeps its past transaction history');
+  });
+
   // Acceptance round 1: the paragraph must name every real side effect
   // deleteAccount/anonymizePersonalData actually perform, each sourced to a
   // line in those methods -- not a guess, and not silently omitted.
