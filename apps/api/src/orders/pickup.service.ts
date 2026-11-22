@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InventoryService } from '../products/inventory.service';
 import { OwnershipService } from '../products/ownership.service';
+import { assertReservationsNotReleased } from './order-release-guard';
 
 interface Actor {
   userId: string;
@@ -48,7 +49,7 @@ export class PickupService {
   private async load(vendorOrderId: string) {
     const vo = await this.prisma.vendorOrder.findUnique({
       where: { id: vendorOrderId },
-      include: { items: true, order: { select: { userId: true, orderNumber: true } }, vendorProfile: { select: { userId: true } } },
+      include: { items: true, order: { select: { userId: true, orderNumber: true, reservationsReleasedAt: true } }, vendorProfile: { select: { userId: true } } },
     });
     if (!vo) throw new NotFoundException('Order not found.');
     return vo;
@@ -63,6 +64,9 @@ export class PickupService {
     const vo = await this.ownedByVendor(userId, vendorOrderId);
     this.assertPickup(vo);
     if (vo.status === 'READY_FOR_PICKUP') return this.serialize(vo, { forVendor: true }); // idempotent, checked before the allow-list below
+    // ORD-RELEASED-GUARD: this is the step that starts the collection flow —
+    // stop it here and no PIN is ever issued for a released order.
+    assertReservationsNotReleased(vo.order.reservationsReleasedAt);
     // Same positive allow-list as VendorFulfilmentService.markReady()'s DELIVERY
     // path: a pickup order that went through startPreparing() is still readyable.
     if (vo.status !== 'PENDING' && vo.status !== 'PREPARING') throw new ConflictException(`Cannot ready a ${vo.status} order for pickup.`);
@@ -78,6 +82,9 @@ export class PickupService {
     const vo = await this.ownedByVendor(actor.userId, vendorOrderId);
     this.assertPickup(vo);
     if (vo.status === 'PICKED_UP') return this.serialize(vo, { forVendor: true }); // idempotent
+    // ORD-RELEASED-GUARD: finalizes real inventory below — must not run for a
+    // released order (see finalize()'s own comment on the over-decrement risk).
+    assertReservationsNotReleased(vo.order.reservationsReleasedAt);
     if (vo.status !== 'READY_FOR_PICKUP') throw new ConflictException('Mark the order ready for pickup first.');
     await this.verifyPin(actor.userId, vendorOrderId, dto.pin);
     return this.finalize(vendorOrderId, actor.userId, null);
@@ -89,6 +96,9 @@ export class PickupService {
     const vo = await this.load(vendorOrderId);
     this.assertPickup(vo);
     if (vo.status === 'PICKED_UP') return this.serialize(vo, { forVendor: true });
+    // ORD-RELEASED-GUARD: the override still finalizes real inventory — it may
+    // skip the PIN, never the money state.
+    assertReservationsNotReleased(vo.order.reservationsReleasedAt);
     if (vo.status !== 'READY_FOR_PICKUP' && vo.status !== 'PENDING') throw new ConflictException(`Cannot confirm pickup for a ${vo.status} order.`);
     return this.finalize(vendorOrderId, actor.userId, dto.reason);
   }
@@ -114,7 +124,21 @@ export class PickupService {
     }
   }
 
-  /** Transition to PICKED_UP + finalize inventory exactly once, atomically. */
+  /**
+   * Transition to PICKED_UP + finalize inventory exactly once, atomically.
+   *
+   * ORD-RELEASED-GUARD: `InventoryService.finalizeReservation`/
+   * `finalizeLocationReservation` decrement real on-hand `quantity`
+   * unconditionally — they do not throw or check `reserved` first, so
+   * calling this for an order whose reservations were already released
+   * (stock already given back, `reserved` already floored at 0, `quantity`
+   * never touched by release) would silently take a SECOND real unit out of
+   * stock for goods never actually finalized before. Both callers
+   * (`confirmPickup`, `adminConfirmPickup`) now refuse before reaching here
+   * once `order.reservationsReleasedAt` is set, so this is unreachable for a
+   * released order — not re-guarded here too, to keep exactly one place
+   * deciding "is this order still fulfillable".
+   */
   private async finalize(vendorOrderId: string, actorId: string, reason: string | null) {
     const vo = await this.load(vendorOrderId);
     await this.prisma.$transaction(async (tx) => {
