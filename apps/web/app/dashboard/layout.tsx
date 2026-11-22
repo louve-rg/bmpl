@@ -68,7 +68,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </header>
           <AvatarRequiredBanner me={me} />
-          <div className="min-w-0 flex-1 p-4 sm:p-5 md:p-8">{children}</div>
+          {/* lg:p-8, not md:p-8 (WEB-768-PINCH-POINT): the Sidebar is `hidden
+              md:flex md:w-72` -- it only starts costing 288px at the exact
+              same width (768px) this padding used to jump by 24px more, so
+              content width actually DIPS going from 640px (no sidebar, p-5)
+              to 768px (sidebar + the old p-8), before recovering as the
+              viewport keeps growing. A PageHeader title/description column
+              measured with zero scrollWidth/clientWidth margin at 768px
+              under this app's own (never-loaded, see glass.css's
+              `--font-sans: 'Inter', ...`) font-fallback chain -- any
+              environment whose fallback renders a few px wider than this
+              one's tips it into the real, CI-only overflow
+              driver-job-detail-free-text-overflow.spec.ts caught. Moving
+              the padding step to lg removes the coincidence rather than
+              chasing the specific font: p-5 still applies through the
+              768-1023px range where the sidebar is now also active, so
+              there's real margin instead of exactly none. */}
+          <div className="min-w-0 flex-1 p-4 sm:p-5 lg:p-8">{children}</div>
         </main>
       </div>
     </TerminalMembershipProvider>
