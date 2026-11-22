@@ -56,11 +56,10 @@ export const BASE_NAV: NavItem[] = [
   { label: 'My Roles', href: '/dashboard/roles', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0' },
   { label: 'Profile', href: '/dashboard/profile', icon: PERSON_ICON },
   // MDF-925: profile editing already had a home (Profile, above); this is
-  // the account settings surface, built section-by-section as Pam's API
-  // routes land -- profile/contact and password security are live today,
-  // session management and account deletion follow once their own routes
-  // merge -- additive, not a replacement for Profile's own avatar + contact
-  // form.
+  // the account settings surface -- profile/contact, password security,
+  // session management and account deletion are all live now (the last
+  // two merged via #811/#813 and #808/#824) -- additive, not a replacement
+  // for Profile's own avatar + contact form.
   { label: 'Settings', href: '/dashboard/settings', icon: SETTINGS_ICON },
 ];
 

@@ -26,9 +26,15 @@ import {
  * succeeds (same pattern DeleteAccountForm already uses). Revoking any
  * other row just removes it from this list; this device stays signed in.
  *
- * window.confirm is the same acknowledgement control DeleteAccountForm and
- * "End membership" (dashboard/terminal/page.tsx's endMember) already use --
- * reused here rather than inventing a fourth confirmation pattern.
+ * window.confirm is the same acknowledgement control "End membership"
+ * (dashboard/terminal/page.tsx's endMember) already uses -- both revoking a
+ * session and ending a membership are REVERSIBLE (sign back in; reactivate),
+ * so window.confirm's one real gap (a browser with dialogs suppressed makes
+ * it return `false` exactly like a decline) is tolerable here. Since
+ * acceptance round 2, DeleteAccountForm no longer uses window.confirm at
+ * all -- deleting an account is the one IRREVERSIBLE action in this set, and
+ * it gets its own in-page confirmation panel instead. See that file's doc
+ * comment for the rule.
  *
  * Neither raw `ipAddress` nor raw `userAgent` is ever rendered. See
  * lib/sessions.ts's `describeClient`/`describeUserAgent`: both derive their
