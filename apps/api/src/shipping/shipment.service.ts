@@ -1877,6 +1877,82 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-926 item 3: `confirmPickup` (driver self-submit) and
+   * `staffReleaseToCourier` (terminal release) each used to run their OWN
+   * conditional `updateMany` (`courierStatus` -> `PICKUP_CONFIRMED`,
+   * `pickedUpAt`) as its own commit, then call `startLeg()` separately — a
+   * SECOND, independent `$transaction` for `status` -> `IN_PROGRESS`/
+   * `startedAt`/custody. Anything that made the second transaction throw
+   * after the first had already committed — the LINE_HAUL guard, the
+   * READY-status guard, or (the reachable case the regression test in
+   * `shipping-pickup-courier-identity.integration.spec.ts` exercises)
+   * `startLeg`'s own driver-match check on a grandfathered leg whose
+   * `presentedCourierUserId` is never validated earlier — left a leg stuck:
+   * `courierStatus` `PICKUP_CONFIRMED` and `pickedUpAt` set, but `status`
+   * still `READY` and `startedAt` still null. Every other caller's own guard
+   * requires `courierStatus` to still be `DRIVER_ACCEPTED` before it will
+   * act, so nothing ever read that leg as "not yet picked up" again — it
+   * needed a person to notice and hand-repair the row.
+   *
+   * Folding both writes into one `transition()` callback makes them atomic:
+   * either the pickup fields and the start fields land together, or neither
+   * does. Deliberately NOT shared with `startLeg` above (same guards,
+   * duplicated rather than extracted) — `startLeg`'s own callers never touch
+   * courier-pickup fields at all, and this card's scope is making these two
+   * writes atomic, not deduplicating `transition()` callbacks across the
+   * file.
+   *
+   * Does NOT heal any leg already stuck in that half-applied state before
+   * this deploys — there is no backfill here, and no production access
+   * exists to sweep for one. It only stops a NEW one from being created.
+   */
+  async confirmAndStartLeg(
+    legId: string,
+    extraPickupData: { pickupVerifiedAt?: Date; pickupVerificationStatus?: 'VERIFIED' },
+    conflictMessage: string,
+    actor: { userId: string; label?: string },
+  ) {
+    return this.transition(legId, actor, async (tx, leg, shipment) => {
+      if (leg.courierStatus !== 'DRIVER_ACCEPTED' || leg.status === 'EXCEPTION') {
+        throw new ConflictException(conflictMessage);
+      }
+      if (leg.kind === 'LINE_HAUL') {
+        throw new BadRequestException('A transport leg does not start here — record its departure instead.');
+      }
+      if (leg.status !== 'READY') {
+        throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot be started.`);
+      }
+      if (leg.assignedDriverProfileId != null) {
+        const profile = await tx.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } });
+        if (profile?.id !== leg.assignedDriverProfileId) {
+          throw new ForbiddenException('You are not the courier assigned to this leg.');
+        }
+      }
+      await tx.shipmentLeg.update({
+        where: { id: leg.id },
+        data: {
+          courierStatus: 'PICKUP_CONFIRMED',
+          pickedUpAt: new Date(),
+          status: 'IN_PROGRESS',
+          startedAt: new Date(),
+          ...extraPickupData,
+        },
+      });
+      await this.appendCustody(tx, shipment.id, leg.id, {
+        fromHolder: leg.sequence === 1 ? 'SENDER' : 'HUB',
+        // Never CARRIER: only a driver leg (FIRST_MILE/LAST_MILE/DIRECT)
+        // reaches this method at all.
+        toHolder: 'DRIVER',
+        hubId: leg.originHubId,
+        actorUserId: actor.userId,
+        actorLabel: actor.label,
+        note: 'Collected.',
+      });
+      return { action: 'SHIPMENT_LEG_STARTED' as const, note: null };
+    });
+  }
+
+  /**
    * A line-haul left the terminal. Carrier details are recorded as given.
    *
    * Gated on the route's own BMPL-186 schedule for today (BMPL-196): a
@@ -4818,6 +4894,18 @@ export class ShipmentService {
    * — those stay staff-only exactly as the test at
    * apps/api/test/shipping.integration.spec.ts:976-988 already pins; this
    * constant must never grow to include either.
+   *
+   * LOAD-BEARING FOR apps/web TOO (MDF-942): `CollectionHoldMessageText`
+   * (apps/web/components/shipping/CollectionHoldMessage.tsx) cannot import
+   * this constant — it is private, and apps/web can't import from apps/api
+   * at all — so it finds the trailing phrase "contact support" inside this
+   * exact string at runtime, by matching the text, and turns it into a
+   * mailto: link. Removing or rewording "contact support" (or changing its
+   * case beyond what that component's case-insensitive match already
+   * tolerates) silently breaks that link — the sentence still ends up on
+   * screen, just without anything to act on — and NO API test will catch
+   * it, because the API's own test coverage only exercises this string's
+   * content, never what apps/web does with it.
    */
   private static readonly COLLECTION_LOCKED_CUSTOMER_MESSAGE =
     'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.';
@@ -6203,20 +6291,20 @@ export class ShipmentService {
       await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
     }
 
-    const claimed = await this.prisma.shipmentLeg.updateMany({
-      where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
-      data: {
-        courierStatus: 'PICKUP_CONFIRMED',
-        pickedUpAt: new Date(),
-        // Left unset on the grandfather exemption — same as confirmPickup's
-        // own exempt path — so the record still shows an unverified pickup
-        // rather than claiming a verification that never happened.
-        ...(leg.pickupPinGrandfathered ? {} : { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' }),
-      },
-    });
-    if (claimed.count === 0) {
-      throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be released.');
-    }
+    // MDF-926 item 3: folded into ONE transaction with the leg-start write —
+    // see confirmAndStartLeg's own doc comment. The audit row below now
+    // runs only after BOTH writes have actually landed, not between them
+    // the way the old two-call shape did, so it can no longer assert a
+    // pickup that the leg-start half then refused.
+    const result = await this.confirmAndStartLeg(
+      legId,
+      // Left unset on the grandfather exemption — so the record still shows
+      // an unverified pickup rather than claiming a verification that never
+      // happened.
+      leg.pickupPinGrandfathered ? {} : { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' },
+      'This leg has an open exception and must be resolved by staff before it can be released.',
+      { userId: presentedCourierUserId, label: 'Courier (verified at terminal)' },
+    );
     await this.audit.record({
       action: 'SHIPMENT_LEG_PICKED_UP',
       actorId: actor.userId,
@@ -6231,6 +6319,6 @@ export class ShipmentService {
         pickupPinGrandfathered: leg.pickupPinGrandfathered,
       },
     });
-    return this.startLeg(legId, { userId: presentedCourierUserId, label: 'Courier (verified at terminal)' });
+    return result;
   }
 }
