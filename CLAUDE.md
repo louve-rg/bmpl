@@ -403,7 +403,27 @@ and the dependency edge are both configured correctly, so this is not the
 same missing-`dependsOn` config gap the rest of this section describes.
 The actual cause is still open and tracked on FLOOR-STALEDIST; the leading
 suspect is turbo's build cache treating a changed upstream package as
-already satisfied, but that is not yet confirmed by a reproduction.
+already satisfied, but that is not yet confirmed by a reproduction for
+`@bmpl/validation` specifically.
+
+**A confirmed instance of that same general shape exists, for a different
+package, found by direct reproduction (INFRA-TURBO-CACHE-FALSE-SUCCESS,
+2026-11-22):** `@bmpl/database`'s `build` task's declared `outputs`
+(`dist/**`, `.next/**`) do not cover `prisma generate`'s real output, which
+lives outside the package entirely. A cache HIT for that task restores only
+the declared outputs and replays the old log — it never re-runs
+`prisma generate` and never notices the generated client is missing or
+stale, and this propagates: a downstream task (confirmed with `@bmpl/api`'s
+own `typecheck`, whose `pretypecheck` hook is the thing meant to catch
+exactly this) can ALSO get a cache hit and skip re-executing its own
+freshness check entirely. See `packages/database/CLAUDE.md` §7 for the full
+reproduction and recovery. This is not confirmed to be the SAME mechanism
+behind the `@bmpl/validation` incident above (that package's `build` is a
+plain `tsc` compile whose only real output IS `dist/**`, already fully
+declared) — it is a sibling confirmation that "a cache hit can report
+SUCCESS while a real, consumed artifact silently stays stale" is a real
+turbo behavior on this repo, not merely a suspicion, for at least one
+concrete case.
 
 Until the cause is found, **the only build guaranteed not to read a stale
 cache entry is one run with `--force`**, which is turbo's own documented

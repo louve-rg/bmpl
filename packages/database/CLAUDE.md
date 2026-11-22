@@ -263,7 +263,74 @@ kept here as the record of how, one remains live and always will:
    the accident this section exists to prevent would now come from removing
    it, not from the default itself.
 
-## 7. This package declares a `test` script and has no tests
+## 7. `pnpm turbo run build --filter=@bmpl/database` (or anything depending on
+   it) can report SUCCESS without having actually run `prisma generate` —
+   confirmed by reproduction, not theoretical (INFRA-TURBO-CACHE-FALSE-SUCCESS)
+
+**The mechanism, confirmed directly:** `@bmpl/database`'s `build` script is
+`prisma generate && tsc -p tsconfig.json`, but `turbo.json`'s generic `build`
+task declares `outputs: ["dist/**", ".next/**", "!.next/cache/**"]` — this
+covers the `tsc` half only. `prisma generate`'s real output, the generated
+client code, lives OUTSIDE this package entirely, at
+`node_modules/.pnpm/@prisma+client@*/node_modules/.prisma/client` (a different,
+sibling package to `@prisma/client` itself — `require.resolve('@prisma/client')`
+then `../../.prisma/client` from there finds it; `scripts/check-prisma-fresh.mjs`
+resolves it exactly this way).
+
+Because that directory is never a declared `output`, turbo's cache-hit path —
+which restores only what a task *declared* it produces, then replays the
+stdout log verbatim (including a stale timing figure from the ORIGINAL run,
+e.g. "Generated Prisma Client ... in 1.49s") — never touches it. **Reproduced
+directly:** deleted that directory by hand (simulating what a `pnpm install`
+leaves behind — a generic, ungenerated client stub — right after reinstalling
+`node_modules` with the schema unchanged), re-ran
+`pnpm turbo run build --filter=@bmpl/database` with no `--force`. Result:
+`cache hit, replaying logs`, `3 successful, 3 total`, the deleted directory
+**still did not exist afterward**. Worse, the SAME is true one layer up:
+`pnpm turbo run typecheck --filter=@bmpl/api` (whose own `pretypecheck` hook
+runs `check-prisma-fresh.mjs` — the one thing that would normally catch this)
+ALSO reported a cache hit and replayed ITS OWN old log, meaning the freshness
+check never actually executed either. Turbo's hash for a downstream task is
+derived from its declared inputs and its upstream tasks' declared
+outputs/hashes, not from an arbitrary scan of the real filesystem — since
+nothing in that declared surface changed, the whole chain stayed "cached" top
+to bottom while the real Prisma client was simply gone.
+
+**This is the confirmation root `CLAUDE.md` §10's FLOOR-STALEDIST entry asked
+for** ("the leading suspect is turbo's build cache treating a changed
+upstream package as already satisfied, but that is not yet confirmed by a
+reproduction") — it is now confirmed, and the mechanism above is the reason,
+not merely a correlation.
+
+**The cache KEY itself is not the defect** — content-hash keying correctly
+busts on any real change to a tracked file (a new migration picked up by a
+`git rebase` DOES bust the cache and force a real re-run, confirmed earlier
+the same night on a live branch rebase). The defect is that the task's
+declared `outputs` are incomplete for what the script actually does, and nothing
+currently marks the Prisma-generation step as needing its own cache
+accounting.
+
+**Recovery, until this is fixed at the turbo-config level (a repo-wide change,
+flagged to Michael rather than made unilaterally — marking the task
+uncacheable slows every future `@bmpl/database` build for every agent, a
+tradeoff worth a human decision):**
+- After ANY `git pull`/`rebase`/fresh `pnpm install`, or whenever
+  `check-prisma-fresh.mjs` fails, run `pnpm db:generate` directly — it calls
+  `pnpm --filter @bmpl/database generate` with no turbo involved at all, so it
+  always actually runs `prisma generate`, never a cache replay.
+- `pnpm turbo run build --filter=@bmpl/database --force` also works, but
+  `--force` is easy to forget; `pnpm db:generate` is the one that can't be
+  skipped by a stale cache because it never consults one.
+- Do not trust "N successful, N total" from any `turbo run build/typecheck`
+  output as proof `prisma generate` ran — a replayed cache-hit log looks
+  identical to a real run, down to the printed timing. If in doubt, check the
+  real mtime: `check-prisma-fresh.mjs`'s own comparison
+  (`packages/database/prisma`'s newest mtime vs. the generated client
+  directory's newest mtime) is the one thing in this chain that reads the
+  actual filesystem instead of a cache record — but only when it actually
+  executes, which (per above) a cascading cache hit can itself skip.
+
+## 8. This package declares a `test` script and has no tests
 
 `pnpm turbo run test` therefore reports it as a failure, along with
 `@bmpl/authentication` and `@bmpl/notifications`. Pre-existing and tracked; CI
