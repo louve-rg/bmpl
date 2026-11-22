@@ -186,7 +186,7 @@ export class SessionService {
     const owned = await this.prisma.session.findFirst({ where: { id: sessionId, userId }, select: { id: true } });
     if (!owned) throw new NotFoundException('Session not found.');
     await this.prisma.session.updateMany({
-      where: { id: sessionId, revokedAt: null },
+      where: { id: sessionId, userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
