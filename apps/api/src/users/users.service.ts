@@ -1,5 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { UpdateProfileInput } from '@bmpl/validation';
+import { randomBytes } from 'node:crypto';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { hashPassword, verifyPassword } from '@bmpl/authentication';
+import type { DeliveryStatus, VendorOrderStatus } from '@bmpl/database';
+import type { DeleteAccountInput, UpdateProfileInput } from '@bmpl/validation';
 import {
   AVATAR_REJECTION_REASONS,
   avatarNeedsApproval,
@@ -18,7 +21,14 @@ import { StorageService } from '../storage/storage.service';
 import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AvatarVisionService } from '../storage/avatar-vision.service';
 import { AuditService } from '../audit/audit.service';
+import { SessionService } from '../auth/session.service';
 import { publicAvatarUrl } from '../common/avatar-url';
+
+/** The committed-and-not-yet-finished delivery/courier statuses — a driver
+ *  in one of these cannot simply vanish; see {@link UsersService.liveResponsibilities}. */
+const LIVE_DRIVER_STATUSES: DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
+/** Vendor order states still awaiting the vendor's own action. */
+const LIVE_VENDOR_ORDER_STATUSES: VendorOrderStatus[] = ['PENDING', 'PREPARING', 'READY_FOR_PICKUP'];
 
 /** Serializable view of the signed-in user + their roles. */
 export interface MeView {
@@ -80,6 +90,7 @@ export class UsersService {
     private readonly ingest: UploadIngestService,
     private readonly vision: AvatarVisionService,
     private readonly audit: AuditService,
+    private readonly sessions: SessionService,
   ) {}
 
   /**
@@ -335,6 +346,179 @@ export class UsersService {
     await this.deleteQuietly(user.avatarPendingKey);
     await this.audit.record({ action: 'AVATAR_REMOVED', actorId: userId, targetUserId: userId });
     return this.getMe(userId);
+  }
+
+  /**
+   * MDF-924: self-service account deletion. Reauthentication (the CURRENT
+   * password) is required, same as changePassword — a live session alone
+   * is not enough proof for a one-way destructive action.
+   *
+   * The `users` row is NEVER deleted. Every foreign key into it (orders,
+   * shipments, audit log, wallet accounts, ...) must keep pointing at a
+   * real row — this ANONYMIZES the eligible personal data in place instead:
+   * email, name, phone and address are overwritten, the avatar is removed,
+   * the password hash is replaced with an unusable one, and the account is
+   * marked `DEACTIVATED` + `deletedAt` (see the schema comment on
+   * `deletedAt` for why deactivation alone is not deletion). Every session
+   * is revoked afterward, including the one that made this call.
+   *
+   * Refuses first — before anonymizing anything — when the account
+   * currently holds a live responsibility only a hand-off can clear; see
+   * {@link liveResponsibilities}.
+   */
+  async deleteAccount(
+    userId: string,
+    input: DeleteAccountInput,
+    meta: { ipAddress?: string },
+  ): Promise<void> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const ok = await verifyPassword(user.passwordHash, input.currentPassword);
+    if (!ok) {
+      throw new BadRequestException('Current password is incorrect.');
+    }
+
+    const reasons = await this.liveResponsibilities(userId);
+    if (reasons.length > 0) {
+      throw new ConflictException({
+        message: 'Your account cannot be deleted yet.',
+        reasons,
+      });
+    }
+
+    // Unique, deterministic, and never reachable as a real registration —
+    // register() lower-cases nothing special here, but no real address can
+    // ever collide with this host, and the user's own id makes it unique
+    // without a retry loop.
+    const anonymizedEmail = `deleted-${userId}@deleted.bmpl.internal`;
+    // A random hash nobody knows and nothing derives from the request —
+    // this account must never be able to log in again, even if some other
+    // guard were ever removed.
+    const unusablePasswordHash = await hashPassword(randomBytes(32).toString('hex'));
+
+    const previous = await this.prisma.$transaction(async (tx) => {
+      const before = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { avatarKey: true, avatarPendingKey: true },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          email: anonymizedEmail,
+          passwordHash: unusablePasswordHash,
+          firstName: 'Deleted',
+          lastName: 'User',
+          phone: null,
+          district: null,
+          addressLine1: null,
+          addressLine2: null,
+          city: null,
+          avatarKey: null,
+          avatarPendingKey: null,
+          avatarStatus: 'NONE',
+          avatarRejectedReason: null,
+          status: 'DEACTIVATED',
+          deletedAt: new Date(),
+        },
+      });
+      await this.audit.record(
+        { action: 'USER_ACCOUNT_DELETED', actorId: userId, targetUserId: userId, ipAddress: meta.ipAddress },
+        tx,
+      );
+      return before;
+    });
+    // Storage deletes are best-effort and not transactional — same pattern
+    // as removeAvatar above.
+    await this.deleteQuietly(previous.avatarKey);
+    await this.deleteQuietly(previous.avatarPendingKey);
+
+    // A stolen session must not survive the account it belonged to being
+    // deleted — including the session that made this very call.
+    await this.sessions.revokeAllForUser(userId);
+  }
+
+  /**
+   * Live, hand-off-worthy responsibilities that must block deletion — each
+   * entry is a complete, honest explanation of what to do first, per
+   * MDF-924's requirement that a refusal here is a real response, not a
+   * silent failure. Three checks, each with a concrete, pre-existing
+   * mechanism behind it (no invented floor):
+   *
+   * - Terminal company: the SAME last-active-manager floor
+   *   `assertManagerFloorHolds` enforces in `terminal.service.ts` — read
+   *   here directly rather than calling into that module, which is outside
+   *   this card's file boundary. If this ever drifts from that floor's own
+   *   definition, fix `terminal.service.ts` first and mirror it here.
+   * - Vendor: an open VendorOrder (not yet PICKED_UP or CANCELLED) depends
+   *   on the vendor actually doing something next.
+   * - Driver: a committed-but-unfinished marketplace OrderDelivery or
+   *   shipping ShipmentLeg (accepted, not yet delivered/cancelled/declined).
+   *
+   * Deliberately does NOT check: an "administrator" floor (no such
+   * last-admin concept exists anywhere in this codebase today — checked
+   * AdminPermissionGrant before deciding not to invent one) or a
+   * PASSENGER_DRIVER's active trip (out of this card's verified scope —
+   * flagged to god rather than guessed at).
+   */
+  private async liveResponsibilities(userId: string): Promise<string[]> {
+    const reasons: string[] = [];
+
+    const managerMemberships = await this.prisma.terminalCompanyMember.findMany({
+      where: { userId, status: 'ACTIVE', memberRole: 'MANAGER' },
+      select: { terminalCompanyId: true, terminalCompany: { select: { businessName: true } } },
+    });
+    for (const membership of managerMemberships) {
+      const otherActiveManagers = await this.prisma.terminalCompanyMember.count({
+        where: {
+          terminalCompanyId: membership.terminalCompanyId,
+          status: 'ACTIVE',
+          memberRole: 'MANAGER',
+          userId: { not: userId },
+        },
+      });
+      if (otherActiveManagers === 0) {
+        reasons.push(
+          `You are the only active manager of "${membership.terminalCompany.businessName}". Promote another manager, or ask an administrator to end your membership, before deleting your account.`,
+        );
+      }
+    }
+
+    const vendor = await this.prisma.vendorProfile.findUnique({
+      where: { userId },
+      select: { id: true, businessName: true },
+    });
+    if (vendor) {
+      const openOrders = await this.prisma.vendorOrder.count({
+        where: { vendorProfileId: vendor.id, status: { in: LIVE_VENDOR_ORDER_STATUSES } },
+      });
+      if (openOrders > 0) {
+        reasons.push(
+          `Your storefront "${vendor.businessName}" has ${openOrders} order${openOrders === 1 ? '' : 's'} awaiting fulfillment. Complete or cancel ${openOrders === 1 ? 'it' : 'them'} before deleting your account.`,
+        );
+      }
+    }
+
+    const driver = await this.prisma.driverProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (driver) {
+      const [activeDeliveries, activeLegs] = await Promise.all([
+        this.prisma.orderDelivery.count({
+          where: { assignedDriverProfileId: driver.id, status: { in: LIVE_DRIVER_STATUSES } },
+        }),
+        this.prisma.shipmentLeg.count({
+          where: { assignedDriverProfileId: driver.id, courierStatus: { in: LIVE_DRIVER_STATUSES } },
+        }),
+      ]);
+      const activeCount = activeDeliveries + activeLegs;
+      if (activeCount > 0) {
+        reasons.push(
+          `You have ${activeCount} delivery or shipment job${activeCount === 1 ? '' : 's'} in progress. Complete or hand ${activeCount === 1 ? 'it' : 'them'} off before deleting your account.`,
+        );
+      }
+    }
+
+    return reasons;
   }
 
   /**

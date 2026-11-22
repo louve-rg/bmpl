@@ -341,6 +341,10 @@ export const AUDIT_ACTIONS = [
   // PASSWORD_RESET — that one is the unauthenticated, mailed-token flow;
   // this one requires an already-live session AND the current password.
   'PASSWORD_CHANGED',
+  // MDF-924: self-service account deletion — self-initiated, anonymizes
+  // the row, permanent. Kept separate from USER_SUSPENDED/USER_RESTORED,
+  // which are admin-initiated and reversible.
+  'USER_ACCOUNT_DELETED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
