@@ -67,6 +67,8 @@ describe('AccountMenu', () => {
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(panelText()).toContain('Dashboard');
     expect(panelText()).toContain('Profile');
+    // MDF-925: the new account settings surface, reachable from here too.
+    expect(panelText()).toContain('Settings');
     expect(panelText()).toContain('My orders');
     expect(panelText()).toContain('Sign out');
   });

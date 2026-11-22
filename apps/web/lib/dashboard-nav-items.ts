@@ -29,6 +29,7 @@ const CALENDAR_ICON = 'M8 3v4M16 3v4M4 9h16M5 5h14v16H5V5Z';
 const CHART_ICON = 'M4 20V4 M4 20h16 M8 20v-6 M13 20V9 M18 20v-9';
 const BUILDING_ICON = 'M4 21V5l8-3 8 3v16M9 21v-5h6v5M8 9h1M8 13h1M15 9h1M15 13h1';
 const CARD_ICON = 'M3 6h18v12H3zM3 10h18';
+const SETTINGS_ICON = 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1';
 
 /** The customer baseline every signed-in user gets. */
 export const BASE_NAV: NavItem[] = [
@@ -54,6 +55,10 @@ export const BASE_NAV: NavItem[] = [
   { label: 'Payments', href: '/payments', icon: CARD_ICON },
   { label: 'My Roles', href: '/dashboard/roles', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0' },
   { label: 'Profile', href: '/dashboard/profile', icon: PERSON_ICON },
+  // MDF-925: profile editing already had a home (Profile, above); this is
+  // the new account-security surface (password, sessions, deletion) --
+  // additive, not a replacement for Profile's own avatar + contact form.
+  { label: 'Settings', href: '/dashboard/settings', icon: SETTINGS_ICON },
 ];
 
 /**

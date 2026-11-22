@@ -41,6 +41,13 @@ describe('the navigation definition', () => {
   });
 });
 
+describe('Settings (MDF-925)', () => {
+  it('is in BASE_NAV, reachable by every signed-in user, separate from Profile', () => {
+    expect(BASE_NAV.find((i) => i.href === '/dashboard/settings')?.label).toBe('Settings');
+    expect(BASE_NAV.find((i) => i.href === '/dashboard/profile')?.label).toBe('Profile');
+  });
+});
+
 describe('driver navigation', () => {
   it('is called Driver Dashboard and points at the driver dashboard', () => {
     // The client asked for "Driver Home" to be renamed and to actually navigate
