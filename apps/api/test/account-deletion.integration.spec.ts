@@ -409,6 +409,54 @@ describe('account deletion — refusals', () => {
     expect(allowed.status).toBe(200);
   });
 
+  /**
+   * Acceptance round 3: the balance case above was the only one tested —
+   * an open hold or escrow with a ZERO cached balance (a real shape:
+   * `cachedBalanceMinor` nets debits/credits, a hold does not move it)
+   * never had its own test. Also the one place this round's wallet-copy fix
+   * (item 4) is exercised: the refusal must state the fact, never instruct
+   * the person to "withdraw" — there is no such route anywhere in this
+   * product.
+   */
+  it('refuses when the wallet has an open hold or escrow with a zero cached balance — never sweeps it, only refuses', async () => {
+    const email = 'delete-wallet-hold@example.bz';
+    const password = 'CustomerPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const account = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { userId, type: 'USER' } });
+    expect(account.cachedBalanceMinor).toBe(0n); // the point: no balance, only a hold
+    const order = await ctx.prisma.order.create({
+      data: { orderNumber: 'ORD-HOLD-TEST-1', userId, itemCount: 1, subtotalMinor: 500n, totalMinor: 500n },
+    });
+    const payment = await ctx.prisma.payment.create({
+      data: { paymentNumber: 'PAY-HOLD-TEST-1', orderId: order.id, userId, amountMinor: 500n },
+    });
+    const hold = await ctx.prisma.walletHold.create({
+      data: { paymentId: payment.id, walletAccountId: account.id, amountMinor: 500n, status: 'HELD' },
+    });
+
+    const res = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.some((r: string) => /wallet still holds funds/.test(r))).toBe(true);
+    // The old copy told the person to "withdraw" — no such route exists
+    // anywhere in this product (root CLAUDE.md §4/§8); the refusal must
+    // never instruct an action that cannot be taken.
+    expect(res.body.reasons.some((r: string) => /withdraw/i.test(r))).toBe(false);
+
+    const unchanged = await ctx.prisma.walletHold.findUniqueOrThrow({ where: { id: hold.id } });
+    expect(unchanged.status).toBe('HELD'); // never released/swept by the deletion attempt itself
+
+    await ctx.prisma.walletHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date() } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
   it('refuses when the caller is a passenger operator with an open booking, and allows it once resolved', async () => {
     const email = 'delete-pax-operator@example.bz';
     const password = 'OperatorPass12345';
@@ -492,6 +540,7 @@ describe('account deletion — refusals', () => {
         emergencyContactPhone: '6650012',
         licenceNumber: 'REAL-LICENCE-1',
         licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        profilePhotoKey: 'real-driver-photo-key',
       },
     });
     const vehicle = await ctx.prisma.driverVehicle.create({
@@ -507,6 +556,25 @@ describe('account deletion — refusals', () => {
         licenceNumber: 'REAL-PAX-LICENCE-1',
         licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
       },
+    });
+    // Defect 1 (acceptance): a COMPLETED delivery this driver already
+    // finished, read back through the customer's OWN tracking endpoint
+    // after deletion — proving the leak is closed at the actual read site,
+    // not just in the row. DELIVERED is terminal, so it never blocks
+    // deletion (not in LIVE_DRIVER_STATUSES).
+    const deliveryCustomer = await registerAndLogin('delete-full-sweep-customer@example.bz', 'FullSweepCustPass1');
+    const deliveryVendorUser = await registerAndLogin('delete-full-sweep-vendor@example.bz', 'FullSweepVendPass1');
+    const deliveryVendor = await ctx.prisma.vendorProfile.create({
+      data: { userId: deliveryVendorUser.userId, businessName: 'Full Sweep Delivery Store', slug: 'full-sweep-delivery-store', contactEmail: 'fsdelivery@example.bz' },
+    });
+    const deliveryOrder = await ctx.prisma.order.create({
+      data: { orderNumber: 'ORD-FULLSWEEP-1', userId: deliveryCustomer.userId, itemCount: 1, subtotalMinor: 1000n, totalMinor: 1000n },
+    });
+    const deliveryVendorOrder = await ctx.prisma.vendorOrder.create({
+      data: { orderNumber: 'ORD-FULLSWEEP-1-V1', orderId: deliveryOrder.id, vendorProfileId: deliveryVendor.id, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n, status: 'PICKED_UP' },
+    });
+    const completedDelivery = await ctx.prisma.orderDelivery.create({
+      data: { vendorOrderId: deliveryVendorOrder.id, assignedDriverProfileId: driver.id, status: 'DELIVERED' },
     });
     const jobSeeker = await ctx.prisma.jobSeekerProfile.create({
       data: { userId, preferredName: 'Real Seeker', legalName: 'Real Seeker Legal', contactEmail: 'seeker@example.bz', contactPhone: '6650014' },
@@ -529,6 +597,27 @@ describe('account deletion — refusals', () => {
     const agency = await ctx.prisma.agencyProfile.create({
       data: { managerUserId: userId, name: 'Full Sweep Agency', slug: 'full-sweep-agency', contactEmail: 'agency@example.bz', contactPhone: '6650018' },
     });
+    const passengerProvider = await ctx.prisma.passengerProviderProfile.create({
+      data: {
+        userId, businessName: 'Full Sweep Transport', contactEmail: 'paxops@example.bz', contactPhone: '6650019',
+        addressLine1: '789 Real Terminal Rd', operatingLicenceNumber: 'REAL-PAX-OP-LICENCE-1',
+      },
+    });
+    const shippingProvider = await ctx.prisma.shippingProviderProfile.create({
+      data: {
+        userId, businessName: 'Full Sweep Carrier', contactEmail: 'carrierops@example.bz', contactPhone: '6650020',
+        addressLine1: '321 Real Dock Rd', operatingLicenceNumber: 'REAL-CARRIER-LICENCE-1',
+      },
+    });
+    const roleApplication = await ctx.prisma.roleApplication.create({
+      data: { userId, roleCode: 'DELIVERY_DRIVER', status: 'PENDING' },
+    });
+    const roleDocument = await ctx.prisma.roleApplicationDocument.create({
+      data: { applicationId: roleApplication.id, label: "Driver's licence", storageKey: 'real-licence-photo-key', contentType: 'image/jpeg', sizeBytes: 1024 },
+    });
+    const resume = await ctx.prisma.jobSeekerResume.create({
+      data: { profileId: jobSeeker.id, label: 'My real CV', storageKey: 'real-resume-key', mimeType: 'application/pdf', fileSizeBytes: 2048 },
+    });
 
     const res = await request(ctx.server)
       .delete('/api/me')
@@ -538,56 +627,102 @@ describe('account deletion — refusals', () => {
 
     expect(await ctx.prisma.savedAddress.count({ where: { userId } })).toBe(0);
 
+    // The field the whole Defect 1 leak-closure claim rests on (acceptance
+    // round 3): displayName is what delivery-core/reviews/passenger-network
+    // actually read, so an assertion that misses it would pass even if the
+    // leak were still open. Asserting the DEFINED replacement, not merely
+    // .not.toBe(real value) — the same shape as the round-1 rejection,
+    // closed properly here rather than left to recur a third time.
     const driverAfter = await ctx.prisma.driverProfile.findUniqueOrThrow({ where: { id: driver.id } });
-    expect(driverAfter.legalName).not.toBe('Real Driver Name');
-    expect(driverAfter.phone).not.toBe('6650011');
+    expect(driverAfter.legalName).toBe('Deleted Driver');
+    expect(driverAfter.displayName).toBe('Deleted Driver');
+    expect(driverAfter.phone).toBe('REMOVED');
     expect(driverAfter.homeAddress).toBeNull();
     expect(driverAfter.latitude).toBeNull();
     expect(driverAfter.emergencyContactName).toBeNull();
-    expect(driverAfter.licenceNumber).not.toBe('REAL-LICENCE-1');
+    expect(driverAfter.licenceNumber).toBe(`DELETED-${driver.id}`);
+    expect(driverAfter.profilePhotoKey).toBeNull();
     expect(driverAfter.isActive).toBe(false);
     expect(driverAfter.availability).toBe('OFFLINE');
 
     const vehicleAfter = await ctx.prisma.driverVehicle.findUniqueOrThrow({ where: { id: vehicle.id } });
-    expect(vehicleAfter.licencePlate).not.toBe('REAL-PLATE-1');
+    expect(vehicleAfter.licencePlate).toBe(`DELETED-${vehicle.id}`);
 
     const paxDriverAfter = await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { id: paxDriver.id } });
-    expect(paxDriverAfter.legalName).not.toBe('Real Pax Driver');
-    expect(paxDriverAfter.licenceNumber).not.toBe('REAL-PAX-LICENCE-1');
+    expect(paxDriverAfter.legalName).toBe('Deleted Driver');
+    expect(paxDriverAfter.displayName).toBe('Deleted Driver');
+    expect(paxDriverAfter.licenceNumber).toBe(`DELETED-${paxDriver.id}`);
     expect(paxDriverAfter.isActive).toBe(false);
 
+    // Defect 1, read through the ACTUAL customer-facing endpoint, not just
+    // the row — delivery-core.service.ts's driverSummary() reads
+    // DriverProfile.displayName directly, and this proves that call site,
+    // not just the data, no longer leaks the real name.
+    const deliveryView = await request(ctx.server)
+      .get(`/api/deliveries/${completedDelivery.id}`)
+      .set('Cookie', deliveryCustomer.cookies);
+    expect(deliveryView.status).toBe(200);
+    expect(deliveryView.body.driver.displayName).toBe('Deleted Driver');
+    expect(JSON.stringify(deliveryView.body)).not.toContain('Real Driver Name');
+
     const jobSeekerAfter = await ctx.prisma.jobSeekerProfile.findUniqueOrThrow({ where: { id: jobSeeker.id } });
-    expect(jobSeekerAfter.preferredName).not.toBe('Real Seeker');
+    expect(jobSeekerAfter.preferredName).toBe('Deleted');
     expect(jobSeekerAfter.legalName).toBeNull();
     expect(jobSeekerAfter.contactEmail).toBeNull();
     expect(jobSeekerAfter.contactPhone).toBeNull();
 
+    const resumeAfter = await ctx.prisma.jobSeekerResume.findUniqueOrThrow({ where: { id: resume.id } });
+    expect(resumeAfter.storageKey).toBe(`deleted-${resume.id}`);
+    expect(resumeAfter.label).toBe('Removed');
+
+    const roleDocumentAfter = await ctx.prisma.roleApplicationDocument.findUniqueOrThrow({ where: { id: roleDocument.id } });
+    expect(roleDocumentAfter.storageKey).toBe(`deleted-${roleDocument.id}`);
+    expect(roleDocumentAfter.label).toBeNull();
+    // contentType carries no personal data — left alone, see the doc comment.
+    expect(roleDocumentAfter.contentType).toBe('image/jpeg');
+
     const vendorAfter = await ctx.prisma.vendorProfile.findUniqueOrThrow({ where: { id: vendor.id } });
     // Business identity is left — see anonymizePersonalData's doc comment.
     expect(vendorAfter.businessName).toBe('Full Sweep Store');
+    expect(vendorAfter.contactEmail).toBe(`deleted-${vendor.id}@deleted.bmpl.internal`);
+    expect(vendorAfter.contactPhone).toBeNull();
     expect(vendorAfter.approvalStatus).toBe('SUSPENDED');
 
     const locationAfter = await ctx.prisma.vendorLocation.findUniqueOrThrow({ where: { id: location.id } });
-    expect(locationAfter.addressLine1).not.toBe('456 Real Ave');
+    expect(locationAfter.addressLine1).toBe('Address removed');
 
     const employerAfter = await ctx.prisma.employerProfile.findUniqueOrThrow({ where: { id: employer.id } });
-    expect(employerAfter.contactEmail).not.toBe('employer@example.bz');
+    expect(employerAfter.contactEmail).toBe(`deleted-${employer.id}@deleted.bmpl.internal`);
     expect(employerAfter.contactPhone).toBeNull();
     expect(employerAfter.companyName).toBe('Full Sweep Employer');
 
     const propertyOwnerAfter = await ctx.prisma.propertyOwnerProfile.findUniqueOrThrow({ where: { id: propertyOwner.id } });
-    expect(propertyOwnerAfter.legalName).not.toBe('Real Owner');
+    expect(propertyOwnerAfter.legalName).toBe('Deleted Owner');
     expect(propertyOwnerAfter.phone).toBeNull();
     expect(propertyOwnerAfter.email).toBeNull();
 
     const agentAfter = await ctx.prisma.realEstateAgentProfile.findUniqueOrThrow({ where: { id: agent.id } });
-    expect(agentAfter.displayName).not.toBe('Real Agent');
+    expect(agentAfter.displayName).toBe('Deleted Agent');
     expect(agentAfter.phone).toBeNull();
     expect(agentAfter.isActive).toBe(false);
 
     const agencyAfter = await ctx.prisma.agencyProfile.findUniqueOrThrow({ where: { id: agency.id } });
-    expect(agencyAfter.contactEmail).not.toBe('agency@example.bz');
+    expect(agencyAfter.contactEmail).toBe(`deleted-agency-${agency.id}@deleted.bmpl.internal`);
     expect(agencyAfter.contactPhone).toBeNull();
     expect(agencyAfter.name).toBe('Full Sweep Agency');
+
+    const passengerProviderAfter = await ctx.prisma.passengerProviderProfile.findUniqueOrThrow({ where: { id: passengerProvider.id } });
+    expect(passengerProviderAfter.contactEmail).toBe(`deleted-${passengerProvider.id}@deleted.bmpl.internal`);
+    expect(passengerProviderAfter.contactPhone).toBeNull();
+    expect(passengerProviderAfter.addressLine1).toBeNull();
+    expect(passengerProviderAfter.operatingLicenceNumber).toBeNull();
+    expect(passengerProviderAfter.businessName).toBe('Full Sweep Transport');
+
+    const shippingProviderAfter = await ctx.prisma.shippingProviderProfile.findUniqueOrThrow({ where: { id: shippingProvider.id } });
+    expect(shippingProviderAfter.contactEmail).toBe(`deleted-${shippingProvider.id}@deleted.bmpl.internal`);
+    expect(shippingProviderAfter.contactPhone).toBeNull();
+    expect(shippingProviderAfter.addressLine1).toBeNull();
+    expect(shippingProviderAfter.operatingLicenceNumber).toBeNull();
+    expect(shippingProviderAfter.businessName).toBe('Full Sweep Carrier');
   });
 });

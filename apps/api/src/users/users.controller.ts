@@ -58,6 +58,14 @@ export class UsersController {
    * terminal company manager, an open vendor order, an in-progress
    * delivery/shipment job) that needs a hand-off first. Rate-limited the
    * same as the other sensitive auth/account routes.
+   *
+   * NOT a full erasure: profile and identity data are anonymized, but a
+   * COMPLETED order or shipment keeps its own stored recipient name and
+   * address, by owner ruling — see `UsersService.deleteAccount`'s own doc
+   * comment. Any web-facing confirmation copy for this action must say
+   * "profile anonymized, past order records retained," not "account
+   * deleted" — this controller's own `{ ok: true }` response makes no such
+   * claim either way, deliberately.
    */
   @StrictThrottle()
   @Delete()

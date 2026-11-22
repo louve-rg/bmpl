@@ -415,6 +415,22 @@ export class UsersService {
    * A live storefront is also SUSPENDED here (see the `vendor.moderate` call
    * below) — reusing the existing admin mechanism, not a parallel one.
    *
+   * WHAT THIS ACTUALLY PROMISES (owner ruling, acceptance round 2/3): this
+   * is PROFILE ANONYMIZED, PAST TRANSACTION RECORDS RETAINED — not "account
+   * deleted" in the sense a caller might assume. `OrderAddress.fullName`/
+   * `phone`/`addressLine1` and `OrderDelivery.recipientName` on a COMPLETED
+   * order or shipment are deliberately left untouched (they are the
+   * vendor's/carrier's own record of work performed, not solely this
+   * account's data — root CLAUDE.md's no-fabrication-of-business-records
+   * line, applied to retention). The practical consequence: a vendor,
+   * admin or driver reading a PAST order can still see this person's real
+   * name, phone and delivery address on it, indefinitely, even though the
+   * `users` row now reads "Deleted User" — because that screen's customer
+   * name and the order's own stored address come from two different
+   * sources. Any user-facing copy describing this action must not claim
+   * more than this — see the PR body for the acceptance ruling this
+   * paraphrases.
+   *
    * Refuses first — before changing anything — when the account currently
    * holds a live responsibility only a hand-off can clear, or funds nothing
    * can be done with once nobody can sign in to spend them; see
@@ -451,6 +467,23 @@ export class UsersService {
     // REJECTED/already SUSPENDED) has nothing for moderate() to transition
     // away from, and moderate() throws if called on one of those, so this
     // guard is load-bearing, not defensive filler.
+    //
+    // Acceptance round 3, transaction boundary: `moderate()` opens and
+    // commits its OWN `$transaction` internally (vendor.service.ts) — it
+    // takes no external `tx`, and giving it one would mean either widening
+    // this card's file boundary into vendor.service.ts or duplicating its
+    // transition/audit/notification logic here, the exact "second way to do
+    // something that already works" root CLAUDE.md §12 calls a defect. So
+    // this call is deliberately OUTSIDE the anonymize transaction below, not
+    // an oversight — and that ordering is the safer of the two failure
+    // directions, not just the simpler one: if the anonymize transaction
+    // then fails, the result is a SUSPENDED storefront on an otherwise
+    // intact, still-logged-in account — recoverable in one step (an admin
+    // restore()s it, or the owner retries delete) and nobody is left
+    // accountable for nothing. Reversing the order would risk the opposite
+    // failure — an anonymized "Deleted User" account whose storefront is
+    // still APPROVED and orderable, with nobody left to run it — which is
+    // the worse of the two states to be caught in.
     const vendor = await this.prisma.vendorProfile.findUnique({
       where: { userId },
       select: { id: true, approvalStatus: true },
@@ -565,6 +598,47 @@ export class UsersService {
    *   country are left: label isn't personal, and city/district/country
    *   are required columns other operational reads (delivery zones,
    *   inventory-by-location) still rely on.
+   *
+   * Acceptance round 3 — four table families this method missed the first
+   * time (spot-checked: `VendorProfile` itself was never updated at all):
+   *
+   * - `RoleApplicationDocument` — the actual uploaded identity/licence
+   *   photos, found across EVERY `RoleApplication` this account ever
+   *   submitted (any role, any outcome — not just the live profile it ended
+   *   up with). `storageKey` is `@unique` and `NOT NULL`, so each row gets
+   *   its own deterministic placeholder (one query per row, like
+   *   `DriverVehicle` above) rather than one shared value; `label` is
+   *   nullable and cleared. `contentType` (a MIME type like
+   *   `application/pdf`) is left: it carries no personal data, and nulling
+   *   a `NOT NULL` column buys no privacy.
+   * - `JobSeekerResume` — the CV itself, a separate table from
+   *   `JobSeekerProfile` (whose own photo this method already clears).
+   *   Same per-row placeholder reasoning as the documents above; `label` is
+   *   `NOT NULL` here, so it gets a literal replacement string instead of
+   *   `null`.
+   * - `VendorProfile.contactEmail`/`contactPhone` — the vendor row itself
+   *   was never touched before this round; only its child `VendorLocation`
+   *   rows were. For a sole trader these are the person's own contact
+   *   details, not the business's public identity — unlike `businessName`,
+   *   which stays for the same reason `EmployerProfile.companyName` does.
+   * - `PassengerProviderProfile` / `ShippingProviderProfile` —
+   *   `contactEmail`, `contactPhone`, `addressLine1`,
+   *   `operatingLicenceNumber`. `businessName`/`district`/`city` are left:
+   *   business identity and coarse location, not the person.
+   *
+   * Deliberately left alone, stated rather than silently skipped:
+   *
+   * - `JobSeekerProfile.headline`/`summary`, `RealEstateAgentProfile.bio` —
+   *   free text the person wrote themselves, which may itself contain a
+   *   name or other personal detail no sweep can reliably find and which a
+   *   blanket overwrite would just as easily destroy a harmless sentence.
+   * - `Message.body` / `MessageAttachment` — free text and files this
+   *   account sent INTO a conversation with another party. The thread
+   *   belongs to both sides, not solely to the account being deleted — the
+   *   same reasoning the PR body gives for leaving `OrderDelivery.
+   *   recipientName`/`ShipmentLeg.handoffReceivedByName` alone: it is a
+   *   dated record of what was actually said, and rewriting half of a
+   *   two-sided conversation after the fact is worse than leaving it.
    *
    * Returns every storage key this pass orphaned, so the caller deletes the
    * actual objects AFTER the transaction commits — best-effort, same
@@ -695,10 +769,64 @@ export class UsersService {
 
     const vendorForLocations = await tx.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
     if (vendorForLocations) {
+      await tx.vendorProfile.update({
+        where: { id: vendorForLocations.id },
+        data: { contactEmail: `deleted-${vendorForLocations.id}@deleted.bmpl.internal`, contactPhone: null },
+      });
       await tx.vendorLocation.updateMany({
         where: { vendorProfileId: vendorForLocations.id },
         data: { addressLine1: 'Address removed', addressLine2: null, latitude: null, longitude: null, pickupInstructions: null },
       });
+    }
+
+    const passengerProviderForAnon = await tx.passengerProviderProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (passengerProviderForAnon) {
+      await tx.passengerProviderProfile.update({
+        where: { id: passengerProviderForAnon.id },
+        data: {
+          contactEmail: `deleted-${passengerProviderForAnon.id}@deleted.bmpl.internal`,
+          contactPhone: null,
+          addressLine1: null,
+          operatingLicenceNumber: null,
+        },
+      });
+    }
+
+    const shippingProviderForAnon = await tx.shippingProviderProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (shippingProviderForAnon) {
+      await tx.shippingProviderProfile.update({
+        where: { id: shippingProviderForAnon.id },
+        data: {
+          contactEmail: `deleted-${shippingProviderForAnon.id}@deleted.bmpl.internal`,
+          contactPhone: null,
+          addressLine1: null,
+          operatingLicenceNumber: null,
+        },
+      });
+    }
+
+    // RoleApplicationDocument: across every application this account ever
+    // submitted, not just the live profile it ended up with — see the doc
+    // comment above for why storageKey/label are handled this way.
+    const roleApplicationIds = (await tx.roleApplication.findMany({ where: { userId }, select: { id: true } })).map((a) => a.id);
+    if (roleApplicationIds.length > 0) {
+      const documents = await tx.roleApplicationDocument.findMany({
+        where: { applicationId: { in: roleApplicationIds } },
+        select: { id: true, storageKey: true },
+      });
+      for (const doc of documents) {
+        orphanedKeys.push(doc.storageKey);
+        await tx.roleApplicationDocument.update({ where: { id: doc.id }, data: { storageKey: `deleted-${doc.id}`, label: null } });
+      }
+    }
+
+    // JobSeekerResume: the CV itself, a separate table from JobSeekerProfile.
+    if (jobSeeker) {
+      const resumes = await tx.jobSeekerResume.findMany({ where: { profileId: jobSeeker.id }, select: { id: true, storageKey: true } });
+      for (const resume of resumes) {
+        orphanedKeys.push(resume.storageKey);
+        await tx.jobSeekerResume.update({ where: { id: resume.id }, data: { storageKey: `deleted-${resume.id}`, label: 'Removed' } });
+      }
     }
 
     return orphanedKeys;
@@ -904,7 +1032,12 @@ export class UsersService {
 
     // Wallet funds, a hold or an escrow balance — refuse, never sweep. See
     // the doc comment above: moving the money to clear this would itself be
-    // a financial transaction, out of bounds here.
+    // a financial transaction, out of bounds here. Trusting
+    // `cachedBalanceMinor` rather than re-summing the ledger is safe: it is
+    // only ever written inside the SAME transaction as the ledger entries
+    // that justify it (`WalletService.postTransaction`, the one and only
+    // place a transaction posts), so it cannot be stale relative to the
+    // ledger it mirrors.
     const walletAccounts = await this.prisma.walletAccount.findMany({
       where: { userId },
       select: { id: true, cachedBalanceMinor: true },
@@ -921,8 +1054,15 @@ export class UsersService {
       hasOpenHold = openHolds > 0;
     }
     if (hasBalance || hasOpenHold) {
+      // Acceptance round 3: the previous copy told the person to "withdraw"
+      // — there is no withdrawal, payout or refund-to-source route anywhere
+      // in this product (root CLAUDE.md §4/§8), so that instruction could
+      // never be followed. State the blocking fact only; do not promise a
+      // route that does not exist. The permanent handling of a stranded
+      // non-zero balance (e.g. self-service UAT test credit with nowhere to
+      // go) is an owner decision, not something to guess at here.
       reasons.push(
-        'Your wallet still holds funds, a hold, or an escrow balance. Withdraw or spend the balance to zero before deleting your account.',
+        'Your wallet still holds funds, a hold, or an escrow balance, and this account cannot be deleted while it does. This product has no way to remove funds from a wallet today.',
       );
     }
 
