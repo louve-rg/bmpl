@@ -30,6 +30,13 @@
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
       "env": ["ADMIN_PUBLIC_API_URL"]
     },
+    "@bmpl/database#generate": {
+      "cache": false
+    },
+    "@bmpl/database#build": {
+      "dependsOn": ["^build", "generate"],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
