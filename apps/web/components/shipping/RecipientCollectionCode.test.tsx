@@ -82,6 +82,14 @@ describe('RecipientCollectionCode', () => {
     expect(el.textContent).toContain('Our team needs to confirm it with you directly');
     expect(el.textContent).not.toContain('No collection code to show for this parcel right now.');
     expect(el.textContent).not.toMatch(/error|could not load|failed/i);
+
+    // MDF-942: that sentence must give a way to act on it, not just name the problem.
+    const link = el.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
+
+    // MDF-942, deliberately NOT this component: the linked recipient has no
+    // token to re-request either -- same reasoning as SenderCollectionCode.
+    expect(el.textContent).not.toMatch(/request a new code/i);
   });
 
   it('shows an honest error only when the request itself fails', async () => {

@@ -23,6 +23,8 @@
  * in its place — the dead-end control the owner ruled out. Rendering the
  * message here, in the code's own spot, is the fix.
  */
+import { CollectionHoldMessageText } from './CollectionHoldMessage';
+
 export function SenderCollectionCode({ code, holdMessage }: { code: string | null; holdMessage?: string | null }) {
   if (!code && !holdMessage) return null;
   return (
@@ -36,7 +38,9 @@ export function SenderCollectionCode({ code, holdMessage }: { code: string | nul
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{code}</p>
         </>
       ) : (
-        <p className="mt-1 text-sm text-slate-600">{holdMessage}</p>
+        <p className="mt-1 text-sm text-slate-600">
+          <CollectionHoldMessageText message={holdMessage!} />
+        </p>
       )}
     </div>
   );

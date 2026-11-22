@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { shippingApi } from '../../lib/shipping';
 import { Alert, LoadingRow } from '../ui';
+import { CollectionHoldMessageText } from './CollectionHoldMessage';
 
 /**
  * MDF-738 (Item 11): a claimed shipment's own collection code, shown to the
@@ -74,7 +75,9 @@ export function RecipientCollectionCode({ reference }: { reference: string }) {
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{code}</p>
         </>
       ) : holdMessage ? (
-        <p className="mt-1 text-sm text-slate-600">{holdMessage}</p>
+        <p className="mt-1 text-sm text-slate-600">
+          <CollectionHoldMessageText message={holdMessage} />
+        </p>
       ) : (
         <p className="mt-1 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
       )}
