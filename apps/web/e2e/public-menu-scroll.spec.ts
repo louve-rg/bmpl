@@ -30,14 +30,29 @@ async function centreOfPanel(page: Page) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+/**
+ * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): a test in this file
+ * failed once in a local full-suite run with the test's own 30000ms global
+ * timeout exceeded -- not an action wait, so raising only a locator/click
+ * timeout would not help; the test dies at 30s regardless of what any inner
+ * wait is still doing. This page has no backend dependency at all -- no API
+ * call, no login, just `/` -- so there is no real-backend latency to blame.
+ * CI itself has never reproduced the failure; it is single-worker CI/local
+ * runner variance (whatever else is on the box as this page's render and
+ * mouse-wheel interaction happen to land), not a slow product. Raising the
+ * TEST timeout to 60s gives that variance room without touching any
+ * assertion.
+ */
 test.describe('public mobile menu on a short phone', () => {
   test('the open menu fits the screen', async ({ page }) => {
+    test.setTimeout(60_000);
     await openMenu(page);
     const box = await page.locator(PANEL).boundingBox();
     expect(box!.height).toBeLessThanOrEqual(SHORT_PHONE.height);
   });
 
   test('a user can reach Create account in the open menu by scrolling it', async ({ page }) => {
+    test.setTimeout(60_000);
     await openMenu(page);
     const { x, y } = await centreOfPanel(page);
     await page.mouse.move(x, y);
@@ -46,6 +61,7 @@ test.describe('public mobile menu on a short phone', () => {
   });
 
   test('a wheel over the open menu reaches the menu and does not move the page behind it', async ({ page }) => {
+    test.setTimeout(60_000);
     await openMenu(page);
     await page.evaluate((selector) => {
       const panel = document.querySelector(selector);
@@ -65,6 +81,7 @@ test.describe('public mobile menu on a short phone', () => {
   });
 
   test('page scroll returns after the menu closes and after navigating away', async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto('/');
     await page.getByRole('button', TOGGLE).click();
     await expect(page.locator(PANEL)).toBeVisible();
