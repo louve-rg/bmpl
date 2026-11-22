@@ -33,6 +33,7 @@ test.describe('no page ever scrolls sideways, at any required breakpoint', () =>
         await page.setViewportSize({ width, height: 900 });
         await page.goto(route);
         const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
+        console.log(`scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px on ${route}`);
         // +1px tolerance for sub-pixel rounding in real layout, not a loosened check.
         expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px on ${route}`).toBeLessThanOrEqual(
           clientWidth + 1,
@@ -106,6 +107,7 @@ test.describe('no page scrolls sideways at 320px either', () => {
       await page.setViewportSize({ width: 320, height: 900 });
       await page.goto(route);
       const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
+      console.log(`scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on ${route}`);
       expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on ${route}`).toBeLessThanOrEqual(clientWidth + 1);
     });
   }

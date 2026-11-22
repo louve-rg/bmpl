@@ -83,6 +83,7 @@ test.describe('AddressField saved-address confirmation never widens the page on 
         clientWidth: document.documentElement.clientWidth,
       }));
 
+      console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long saved-address label should never widen the page`);
       expect(
         scrollWidth,
         `page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long saved-address label should never widen the page`,

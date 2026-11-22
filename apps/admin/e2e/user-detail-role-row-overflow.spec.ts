@@ -91,6 +91,7 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] user detail role row
     }));
     await context.close();
 
+    console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px`);
     expect(scrollWidth, 'page overflow at 320px').toBeLessThanOrEqual(clientWidth + 1);
   });
 });

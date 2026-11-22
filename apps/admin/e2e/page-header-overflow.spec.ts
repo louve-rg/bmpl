@@ -99,13 +99,16 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] PageHeader never sil
       }));
       await close();
 
+      console.log(`'Courier lanes' right edge ${measured.right.toFixed(1)} at ${width}px (viewport ${width})`);
       expect(measured.right, `'Courier lanes' right edge ${measured.right.toFixed(1)} at ${width}px (viewport ${width})`).toBeLessThanOrEqual(width + 1);
       if (measured.clipper) {
+        console.log(`ancestor overflow-hidden clip at ${width}px: scrollWidth ${measured.clipper.scrollWidth} vs clientWidth ${measured.clipper.clientWidth}`);
         expect(
           measured.clipper.scrollWidth,
           `ancestor overflow-hidden clip at ${width}px: scrollWidth ${measured.clipper.scrollWidth} vs clientWidth ${measured.clipper.clientWidth}`,
         ).toBeLessThanOrEqual(measured.clipper.clientWidth + 1);
       }
+      console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px`);
       expect(scrollWidth, `page overflow at ${width}px`).toBeLessThanOrEqual(clientWidth + 1);
     });
   }

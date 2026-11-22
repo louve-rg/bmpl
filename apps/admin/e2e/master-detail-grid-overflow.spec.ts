@@ -152,10 +152,12 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] list+detail admin gr
       await close();
 
       expect(measured, `no .grid.gap-5 found on ${route}${tabText ? ` (${tabText} tab)` : ''}`).not.toBeNull();
+      console.log(`grid scrollWidth ${measured!.scrollWidth}px vs its own clientWidth ${measured!.clientWidth}px (columns: ${measured!.gridTemplateColumns})`);
       expect(
         measured!.scrollWidth,
         `grid scrollWidth ${measured!.scrollWidth}px vs its own clientWidth ${measured!.clientWidth}px (columns: ${measured!.gridTemplateColumns})`,
       ).toBeLessThanOrEqual(measured!.clientWidth + 1);
+      console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px`);
       expect(scrollWidth, 'page overflow at 320px').toBeLessThanOrEqual(clientWidth + 1);
     });
   }

@@ -97,12 +97,14 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] or
       });
 
       expect(measured.headerRow, 'customer header row element not found').not.toBeNull();
+      console.log(`customer header row scrollWidth ${measured.headerRow!.scrollWidth} vs its own clientWidth ${measured.headerRow!.clientWidth} at ${width}px`);
       expect(
         measured.headerRow!.scrollWidth,
         `customer header row scrollWidth ${measured.headerRow!.scrollWidth} vs its own clientWidth ${measured.headerRow!.clientWidth} at ${width}px`,
       ).toBeLessThanOrEqual(measured.headerRow!.clientWidth + 1);
 
       expect(measured.vendorCard, 'vendor card (overflow-hidden) element not found').not.toBeNull();
+      console.log(`vendor card scrollWidth ${measured.vendorCard!.scrollWidth} vs its own clientWidth ${measured.vendorCard!.clientWidth} at ${width}px`);
       expect(
         measured.vendorCard!.scrollWidth,
         `vendor card scrollWidth ${measured.vendorCard!.scrollWidth} vs its own clientWidth ${measured.vendorCard!.clientWidth} at ${width}px`,

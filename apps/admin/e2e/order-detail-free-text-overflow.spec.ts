@@ -110,6 +110,7 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] or
 
       for (const [name, m] of Object.entries(measured)) {
         expect(m, `${name} element not found`).not.toBeNull();
+        console.log(`${name} scrollWidth ${m!.scrollWidth} vs its own clientWidth ${m!.clientWidth} at ${width}px`);
         expect(m!.scrollWidth, `${name} scrollWidth ${m!.scrollWidth} vs its own clientWidth ${m!.clientWidth} at ${width}px`).toBeLessThanOrEqual(
           m!.clientWidth + 1,
         );

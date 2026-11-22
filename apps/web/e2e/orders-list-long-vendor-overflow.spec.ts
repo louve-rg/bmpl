@@ -53,6 +53,7 @@ test.describe('customer orders list never widens the page on a long vendor name'
         clientWidth: document.documentElement.clientWidth,
       }));
 
+      console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long vendor name should never widen the page`);
       expect(
         scrollWidth,
         `page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long vendor name should never widen the page`,

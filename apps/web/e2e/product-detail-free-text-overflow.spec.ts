@@ -112,6 +112,7 @@ test.describe('/products/[slug] never overflows on vendor/customer free text', (
         clientWidth: document.documentElement.clientWidth,
       }));
 
+      console.log(`document scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
       expect(
         measured.scrollWidth,
         `document scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,

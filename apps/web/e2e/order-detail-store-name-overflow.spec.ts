@@ -102,6 +102,7 @@ test.describe('/orders/[id] store-name Link does not overflow its own header at 
 
     const box = await measureHeaderBox(page, 'Supercalifragilistic');
     expect(box.found, 'the vendor-order header should be found via the store-name Link').toBe(true);
+    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with an unbroken long business name`);
     expect(box.scrollWidth, `header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with an unbroken long business name`).toBeLessThanOrEqual(box.clientWidth + 1);
   });
 
@@ -112,6 +113,7 @@ test.describe('/orders/[id] store-name Link does not overflow its own header at 
 
     const box = await measureHeaderBox(page, 'Exceptionally Long Named');
     expect(box.found, 'the vendor-order header should be found via the store-name Link').toBe(true);
+    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with a normal long business name`);
     expect(box.scrollWidth, `header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with a normal long business name`).toBeLessThanOrEqual(box.clientWidth + 1);
   });
 });
