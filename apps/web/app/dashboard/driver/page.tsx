@@ -75,6 +75,15 @@ function QuickActions() {
           description="What you’ve earned and how each delivery was calculated."
           icon="M12 3v18 M6 8h9a3 3 0 0 1 0 6H8"
         />
+        {/* P4-CLAIM (MDF-18): deliveries automatic dispatch has already
+            given up on. Separate from "My Deliveries" — this is a pull, not
+            an offer, so it gets its own card rather than a fifth tab there. */}
+        <PrimaryAction
+          href="/dashboard/driver/claimable"
+          title="Unclaimed Jobs"
+          description="Deliveries automatic dispatch gave up on — pull one if you qualify."
+          icon="M12 8v4l3 3 M21 12a9 9 0 1 1-9-9"
+        />
       </div>
 
       <nav aria-label="Manage your driver account" className="bmpl-card divide-y divide-slate-100 p-1">
