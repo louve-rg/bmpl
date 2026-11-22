@@ -142,9 +142,37 @@ test.describe('/dashboard/driver/jobs/[id] never overflows on free text', () => 
       await openJob(page);
 
       const header = page.locator('h1', { hasText: 'Order #10234' }).locator('..');
-      const measured = await header.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      const measured = await header.evaluate((el) => {
+        const scrollWidth = el.scrollWidth;
+        const clientWidth = el.clientWidth;
+        // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: a CSS sizing-keyword probe
+        // (width: min-content/max-content) was tried first and REJECTED --
+        // overflow-wrap: break-word (Tailwind's break-words, on this exact
+        // box) is excluded from the browser's intrinsic-size calculation by
+        // spec, so both keywords report the width as if the long word could
+        // NOT break at all, wildly overstating the real floor (confirmed in
+        // isolation: a 103px-wide break-word box with no real overflow
+        // reported a "floor" of 1132px under both keywords). Real pixel
+        // widths go through REAL constrained layout, where break-word
+        // actually applies, so bisecting on actual widths is correct where
+        // the keyword probe was not. Set/read/reset entirely inside this one
+        // synchronous call, so no intermediate width is ever observable.
+        const prevWidth = el.style.width;
+        let lo = 0;
+        let hi = clientWidth;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          el.style.width = `${mid}px`;
+          if (el.scrollWidth <= mid + 1) hi = mid;
+          else lo = mid;
+        }
+        el.style.width = prevWidth;
+        return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+      });
 
-      console.log(`PageHeader title/description wrapper scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
+      console.log(
+        `PageHeader title/description wrapper scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px (headroom ${measured.headroom}px)`,
+      );
       expect(
         measured.scrollWidth,
         `PageHeader title/description wrapper scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,

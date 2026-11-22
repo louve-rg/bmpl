@@ -92,19 +92,43 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] or
       const measured = await page.evaluate(() => {
         const headerRow = document.querySelector('h1')?.closest('.flex') as HTMLElement | null;
         const vendorCard = Array.from(document.querySelectorAll<HTMLElement>('div')).find((d) => d.className.includes('overflow-hidden'));
-        const pick = (el: HTMLElement | null | undefined) => (el ? { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth } : null);
+        // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+        // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why a
+        // CSS sizing-keyword probe is wrong for a break-words box and
+        // bisecting real pixel widths is correct instead. One synchronous
+        // call.
+        const pick = (el: HTMLElement | null | undefined) => {
+          if (!el) return null;
+          const scrollWidth = el.scrollWidth;
+          const clientWidth = el.clientWidth;
+          const prevWidth = el.style.width;
+          let lo = 0;
+          let hi = clientWidth;
+          while (hi - lo > 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            el.style.width = `${mid}px`;
+            if (el.scrollWidth <= mid + 1) hi = mid;
+            else lo = mid;
+          }
+          el.style.width = prevWidth;
+          return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+        };
         return { headerRow: pick(headerRow), vendorCard: pick(vendorCard) };
       });
 
       expect(measured.headerRow, 'customer header row element not found').not.toBeNull();
-      console.log(`customer header row scrollWidth ${measured.headerRow!.scrollWidth} vs its own clientWidth ${measured.headerRow!.clientWidth} at ${width}px`);
+      console.log(
+        `customer header row scrollWidth ${measured.headerRow!.scrollWidth} vs its own clientWidth ${measured.headerRow!.clientWidth} at ${width}px (headroom ${measured.headerRow!.headroom}px)`,
+      );
       expect(
         measured.headerRow!.scrollWidth,
         `customer header row scrollWidth ${measured.headerRow!.scrollWidth} vs its own clientWidth ${measured.headerRow!.clientWidth} at ${width}px`,
       ).toBeLessThanOrEqual(measured.headerRow!.clientWidth + 1);
 
       expect(measured.vendorCard, 'vendor card (overflow-hidden) element not found').not.toBeNull();
-      console.log(`vendor card scrollWidth ${measured.vendorCard!.scrollWidth} vs its own clientWidth ${measured.vendorCard!.clientWidth} at ${width}px`);
+      console.log(
+        `vendor card scrollWidth ${measured.vendorCard!.scrollWidth} vs its own clientWidth ${measured.vendorCard!.clientWidth} at ${width}px (headroom ${measured.vendorCard!.headroom}px)`,
+      );
       expect(
         measured.vendorCard!.scrollWidth,
         `vendor card scrollWidth ${measured.vendorCard!.scrollWidth} vs its own clientWidth ${measured.vendorCard!.clientWidth} at ${width}px`,

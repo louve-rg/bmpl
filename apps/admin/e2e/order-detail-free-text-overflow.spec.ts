@@ -100,7 +100,27 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] or
       test.skip(!ready, 'Needs a local responder for the dashboard-shell /me SSR call -- see file header.');
 
       const measured = await page.evaluate(() => {
-        const pick = (el: Element | null | undefined) => (el ? { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth } : null);
+        // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+        // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why a
+        // CSS sizing-keyword probe is wrong for a break-words box and
+        // bisecting real pixel widths is correct instead. One synchronous
+        // call.
+        const pick = (el: HTMLElement | null | undefined) => {
+          if (!el) return null;
+          const scrollWidth = el.scrollWidth;
+          const clientWidth = el.clientWidth;
+          const prevWidth = el.style.width;
+          let lo = 0;
+          let hi = clientWidth;
+          while (hi - lo > 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            el.style.width = `${mid}px`;
+            if (el.scrollWidth <= mid + 1) hi = mid;
+            else lo = mid;
+          }
+          el.style.width = prevWidth;
+          return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+        };
         const notesP = Array.from(document.querySelectorAll('p')).find((p) => p.textContent?.startsWith('Notes:'));
         const instrP = Array.from(document.querySelectorAll('p')).find((p) => p.textContent?.includes('Instructions:'));
         const originP = Array.from(document.querySelectorAll('p')).find((p) => p.textContent?.startsWith('Fulfilled from'));
@@ -110,7 +130,7 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] or
 
       for (const [name, m] of Object.entries(measured)) {
         expect(m, `${name} element not found`).not.toBeNull();
-        console.log(`${name} scrollWidth ${m!.scrollWidth} vs its own clientWidth ${m!.clientWidth} at ${width}px`);
+        console.log(`${name} scrollWidth ${m!.scrollWidth} vs its own clientWidth ${m!.clientWidth} at ${width}px (headroom ${m!.headroom}px)`);
         expect(m!.scrollWidth, `${name} scrollWidth ${m!.scrollWidth} vs its own clientWidth ${m!.clientWidth} at ${width}px`).toBeLessThanOrEqual(
           m!.clientWidth + 1,
         );

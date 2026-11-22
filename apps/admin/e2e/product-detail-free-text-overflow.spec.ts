@@ -138,9 +138,33 @@ test.describe('/dashboard/products/[id] never overflows on vendor free text', ()
 
       const cards = page.locator('.bmpl-card');
       const count = await cards.count();
+      // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+      // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why a CSS
+      // sizing-keyword probe (width: min/max-content) is wrong here --
+      // break-words is excluded from intrinsic-size calculation by spec, so
+      // both keywords wildly overstate the real floor -- and why bisecting
+      // real pixel widths (which goes through real constrained layout, where
+      // break-words actually applies) is correct instead. One synchronous
+      // call.
+      const measureWrapper = (el: HTMLElement | SVGElement) => {
+        const scrollWidth = el.scrollWidth;
+        const clientWidth = el.clientWidth;
+        const prevWidth = el.style.width;
+        let lo = 0;
+        let hi = clientWidth;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          el.style.width = `${mid}px`;
+          if (el.scrollWidth <= mid + 1) hi = mid;
+          else lo = mid;
+        }
+        el.style.width = prevWidth;
+        return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+      };
+
       for (let i = 0; i < count; i++) {
-        const measured = await cards.nth(i).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
-        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
+        const measured = await cards.nth(i).evaluate(measureWrapper);
+        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px (headroom ${measured.headroom}px)`);
         expect(
           measured.scrollWidth,
           `card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,
@@ -148,16 +172,20 @@ test.describe('/dashboard/products/[id] never overflows on vendor free text', ()
       }
 
       const header = page.locator('h1').locator('..');
-      const headerMeasured = await header.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
-      console.log(`title block scrollWidth ${headerMeasured.scrollWidth} vs clientWidth ${headerMeasured.clientWidth} at ${width}px`);
+      const headerMeasured = await header.evaluate(measureWrapper);
+      console.log(
+        `title block scrollWidth ${headerMeasured.scrollWidth} vs clientWidth ${headerMeasured.clientWidth} at ${width}px (headroom ${headerMeasured.headroom}px)`,
+      );
       expect(
         headerMeasured.scrollWidth,
         `title block scrollWidth ${headerMeasured.scrollWidth} vs clientWidth ${headerMeasured.clientWidth} at ${width}px`,
       ).toBeLessThanOrEqual(headerMeasured.clientWidth + 1);
 
       const breadcrumbNav = page.getByRole('navigation', { name: 'Breadcrumb' });
-      const breadcrumbMeasured = await breadcrumbNav.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
-      console.log(`breadcrumb nav scrollWidth ${breadcrumbMeasured.scrollWidth} vs clientWidth ${breadcrumbMeasured.clientWidth} at ${width}px`);
+      const breadcrumbMeasured = await breadcrumbNav.evaluate(measureWrapper);
+      console.log(
+        `breadcrumb nav scrollWidth ${breadcrumbMeasured.scrollWidth} vs clientWidth ${breadcrumbMeasured.clientWidth} at ${width}px (headroom ${breadcrumbMeasured.headroom}px)`,
+      );
       expect(
         breadcrumbMeasured.scrollWidth,
         `breadcrumb nav scrollWidth ${breadcrumbMeasured.scrollWidth} vs clientWidth ${breadcrumbMeasured.clientWidth} at ${width}px`,

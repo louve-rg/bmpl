@@ -126,8 +126,27 @@ test.describe('/dashboard/orders/[id] (vendor) never overflows on customer free 
       const cards = page.locator('.bmpl-card');
       const count = await cards.count();
       for (let i = 0; i < count; i++) {
-        const measured = await cards.nth(i).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
-        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
+        const measured = await cards.nth(i).evaluate((el) => {
+          // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+          // driver-job-detail-free-text-overflow.spec.ts (this app) for why a
+          // CSS sizing-keyword probe is wrong for a break-words box and
+          // bisecting real pixel widths is correct instead. One synchronous
+          // call.
+          const scrollWidth = el.scrollWidth;
+          const clientWidth = el.clientWidth;
+          const prevWidth = el.style.width;
+          let lo = 0;
+          let hi = clientWidth;
+          while (hi - lo > 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            el.style.width = `${mid}px`;
+            if (el.scrollWidth <= mid + 1) hi = mid;
+            else lo = mid;
+          }
+          el.style.width = prevWidth;
+          return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+        });
+        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px (headroom ${measured.headroom}px)`);
         expect(
           measured.scrollWidth,
           `card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,

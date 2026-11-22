@@ -86,11 +86,28 @@ async function measureHeaderBox(page: Page, linkTextSnippet: string) {
   return page.evaluate((snippet) => {
     const link = Array.from(document.querySelectorAll('a')).find((a) => a.textContent?.includes(snippet));
     const header = link?.closest('header');
-    return {
-      found: Boolean(header),
-      scrollWidth: header?.scrollWidth ?? -1,
-      clientWidth: header?.clientWidth ?? -1,
-    };
+    if (!header) return { found: false, scrollWidth: -1, clientWidth: -1, headroom: -1 };
+    // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+    // driver-job-detail-free-text-overflow.spec.ts for why a CSS
+    // sizing-keyword probe (width: min/max-content) is wrong here -- this
+    // box relies on break-words, which both keywords ignore by spec -- and
+    // why bisecting real pixel widths (which DOES go through real
+    // constrained layout, where break-words actually applies) is correct
+    // where the keyword probe was not. Entirely inside this one call, so no
+    // intermediate width is ever observable.
+    const scrollWidth = header.scrollWidth;
+    const clientWidth = header.clientWidth;
+    const prevWidth = header.style.width;
+    let lo = 0;
+    let hi = clientWidth;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      header.style.width = `${mid}px`;
+      if (header.scrollWidth <= mid + 1) hi = mid;
+      else lo = mid;
+    }
+    header.style.width = prevWidth;
+    return { found: true, scrollWidth, clientWidth, headroom: clientWidth - hi };
   }, linkTextSnippet);
 }
 
@@ -102,7 +119,7 @@ test.describe('/orders/[id] store-name Link does not overflow its own header at 
 
     const box = await measureHeaderBox(page, 'Supercalifragilistic');
     expect(box.found, 'the vendor-order header should be found via the store-name Link').toBe(true);
-    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with an unbroken long business name`);
+    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with an unbroken long business name (headroom ${box.headroom}px)`);
     expect(box.scrollWidth, `header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with an unbroken long business name`).toBeLessThanOrEqual(box.clientWidth + 1);
   });
 
@@ -113,7 +130,7 @@ test.describe('/orders/[id] store-name Link does not overflow its own header at 
 
     const box = await measureHeaderBox(page, 'Exceptionally Long Named');
     expect(box.found, 'the vendor-order header should be found via the store-name Link').toBe(true);
-    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with a normal long business name`);
+    console.log(`header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with a normal long business name (headroom ${box.headroom}px)`);
     expect(box.scrollWidth, `header scrollWidth ${box.scrollWidth} vs clientWidth ${box.clientWidth} with a normal long business name`).toBeLessThanOrEqual(box.clientWidth + 1);
   });
 });

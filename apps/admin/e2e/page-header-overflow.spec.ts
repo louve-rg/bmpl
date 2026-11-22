@@ -82,11 +82,28 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] PageHeader never sil
         // page-level scrollWidth check alone never sees it: the clip never
         // reaches the document.
         let el: HTMLElement | null = node.parentElement;
-        let clipper: { scrollWidth: number; clientWidth: number } | null = null;
+        let clipper: { scrollWidth: number; clientWidth: number; headroom: number } | null = null;
         while (el) {
           const style = getComputedStyle(el);
           if (style.overflowX === 'hidden' || style.overflow === 'hidden') {
-            clipper = { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
+            // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+            // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why
+            // a CSS sizing-keyword probe is wrong for a break-words box and
+            // bisecting real pixel widths is correct instead. One
+            // synchronous call.
+            const scrollWidth = el.scrollWidth;
+            const clientWidth = el.clientWidth;
+            const prevWidth = el.style.width;
+            let lo = 0;
+            let hi = clientWidth;
+            while (hi - lo > 1) {
+              const mid = Math.floor((lo + hi) / 2);
+              el.style.width = `${mid}px`;
+              if (el.scrollWidth <= mid + 1) hi = mid;
+              else lo = mid;
+            }
+            el.style.width = prevWidth;
+            clipper = { scrollWidth, clientWidth, headroom: clientWidth - hi };
             break;
           }
           el = el.parentElement;
@@ -102,7 +119,9 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] PageHeader never sil
       console.log(`'Courier lanes' right edge ${measured.right.toFixed(1)} at ${width}px (viewport ${width})`);
       expect(measured.right, `'Courier lanes' right edge ${measured.right.toFixed(1)} at ${width}px (viewport ${width})`).toBeLessThanOrEqual(width + 1);
       if (measured.clipper) {
-        console.log(`ancestor overflow-hidden clip at ${width}px: scrollWidth ${measured.clipper.scrollWidth} vs clientWidth ${measured.clipper.clientWidth}`);
+        console.log(
+          `ancestor overflow-hidden clip at ${width}px: scrollWidth ${measured.clipper.scrollWidth} vs clientWidth ${measured.clipper.clientWidth} (headroom ${measured.clipper.headroom}px)`,
+        );
         expect(
           measured.clipper.scrollWidth,
           `ancestor overflow-hidden clip at ${width}px: scrollWidth ${measured.clipper.scrollWidth} vs clientWidth ${measured.clipper.clientWidth}`,
