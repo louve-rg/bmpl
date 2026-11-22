@@ -280,3 +280,23 @@ describe('MDF-927: driver-reported delivery exception', () => {
     expect(driverView.body.deliveryPin).toBeUndefined();
   });
 });
+
+/**
+ * NOT part of MDF-927. A pre-existing display defect, found from the account-
+ * deletion side (where it showed up as "Deleted Driver" beside initials "DU"),
+ * folded into this PR only because this branch already edits driverSummary()
+ * in the same file. See its own comment in delivery-core.service.ts.
+ */
+describe('driverSummary(): initials come from the name actually shown, not a different one', () => {
+  it('a nicknamed driver gets initials derived from the nickname, not from their legal name', async () => {
+    const { order } = await deliveryInFlight('ARRIVING');
+    const customerView = await get(order.customerCookies, `deliveries/${order.deliveryId}`);
+    expect(customerView.status).toBe(200);
+    // makeDriver() sets displayName "Drv<id>" while the account's legal name
+    // (registerCustomer's fixed firstName/lastName) is "C"/"U" — before this
+    // fix, initials were always "CU" regardless of the displayed name.
+    expect(customerView.body.driver.displayName).toMatch(/^Drv/);
+    expect(customerView.body.driver.initials).not.toBe('CU');
+    expect(customerView.body.driver.initials).toBe(customerView.body.driver.displayName.slice(0, 2).toUpperCase());
+  });
+});

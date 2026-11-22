@@ -228,11 +228,25 @@ export class DeliveryCoreService {
     // Display name only — never legal name, phone, documents, or emergency contact.
     // The face is the point here: a customer opening the door should be able to
     // check that the person in front of them is the driver they were assigned.
+    //
+    // Pre-existing display defect, found from the account-deletion side (not
+    // part of the MDF-927 exception work, but this is the file that already
+    // touches this method): initials must come from the name actually shown,
+    // not from a different source. displayName is a DriverProfile field a
+    // driver sets themselves — a nickname, by design — while initials were
+    // derived from the user row's legal firstName/lastName. Any nicknamed
+    // driver showed, and still would have shown, a nickname beside the
+    // initials of a legal name it doesn't share ("Big Mike" next to "MS").
+    // userInitials() already handles a single-string name correctly (falls
+    // back to its first two letters), so splitting displayName into its
+    // first and last word and reusing it needs no new helper.
+    const [firstWord, ...rest] = d.displayName.trim().split(/\s+/);
+    const lastWord = rest.length ? rest[rest.length - 1] : undefined;
     return {
       displayName: d.displayName,
       ratingAverage: d.ratingAverage,
       completedDeliveries: d.completedDeliveries,
-      initials: userInitials(d.user.firstName, d.user.lastName),
+      initials: userInitials(firstWord, lastWord),
       avatarUrl: publicAvatarUrl(d.user),
     };
   }
