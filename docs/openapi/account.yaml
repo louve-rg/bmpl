@@ -1,0 +1,375 @@
+openapi: 3.1.0
+info:
+  title: BML Account API
+  version: "1.0.0"
+  description: >
+    Belize Marketplace & Logistics — the caller's own identity and account
+    surface: `UsersController` (`@Controller('me')`) and the authenticated
+    `change-password` route on `AuthController`. Every endpoint here was
+    documented from its controller and service, read at `origin/main`
+    (`apps/api/src/users/users.controller.ts`, `users.service.ts`,
+    `apps/api/src/auth/auth.controller.ts`, `auth.service.ts`,
+    `apps/api/src/auth/session.service.ts`) — nothing is described that was
+    not read. Until now this entire surface had NO OpenAPI coverage at all
+    (DOCS-SPEC-GAP); the public, unauthenticated avatar-image redirect
+    (`GET /users/{id}/avatar`, a different controller) is out of scope here.
+
+    MONEY: nothing on this surface moves money. `DELETE /me` refuses rather
+    than touches a wallet balance — see that endpoint's own notes.
+
+    SECRETS: `GET /me/sessions` never returns `refreshTokenHash` or anything
+    derived from it, by construction in `SessionService.listForUser`'s own
+    `select` — there is no field for it to be listed as "optional" here
+    either. Every example below uses an obviously fake placeholder, never a
+    real credential, email or token.
+
+    AUTHENTICATION: every route below requires a live session (cookie auth);
+    there is no external identity provider anywhere in this codebase — every
+    account authenticates with a local password (`User.passwordHash`), so
+    `POST /auth/change-password` and `DELETE /me` both re-check the CALLER'S
+    CURRENT PASSWORD as fresh proof of consent, not an external-IdP case.
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: Account
+    description: The caller's own identity, profile, avatar and destructive account action.
+  - name: Sessions
+    description: ACCT-SESSIONS — the caller's own live sign-ins, listed and individually or collectively revoked.
+security:
+  - cookieAuth: []
+
+paths:
+  /me:
+    get:
+      tags: [Account]
+      summary: The caller's own account — profile, avatar, roles, admin permissions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Account]
+      summary: "MDF-924: self-service account deletion (reauthentication required)"
+      description: >-
+        Requires the caller's CURRENT password in the body — a live session
+        alone is not accepted as proof for a one-way destructive action.
+        Refuses with a `409` naming every unmet reason, rather than deleting,
+        if the account currently holds a live hand-off-worthy responsibility
+        (sole active manager of a terminal company, an open vendor order, an
+        in-progress delivery/shipment/passenger-trip job, an in-flight order
+        or shipment as the customer, a non-zero wallet balance or an open
+        wallet hold, the platform's only SUPER_ADMIN, or an operator/employer
+        with open bookings/applicants). This is NOT a full erasure: the
+        `users` row and related personal-data tables are ANONYMIZED in place
+        (name, contact details, identity documents, saved addresses — see
+        `UsersService.anonymizePersonalData`'s own doc comment for the exact,
+        table-by-table survey), but a COMPLETED order or shipment keeps its
+        own stored recipient name and address, because that is the vendor's
+        or carrier's own record of work performed, not solely this account's
+        data. Any web-facing copy describing this action must say "profile
+        anonymized, past order records retained," never "account deleted" —
+        this endpoint's own `{ ok: true }` response makes no such claim
+        either way. Every session is revoked on success, including the one
+        that made this call, and this response clears auth cookies.
+        Rate-limited the same as the other sensitive auth/account routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteAccountRequest" }
+      responses:
+        "200":
+          description: "`{ ok: true }`"
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "400": { description: "Current password is incorrect" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Blocked by one or more live responsibilities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, enum: ["Your account cannot be deleted yet."] }
+                  reasons: { type: array, items: { type: string }, description: Plain-words, one per blocking responsibility. }
+
+  /me/profile:
+    patch:
+      tags: [Account]
+      summary: Update individual fields of the caller's own profile
+      description: Every field is optional; omitted fields are left unchanged. An empty string on `phone`/`addressLine1`/`addressLine2`/`city` clears that field (stored as null).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProfileRequest" }
+      responses:
+        "200":
+          description: The updated account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /me/avatar/upload:
+    post:
+      tags: [Account]
+      summary: Upload a profile picture as raw bytes (server-side ingest; the ONLY way an avatar is set)
+      description: >-
+        The request body IS the image (no JSON envelope); the real media
+        type is sniffed from the bytes, never trusted from a client-declared
+        Content-Type, and must be JPEG/PNG/WebP, capped at 5 MB. Whether the
+        picture needs human review depends on the CALLER'S OWN approved
+        roles, not a flag the client sends: a role that puts this person at
+        someone's door (driver, passenger driver, real-estate agent, …)
+        queues the photo for admin review (a face check runs first and can
+        auto-approve, auto-reject, or hold it for a human); every other
+        account's picture publishes immediately, cosmetic and unreviewed.
+        A previously approved picture stays live while a replacement is
+        pending or rejected — this call never takes down a photo that was
+        already live.
+      requestBody:
+        required: true
+        content:
+          image/*: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The outcome of this one upload attempt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvatarUploadResult" }
+        "400": { description: "No image data / too large / unsupported type / auto-rejected by the face check" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /me/avatar:
+    delete:
+      tags: [Account]
+      summary: Remove the caller's own profile picture entirely (falls back to initials)
+      description: Clears both the live and any pending-review picture. Best-effort storage cleanup; the account record is updated regardless.
+      responses:
+        "200":
+          description: The updated account (avatarUrl now null)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /me/sessions:
+    get:
+      tags: [Sessions]
+      summary: "ACCT-SESSIONS: the caller's own LIVE sessions (never revoked, not expired)"
+      description: >-
+        A revoked or expired session is left out entirely, not shown as
+        inert clutter. Never returns `refreshTokenHash` or anything derived
+        from it — there is no such field in this response to begin with,
+        not even as an optional one. Exactly one row carries `current: true`
+        — the session THIS request itself authenticated with — so a screen
+        full of otherwise-identical rows does not invite someone to sign
+        themselves out by accident.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/Session" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /me/sessions/{id}:
+    delete:
+      tags: [Sessions]
+      summary: "ACCT-SESSIONS: revoke exactly one of the caller's own sessions"
+      description: >-
+        `404` for a session that does not exist OR belongs to someone
+        else — deliberately indistinguishable, so a caller fishing for
+        another user's session id learns nothing by probing. Idempotent on
+        an already-revoked or already-expired session (a stale list the
+        browser still has open does not turn into an error on retry) — only
+        a still-live row is actually changed, the call still reports success.
+        Revoking the caller's OWN CURRENT session behaves as an honest
+        logout: this response also clears auth cookies when `id` matches the
+        session that made the call, the same way `POST /auth/change-password`
+        and `DELETE /me` do.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: Session id }
+      responses:
+        "200":
+          description: "`{ ok: true }`"
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not found or not owned (deliberately indistinguishable)" }
+  /me/sessions/revoke-others:
+    post:
+      tags: [Sessions]
+      summary: "ACCT-SESSIONS: \"sign out everywhere else\" — revoke every OTHER live session"
+      description: Deliberately leaves the session making this very call untouched — the whole point of the action is that the caller stays signed in on this device. No cookie-clearing, for the same reason.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  revokedCount: { type: integer, description: How many other sessions were revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /auth/change-password:
+    post:
+      tags: [Account]
+      summary: Authenticated password change (requires the current password)
+      description: >-
+        Unlike `POST /auth/reset-password` (a mailed token stands in for
+        identity), the caller here already holds a live session, so the
+        CURRENT password itself is the proof of consent — checked fresh
+        against the stored hash, never trusted from the session alone.
+        Every session is revoked on success, including the one that made
+        this call (a stolen cookie/refresh token must not survive its own
+        password change); this response clears auth cookies. Rate-limited
+        the same as the other sensitive auth routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePasswordRequest" }
+      responses:
+        "200":
+          description: "`{ ok: true }`"
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "400": { description: "Current password is incorrect, or the new password fails the password policy" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  responses:
+    ValidationError:
+      description: Validation failed (plain-words message)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties: { path: { type: string }, message: { type: string } }
+    Unauthorized: { description: Authentication required }
+  schemas:
+    RoleCode:
+      type: string
+      enum: [CUSTOMER, VENDOR, DELIVERY_DRIVER, SHIPPING_PROVIDER, PASSENGER_DRIVER, PASSENGER_PROVIDER, JOB_SEEKER, EMPLOYER, REAL_ESTATE_AGENT, PROPERTY_OWNER, MARKETING_CLIENT, SUPPORT_AGENT, ADMIN, SUPER_ADMIN]
+      description: One of the 14 role codes. A person holds many at once, each with its own lifecycle (root CLAUDE.md §3).
+    RoleStatus:
+      type: string
+      enum: [PENDING, MORE_INFO_REQUIRED, APPROVED, REJECTED, SUSPENDED, REVOKED]
+    AvatarStatus:
+      type: string
+      enum: [NONE, PENDING, APPROVED, REJECTED]
+
+    Me:
+      type: object
+      description: The signed-in caller's own view of their account — nobody else is ever shown this shape.
+      properties:
+        id: { type: string }
+        email: { type: string, example: "jane.doe@example.com" }
+        firstName: { type: string }
+        lastName: { type: string }
+        phone: { type: [string, "null"] }
+        district: { type: [string, "null"], description: One of the six real Belize districts, or null if never set. }
+        addressLine1: { type: [string, "null"] }
+        addressLine2: { type: [string, "null"] }
+        city: { type: [string, "null"] }
+        avatarUrl: { type: [string, "null"], description: "Stable public URL of the APPROVED picture, or null while there isn't one." }
+        avatarStatus: { $ref: "#/components/schemas/AvatarStatus" }
+        avatarPendingUrl: { type: [string, "null"], description: Short-lived signed URL of a picture still awaiting review; null when nothing is pending. Only ever shown to the owner. }
+        avatarRejectedReason: { type: [string, "null"], description: Plain-language explanation, only present when avatarStatus is REJECTED. }
+        avatarRequired: { type: boolean, description: True when one of the caller's own APPROVED roles makes a picture mandatory. }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, DEACTIVATED] }
+        emailVerified: { type: boolean }
+        activeRole: { oneOf: [{ $ref: "#/components/schemas/RoleCode" }, { type: "null" }] }
+        roles:
+          type: array
+          items:
+            type: object
+            properties:
+              roleCode: { $ref: "#/components/schemas/RoleCode" }
+              label: { type: string }
+              status: { $ref: "#/components/schemas/RoleStatus" }
+              isSelectable: { type: boolean, description: "True only when status is APPROVED." }
+        adminPermissions:
+          type: array
+          items: { type: string }
+          description: The admin permission strings this user actually holds — the same grants PermissionsGuard evaluates. Empty for everyone who is not staff.
+
+    UpdateProfileRequest:
+      type: object
+      description: Every field optional; at least one is typically sent, but an empty body is not rejected.
+      properties:
+        firstName: { type: string, maxLength: 80 }
+        lastName: { type: string, maxLength: 80 }
+        phone: { type: string, description: "Belize phone number (+501 international or local 7-digit), or an empty string to clear it." }
+        district: { type: string, description: One of the six real Belize districts. }
+        addressLine1: { type: string, maxLength: 160, description: Or an empty string to clear it. }
+        addressLine2: { type: string, maxLength: 160, description: Or an empty string to clear it. }
+        city: { type: string, maxLength: 80, description: Free text; or an empty string to clear it. }
+
+    DeleteAccountRequest:
+      type: object
+      required: [currentPassword]
+      properties:
+        currentPassword: { type: string, example: "••••••••••" }
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, example: "••••••••••" }
+        newPassword:
+          type: string
+          minLength: 10
+          maxLength: 128
+          description: Must contain at least one letter and one digit. The SAME password policy register and reset-password already enforce (packages/validation).
+          example: "••••••••••"
+
+    AvatarUploadResult:
+      type: object
+      properties:
+        status: { $ref: "#/components/schemas/AvatarStatus" }
+        message: { type: string, description: "What to tell the user — approved, queued for review, or why it failed." }
+        avatarUrl: { type: [string, "null"] }
+
+    Session:
+      type: object
+      properties:
+        id: { type: string }
+        userAgent: { type: [string, "null"] }
+        ipAddress: { type: [string, "null"] }
+        client: { type: string, description: "By convention 'web' | 'admin' | 'mobile' — a plain string column, not a database enum, defaulting to 'web'." }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        current: { type: boolean, description: True on exactly the one session that authenticated the request making this call. }
