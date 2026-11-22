@@ -66,20 +66,40 @@ function setPassword(value: string) {
   });
 }
 
-function submit() {
+/** Clicks the trigger ("Delete account") -- opens the inline panel, calls no API. */
+function openPanel() {
   const form = container!.querySelector('form')!;
   act(() => {
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   });
 }
 
+function panelHeading() {
+  return container!.querySelector('[role="group"] h3') as HTMLHeadingElement | null;
+}
+
+function confirmButton() {
+  return Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Yes, delete my account') ?? null;
+}
+
+function cancelButton() {
+  return Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') ?? null;
+}
+
+/** Opens the panel, then clicks "Yes, delete my account" -- the only path that actually calls DELETE /me. */
+function openAndConfirm() {
+  openPanel();
+  act(() => confirmButton()!.click());
+}
+
 /**
- * MDF-925/MDF-924: DELETE /me. The two things this file exists to pin:
- * (1) the consequence copy never says "account deleted" (the controller's
- * own copy rule -- this is anonymization, past order records are kept),
- * and (2) a 409 refusal renders the server's own `reasons[]` verbatim,
- * never a collapsed "something went wrong" and never a client-side guess
- * at why.
+ * MDF-925/MDF-924: DELETE /me. The things this file exists to pin: (1) the
+ * consequence copy never says "account deleted" (the controller's own copy
+ * rule -- this is anonymization, past order records are kept), (2) a 409
+ * refusal renders the server's own `reasons[]` verbatim, never a collapsed
+ * "something went wrong" and never a client-side guess at why, and (3) the
+ * inline confirmation panel (acceptance round 2) gates every path to the
+ * API, is genuinely absent until opened, and a cancel loses nothing.
  */
 describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
   it('states the anonymization consequence up front, never claiming full deletion', async () => {
@@ -105,32 +125,30 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
   });
 
   it('submits only currentPassword to DELETE /me', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(apiDel).toHaveBeenCalledWith('/me', { currentPassword: 'my-real-password' });
   });
 
-  it('disables submit until a password is entered, without pre-checking anything server-side', async () => {
+  it('disables the trigger until a password is entered, without pre-checking anything server-side', async () => {
     mount();
     await flush();
 
-    const button = container!.querySelector('button[type="submit"]') as HTMLButtonElement;
+    const button = container!.querySelector('#deleteAccountTrigger') as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     setPassword('x');
     expect(button.disabled).toBe(false);
   });
 
   it('on success, navigates to /login with the anonymization reason -- never shows a success message here', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(router.push).toHaveBeenCalledWith('/login?reason=account-anonymized');
@@ -151,11 +169,10 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
         'You have 2 orders still being fulfilled or delivered. Wait for them to finish before deleting your account.',
       ],
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(container!.textContent).toContain('Your wallet still holds funds, a hold, or an escrow balance');
@@ -172,11 +189,10 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
         'Your wallet still holds funds, a hold, or an escrow balance, and this account cannot be deleted while it does. This product has no way to remove funds from a wallet today.',
       ],
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(container!.textContent).not.toMatch(/withdraw/i);
@@ -184,11 +200,10 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
 
   it('shows specific copy for a 429 (StrictThrottle), not the raw throttler text', async () => {
     apiDel.mockRejectedValueOnce({ status: 429, message: 'ThrottlerException: Too Many Requests' });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(container!.textContent).toContain("You've tried this too many times. Wait a few minutes, then try again.");
@@ -197,67 +212,108 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
 
   it('shows the bare current-password refusal by its own message', async () => {
     apiDel.mockRejectedValueOnce({ status: 400, message: 'Current password is incorrect.' });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('wrong-password');
-    submit();
+    openAndConfirm();
     await flush();
 
     expect(container!.textContent).toContain('Current password is incorrect.');
     expect(router.push).not.toHaveBeenCalled();
   });
 
-  it('re-enables the button after a failed submit, so the person can try again', async () => {
+  it('re-enables the trigger after a failed submit, so the person can try again -- the panel closes back to the trigger, not a dead state', async () => {
     apiDel.mockRejectedValueOnce({ status: 400, message: 'Current password is incorrect.' });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mount();
     await flush();
     setPassword('wrong-password');
-    submit();
+    openAndConfirm();
     await flush();
 
-    const button = container!.querySelector('button[type="submit"]') as HTMLButtonElement;
+    const button = container!.querySelector('#deleteAccountTrigger') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe('Delete account');
+    expect(confirmButton()).toBeNull();
   });
 });
 
 /**
- * Acceptance round 1, REQUIRED: the owner directive asks for "explicit
- * consequence confirmation," distinct from the consequence copy merely
- * being honest -- a browser-autofilled password otherwise turns this into
- * a single keypress. `window.confirm` is the same control the product
- * already uses for "End membership" (terminal/page.tsx's endMember),
- * reused here rather than a second pattern (a checkbox) for the same kind
- * of decision.
+ * Acceptance round 2 (REQUIRED): irreversible actions get an in-page
+ * confirmation step, not `window.confirm` -- a browser that has suppressed
+ * dialogs makes `window.confirm` return `false` exactly like a decline,
+ * silently turning the button nonfunctional with no way to tell the two
+ * apart from inside the page. This panel removes the need for that
+ * detection: there is no browser setting that can suppress a React state
+ * update.
  */
-describe('DeleteAccountForm — the acknowledgement gate (acceptance round 1, REQUIRED)', () => {
-  it('asks for explicit confirmation before calling the API at all', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+describe('DeleteAccountForm — the inline confirmation panel (acceptance round 2, REQUIRED)', () => {
+  it('the destructive button does not exist in the DOM until the panel is opened -- not hidden, not disabled, absent', async () => {
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+
+    expect(confirmButton()).toBeNull();
+
+    openPanel();
     await flush();
 
-    expect(confirmSpy).toHaveBeenCalledWith('Delete your account? This anonymizes your profile and cannot be undone.');
-    expect(apiDel).toHaveBeenCalledWith('/me', { currentPassword: 'my-real-password' });
+    expect(confirmButton()).not.toBeNull();
+    expect(apiDel).not.toHaveBeenCalled();
   });
 
-  it('does nothing at all if the person declines the confirmation -- no API call, no error, no navigation', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('opening the panel moves focus to it -- a keyboard user is told something changed', async () => {
     mount();
     await flush();
     setPassword('my-real-password');
-    submit();
+    openPanel();
+    await flush();
+
+    expect(document.activeElement).toBe(panelHeading());
+  });
+
+  it('the panel carries the exact fact acceptance flagged as missing -- past orders/shipments keep the real recipient name and address', async () => {
+    mount();
+    await flush();
+    setPassword('my-real-password');
+    openPanel();
+    await flush();
+
+    expect(container!.textContent).toContain('Anonymize your profile and sign out of every device?');
+    expect(container!.textContent).toContain('Past orders and shipments keep their recipient name and address.');
+  });
+
+  it('declining (Cancel) does nothing and loses nothing -- no API call, no navigation, the password is preserved, focus returns to the trigger', async () => {
+    mount();
+    await flush();
+    setPassword('my-real-password');
+    openPanel();
+    await flush();
+
+    act(() => cancelButton()!.click());
     await flush();
 
     expect(apiDel).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
-    expect(container!.textContent).not.toContain('Unable to delete');
-    const button = container!.querySelector('button[type="submit"]') as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-    expect(button.textContent).toBe('Delete account');
+    expect(confirmButton()).toBeNull();
+    expect((container!.querySelector('#deleteAccountPassword') as HTMLInputElement).value).toBe('my-real-password');
+    expect(document.activeElement).toBe(container!.querySelector('#deleteAccountTrigger'));
+  });
+
+  it('Escape cancels exactly like clicking Cancel', async () => {
+    mount();
+    await flush();
+    setPassword('my-real-password');
+    openPanel();
+    await flush();
+
+    act(() => {
+      panelHeading()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await flush();
+
+    expect(apiDel).not.toHaveBeenCalled();
+    expect(confirmButton()).toBeNull();
+    expect((container!.querySelector('#deleteAccountPassword') as HTMLInputElement).value).toBe('my-real-password');
+    expect(document.activeElement).toBe(container!.querySelector('#deleteAccountTrigger'));
   });
 });
