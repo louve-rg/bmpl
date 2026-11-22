@@ -4784,6 +4784,17 @@ export class ShipmentService {
    * matters most here: telling this caller the code is on hold is fine;
    * telling them how many guesses are left anywhere in this system is a
    * brute-force oracle, which is exactly what the lockout exists to deny.
+   *
+   * MDF-941: the lockout branch alone does NOT consume the reveal token.
+   * Every other null-reason here (not yet AWAITING_COLLECTION, already
+   * collected, grandfathered) still does, exactly as before — consuming it
+   * is what makes this single-use. But a locked-out caller gets nothing
+   * usable from this call regardless, so spending their one mailed token
+   * just to be told "ask staff" left them needing a brand new email after
+   * the hold cleared, even though the original token was still unexpired.
+   * The token is still spent the FIRST time this call would otherwise
+   * succeed — this is one free pass through the locked window, not a
+   * second single-use grant.
    */
   async revealCollectionCode(token: string, revealToken: string) {
     const s = await this.prisma.shipment.findUnique({
@@ -4808,18 +4819,26 @@ export class ShipmentService {
       s.collectionCodeRevealTokenExpiresAt > new Date();
     if (!valid) throw new BadRequestException('That code is invalid or has expired. Request a new one.');
 
-    await this.prisma.shipment.update({
-      where: { id: s.id },
-      data: { collectionCodeRevealToken: null, collectionCodeRevealTokenExpiresAt: null },
-    });
-
     const locked = s.collectionVerificationStatus === 'FAILED';
+    const isLockedOut = s.status === 'AWAITING_COLLECTION' && !s.collectedAt && !s.collectionPinGrandfathered && locked;
+
+    // MDF-941: the lockout branch must NOT consume the token. Without this,
+    // a recipient who is locked out burns their one mailed token just by
+    // reading the lock message, and needs a brand new one after staff clear
+    // the hold even though the original token is still unexpired. Every
+    // other null-reason below (already collected, grandfathered, not yet
+    // AWAITING_COLLECTION) still consumes the token exactly as before --
+    // only this branch is exempt.
+    if (!isLockedOut) {
+      await this.prisma.shipment.update({
+        where: { id: s.id },
+        data: { collectionCodeRevealToken: null, collectionCodeRevealTokenExpiresAt: null },
+      });
+    }
+
     const collectionCode =
       s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered || locked ? null : s.collectionPin;
-    const collectionHoldMessage =
-      s.status === 'AWAITING_COLLECTION' && !s.collectedAt && !s.collectionPinGrandfathered && locked
-        ? ShipmentService.COLLECTION_LOCKED_CUSTOMER_MESSAGE
-        : null;
+    const collectionHoldMessage = isLockedOut ? ShipmentService.COLLECTION_LOCKED_CUSTOMER_MESSAGE : null;
 
     await this.audit.record({
       action: 'SHIPMENT_COLLECTION_CODE_REVEALED',

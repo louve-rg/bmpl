@@ -429,3 +429,94 @@ describe('MDF-926 piece 5: a locked-out recipient gets neither code through eith
   });
 });
 
+/**
+ * MDF-941: before this fix, `revealCollectionCode` consumed the single-use
+ * reveal token BEFORE checking the lockout, on every call — including the
+ * one above that only ever gets the null+sentence answer. A locked-out
+ * recipient who reveals once (getting nothing usable) had already burned
+ * their one mailed token, and needed staff to send a brand new email after
+ * clearing the hold even though the original token was still unexpired.
+ * The fix exempts ONLY the lockout branch from consuming the token; every
+ * other null-reason (not yet AWAITING_COLLECTION, already collected,
+ * grandfathered) must keep consuming it exactly as before.
+ */
+describe('MDF-941: the lockout branch alone spares the reveal token, so it survives for reuse', () => {
+  async function lockOut(shipmentId: string) {
+    const real = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { collectionPin: true } }).then((s) => s.collectionPin!);
+    const wrong = real === '0000' ? '1111' : '0000';
+    for (let i = 0; i < 6; i++) {
+      await post(admin, `admin/logistics/shipments/${shipmentId}/collect`, { collectedByName: 'Maria Cruz', code: wrong });
+    }
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })).collectionVerificationStatus).toBe('FAILED');
+    return real;
+  }
+
+  it('the same reveal token still works after staff clears the lockout, within its original TTL', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const destEmail = `survives_${uniq()}@example.com`;
+    const booked = await bookDoorToHub(senderCookies, net, destEmail);
+    await driveToAwaitingCollection(booked.id);
+
+    const reqRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/request`);
+    expect(reqRes.status).toBe(201);
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email: destEmail });
+    const revealToken = /: ([A-Z0-9]{10})/.exec(inbox.body.body)?.[1];
+    expect(revealToken).toBeDefined();
+
+    const real = await lockOut(booked.id);
+
+    // First reveal while locked: null + the coarse sentence, as piece 5
+    // above already covers. The point of THIS test is what happens to the
+    // token itself.
+    const whileLocked = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(whileLocked.status).toBe(201);
+    expect(whileLocked.body.collectionCode).toBeNull();
+
+    const tokenRow = await ctx.prisma.shipment.findUniqueOrThrow({
+      where: { id: booked.id },
+      select: { collectionCodeRevealToken: true },
+    });
+    expect(tokenRow.collectionCodeRevealToken).toBe(revealToken);
+
+    const unlock = await post(admin, `admin/logistics/shipments/${booked.id}/unlock-collection`, {
+      note: 'Confirmed with the recipient by phone; code is correct.',
+    });
+    expect(unlock.status).toBe(201);
+
+    // Same token, no new request — this is the whole point.
+    const afterUnlock = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(afterUnlock.status).toBe(201);
+    expect(afterUnlock.body.collectionCode).toBe(real);
+
+    // And now it IS spent — the lockout exemption is one free pass through
+    // the locked window, not a second single-use grant.
+    const reuse = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(reuse.status).toBe(400);
+  });
+
+  it('every other null-reason still consumes the token as before — not yet AWAITING_COLLECTION', async () => {
+    const net = await makeNetwork();
+    const senderCookies = await fundedSender();
+    const destEmail = `stillconsumed_${uniq()}@example.com`;
+    const booked = await bookDoorToHub(senderCookies, net, destEmail);
+    // Deliberately NOT driven to AWAITING_COLLECTION yet.
+
+    const reqRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/request`);
+    expect(reqRes.status).toBe(201);
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email: destEmail });
+    const revealToken = /: ([A-Z0-9]{10})/.exec(inbox.body.body)?.[1];
+    expect(revealToken).toBeDefined();
+
+    const revealRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(revealRes.status).toBe(201);
+    expect(revealRes.body.collectionCode).toBeNull();
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id }, select: { collectionCodeRevealToken: true } });
+    expect(row.collectionCodeRevealToken).toBeNull();
+
+    const reuse = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
+    expect(reuse.status).toBe(400);
+  });
+});
+
