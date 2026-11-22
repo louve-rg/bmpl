@@ -780,14 +780,15 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # Five read-only, re-runnable checkers (BMPL-211/BMPL-220/BMPL-304/MDF-742),
-      # wired here because each is ALREADY GREEN on main today — wiring a
-      # check that is currently failing would make main red on every
-      # unrelated merge until someone resolves the underlying finding, the
-      # same harm BMPL-235 caused for an unrelated reason (BMPL-310/BMPL-312).
-      # No `pnpm install` step exists in this job on purpose: all five import
-      # nothing but node:fs/node:path/node:url and their own local baseline
-      # file — zero npm dependencies, confirmed before wiring this.
+      # Six read-only, re-runnable checkers (BMPL-211/BMPL-220/BMPL-304/MDF-742/
+      # CI-OPENAPI-DRIFT-MEASURE-AND-ADOPT), wired here because each is
+      # ALREADY GREEN on main today — wiring a check that is currently
+      # failing would make main red on every unrelated merge until someone
+      # resolves the underlying finding, the same harm BMPL-235 caused for
+      # an unrelated reason (BMPL-310/BMPL-312). No `pnpm install` step
+      # exists in this job on purpose: all six import nothing but
+      # node:fs/node:path/node:url and their own local baseline file — zero
+      # npm dependencies, confirmed before wiring this.
       - name: Notification event catalog drift (BMPL-220)
         run: node scripts/detect-notification-event-catalog-drift.mjs
 
@@ -802,6 +803,17 @@ jobs:
 
       - name: Terminal OpenAPI route drift (MDF-742, TERM-OPENAPI-GUARD)
         run: node scripts/detect-terminal-openapi-route-drift.mjs
+
+      # Adopted at zero drift on purpose (CI-OPENAPI-DRIFT-MEASURE-AND-ADOPT,
+      # 2026-11-22): account.yaml was the second spec in the repo measured
+      # at real=spec with zero undocumented routes, after terminal.yaml. A
+      # check adopted while its spec is clean can only ever enforce what is
+      # already true; scoped to me/auth ONLY, never the four other
+      # hand-maintained specs under docs/openapi/, which have real, measured
+      # drift today (scripts/measure-openapi-route-drift-all-specs.mjs) and
+      # would redden main immediately if checked this way.
+      - name: Account OpenAPI route drift (CI-OPENAPI-DRIFT-MEASURE-AND-ADOPT)
+        run: node scripts/detect-account-openapi-route-drift.mjs
 
       # scripts/detect-tracked-deletions.mjs is DELIBERATELY NOT WIRED HERE,
       # and must not be added later without re-reading this comment first
