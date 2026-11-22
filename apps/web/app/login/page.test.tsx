@@ -88,6 +88,23 @@ describe('MDF-925/MDF-923 -- the password-changed notice', () => {
   });
 });
 
+describe('MDF-925/MDF-924 -- the account-anonymized notice', () => {
+  it('shows the confirmation when arriving with ?reason=account-anonymized, worded as anonymization not deletion', async () => {
+    window.history.replaceState(null, '', '/login?reason=account-anonymized');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(container.textContent).toContain('Your profile has been anonymized and your past order records are retained.');
+    // The controller's own copy rule: never claim full deletion here.
+    expect(container.textContent).not.toContain('account deleted');
+    expect(container.textContent).not.toContain('Account deleted');
+  });
+});
+
 describe('SEC-LOGIN-PASSWORD-IN-URL', () => {
   it('the form defaults to POST, not GET, before React ever attaches a submit handler', async () => {
     // The defect: before hydration completes, a click on "Sign in" has no

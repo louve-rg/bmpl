@@ -10,6 +10,15 @@ export interface ApiError {
   errors?: Array<{ path: string; message: string }>;
   /** Raw server message, kept for logs/debugging when `message` is a friendly fallback. */
   detail?: string;
+  /**
+   * MDF-925: the 409 `deleteAccount` refuses with (ConflictException's body
+   * carries `reasons: string[]` alongside `message` -- a plain-language
+   * sentence per live responsibility the account still holds, e.g. an open
+   * vendor order or a non-zero wallet balance). `message` alone collapses
+   * all of them into one generic line, so this is captured separately,
+   * the same way `errors[]` already is, rather than losing it.
+   */
+  reasons?: string[];
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -114,6 +123,7 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
         : withFieldErrors(raw, data?.errors),
       errors: data?.errors,
       detail: raw,
+      reasons: data?.reasons,
     };
     throw err;
   }
@@ -199,5 +209,6 @@ export const api = {
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
-  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  del: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'DELETE', body: body ? JSON.stringify(body) : undefined }),
 };
