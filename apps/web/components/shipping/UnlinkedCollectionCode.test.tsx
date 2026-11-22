@@ -153,6 +153,29 @@ describe('UnlinkedCollectionCode — reveal step', () => {
     expect(el.textContent).toContain('No collection code to show for this parcel right now.');
   });
 
+  // MDF-926: this is the least-authenticated of the three collection-code
+  // readers -- no account, no session, just a mailed token -- so a
+  // locked-out holder must see the SAME coarse sentence in the code's own
+  // slot, never the generic "nothing to show" line, and never any count,
+  // remaining-tries, or raw status.
+  it('shows the hold message in the code\'s own slot once the code has locked out, not the generic "nothing to show" line', async () => {
+    const el = await requestThenMount();
+    const input = el.querySelector('input') as HTMLInputElement;
+    setInputValue(input, 'ABCDEFGHJK');
+
+    revealCollectionCode.mockResolvedValue({
+      reference: 'BML-ABCD2345',
+      collectionCode: null,
+      collectionHoldMessage:
+        'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.',
+    });
+    await clickAndFlush(findButton(el, 'Confirm token')!);
+
+    expect(el.textContent).toContain('Our team needs to confirm it with you directly');
+    expect(el.textContent).not.toContain('No collection code to show for this parcel right now.');
+    expect(el.textContent).not.toMatch(/attempt|remaining|tries left/i);
+  });
+
   it('shows the server’s own message on an invalid or expired token, and lets them try again', async () => {
     const el = await requestThenMount();
     const input = el.querySelector('input') as HTMLInputElement;
