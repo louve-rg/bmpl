@@ -1,0 +1,22 @@
+-- MDF-923: the authenticated change-password route needs its own audit
+-- action. PASSWORD_RESET already exists but is the wrong fit: that one
+-- fires from the unauthenticated forgot-password flow, where a mailed,
+-- single-use token stands in for proof of identity. Here the caller already
+-- holds a live session AND must additionally re-prove the CURRENT password
+-- before the write — a different actor context and a different evidence of
+-- consent, so a new value keeps an audit query asking "did the owner use
+-- their already-known password to set a new one" distinguishable from
+-- "did someone with mailed-link access reset it instead." Checked the full
+-- AuditAction enum first; nothing else already covers this.
+--
+-- ADD ONLY: nothing in this migration references the new value — Postgres
+-- refuses a transaction that both adds an enum member and uses it (see
+-- packages/database/CLAUDE.md §2). The AuthService code that writes this
+-- value ships in the same PR but runs only after this migration has
+-- committed.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'PASSWORD_CHANGED';

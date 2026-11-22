@@ -11,7 +11,7 @@ import {
   verifyPassword,
 } from '@bmpl/authentication';
 import { templates } from '@bmpl/notifications';
-import type { RegisterInput, ResetPasswordInput } from '@bmpl/validation';
+import type { ChangePasswordInput, RegisterInput, ResetPasswordInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
@@ -241,5 +241,49 @@ export class AuthService {
     });
     // Revoke every existing session — a password reset invalidates all sessions.
     await this.sessions.revokeAllForUser(record.userId);
+  }
+
+  /**
+   * Authenticated change-password. Unlike resetPassword (a mailed token
+   * stands in for identity), the caller here already holds a live session —
+   * so the CURRENT password itself is the proof of consent, checked fresh
+   * against the stored hash rather than trusted from the session alone.
+   *
+   * Every account in this schema authenticates with a local password —
+   * `User.passwordHash` is non-nullable and there is no external identity
+   * provider field, login route or OAuth/SSO integration anywhere in this
+   * codebase (verified: no `provider`/`ssoId`/`externalAuth`-shaped column
+   * exists, and every "provider" hit elsewhere is a business-domain shipping
+   * or passenger provider, unrelated to authentication). So there is no
+   * external-IdP account to distinguish and refuse here — reported to god
+   * rather than inventing a field or a code path for a case this schema
+   * does not have.
+   */
+  async changePassword(
+    userId: string,
+    input: ChangePasswordInput,
+    meta: RequestMeta,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const ok = await verifyPassword(user.passwordHash, input.currentPassword);
+    if (!ok) {
+      throw new BadRequestException('Current password is incorrect.');
+    }
+
+    const passwordHash = await hashPassword(input.newPassword);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+      await this.audit.record(
+        {
+          action: 'PASSWORD_CHANGED',
+          actorId: userId,
+          targetUserId: userId,
+          ipAddress: meta.ipAddress,
+        },
+        tx,
+      );
+    });
+    // A stolen session/refresh token must not survive its own password change.
+    await this.sessions.revokeAllForUser(userId);
   }
 }
