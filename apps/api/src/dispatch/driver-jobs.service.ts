@@ -754,7 +754,9 @@ export class DriverJobService {
    */
   async reportException(actor: Actor, deliveryId: string, dto: ReportDeliveryExceptionInput) {
     const { d } = await this.ownedDelivery(actor.userId, deliveryId);
-    this.core.assertAction('RAISE_EXCEPTION', d.status);
+    // Explicit, even though 'DELIVERY' is this method's default — RAISE_EXCEPTION
+    // is the one action that actually cares, and the point is to say so here.
+    this.core.assertAction('RAISE_EXCEPTION', d.status, 'DELIVERY');
     const fromStatus = d.status;
 
     // Conditional write, same shape as simpleTransition/confirmPickup above:

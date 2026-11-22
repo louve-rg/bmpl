@@ -12,6 +12,7 @@ import {
   canPerform,
   userInitials,
   type DeliveryAction,
+  type DeliveryEntityKind,
   type DeliveryStatus,
 } from '@bmpl/shared';
 import type { AuditAction } from '@bmpl/shared';
@@ -131,8 +132,8 @@ export class DeliveryCoreService {
   ) {}
 
   /** Guard: throw unless `action` is legal from `current`. */
-  assertAction(action: DeliveryAction, current: DeliveryStatus): void {
-    if (!canPerform(action, current)) {
+  assertAction(action: DeliveryAction, current: DeliveryStatus, entity: DeliveryEntityKind = 'DELIVERY'): void {
+    if (!canPerform(action, current, entity)) {
       const label = DELIVERY_STATUS_LABELS[current] ?? current;
       throw new BadRequestException(`Cannot ${action.toLowerCase().replace('_', ' ')} a delivery that is "${label}".`);
     }
@@ -420,6 +421,7 @@ export class DeliveryCoreService {
           arrivingAt: d.arrivingAt,
           deliveredAt: d.deliveredAt,
           cancelledAt: d.cancelledAt,
+          exceptionAt: d.exceptionAt,
         }),
       };
     }

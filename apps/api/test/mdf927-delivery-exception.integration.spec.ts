@@ -236,6 +236,22 @@ describe('MDF-927: driver-reported delivery exception', () => {
     expect(row.status).toBe('EXCEPTION'); // unchanged — the rejected call did not move it
   });
 
+  it('boundary: the customer gets a fixed, status-derived sentence — never the raw driver-authored reason', async () => {
+    const { order, driver } = await deliveryInFlight('ARRIVING');
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/report-exception`, { reason: 'Building looked abandoned, did not feel safe going up' })).body.status).toBe('EXCEPTION');
+
+    const customerView = await get(order.customerCookies, `deliveries/${order.deliveryId}`);
+    expect(customerView.status).toBe(200);
+    expect(customerView.body.status).toBe('EXCEPTION');
+    expect(customerView.body.statusLabel).toBe('Delivery problem reported'); // fixed, status-derived
+    expect(customerView.body.exceptionReason).toBeUndefined();
+    expect(JSON.stringify(customerView.body)).not.toContain('did not feel safe');
+
+    // The progress tracker freezes (same as a cancellation) rather than
+    // showing a step still blinking "in progress" with a problem reported.
+    expect(customerView.body.progress.some((e: { state: string }) => e.state === 'CURRENT')).toBe(false);
+  });
+
   it('boundary: a staff-entered reason never reaches the driver, even for the delivery they themselves flagged', async () => {
     const { order, driver } = await deliveryInFlight('ARRIVING');
     expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/report-exception`, { reason: 'Recipient address does not exist' })).body.status).toBe('EXCEPTION');

@@ -37,6 +37,17 @@ export const TERMINAL_DELIVERY_STATUSES: readonly DeliveryStatus[] = ['DELIVERED
 /** Who may trigger a transition. SYSTEM is reserved (unused in M15). */
 export type DeliveryActor = 'ADMIN' | 'DRIVER';
 
+/**
+ * MDF-927: which record kind an action is legal against. `OrderDelivery`
+ * and `ShipmentLeg.courierStatus` share this exact enum and this exact
+ * table (see RAISE_EXCEPTION's own comment below) — most actions apply to
+ * both and leave `appliesTo` unset. An action that must NOT reach one of
+ * them (RAISE_EXCEPTION, marketplace-only) sets it explicitly, and
+ * `canPerform`/`assertAction` enforce it at the table, not the caller —
+ * see their own comments for why that distinction is load-bearing.
+ */
+export type DeliveryEntityKind = 'DELIVERY' | 'LEG';
+
 /** Lifecycle of a single DeliveryAssignment row (append-only history). */
 export const DELIVERY_ASSIGNMENT_STATUSES = [
   'ACTIVE', // the current, outstanding assignment awaiting/holding the driver
@@ -69,13 +80,18 @@ export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
  * refund/escrow/settlement step here, deliberately; that is a separate,
  * owner-level money decision (MDF-927), not state the dispatch edge moves.
  *
- * RAISE_EXCEPTION is written for OrderDelivery (marketplace) only, even
- * though ShipmentLeg.courierStatus shares this exact enum and table. A
- * courier leg already has its own staff/system-driven exception mechanism
- * on ShipmentLeg.status (apps/api/src/shipping/shipment.service.ts) — a
+ * RAISE_EXCEPTION is for OrderDelivery (marketplace) only, even though
+ * ShipmentLeg.courierStatus shares this exact enum and table — a courier
+ * leg already has its own staff/system-driven exception mechanism on
+ * ShipmentLeg.status (apps/api/src/shipping/shipment.service.ts), and a
  * second, courierStatus-driven one would be two sources for the same fact.
- * Nothing in apps/api/src/shipping calls RAISE_EXCEPTION; keep it that way
- * unless that leg-side mechanism is reconciled with this one first.
+ * `appliesTo: ['DELIVERY']` on its own entry below ENFORCES this at
+ * canPerform/assertAction, not by convention: apps/api/src/shipping's own
+ * assertAction wrapper (shipment-driver.service.ts) calls canPerform with
+ * no entity argument, because it predates this parameter entirely, and a
+ * restricted action with no matching entity is refused — see canPerform's
+ * own comment. That leg-side file needs ZERO changes for this to hold,
+ * which is the point: nobody there has to remember a rule.
  *
  * TERMINAL BY DESIGN, NOT BY DEFAULT: EXCEPTION has exactly one way out
  * (admin CANCEL) rather than a retry edge back to ASSIGNED, because the
@@ -108,17 +124,40 @@ export const DELIVERY_ACTIONS = {
   ARRIVING: { actor: 'DRIVER', from: ['IN_TRANSIT'], to: 'ARRIVING' },
   DELIVER: { actor: 'DRIVER', from: ['ARRIVING'], to: 'DELIVERED' },
   // MDF-927: the only edge off the forward track once a job is in the
-  // driver's hands. Scoped to marketplace OrderDelivery — see this table's
-  // own header comment for why it must not be wired to a courier leg as-is.
-  RAISE_EXCEPTION: { actor: 'DRIVER', from: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'], to: 'EXCEPTION' },
+  // driver's hands. `appliesTo: ['DELIVERY']` is enforced by canPerform
+  // itself (see its own comment) — a courier-leg call site that passes no
+  // entity, including every existing one in apps/api/src/shipping today,
+  // is refused automatically. Not a caller-side check; nobody has to
+  // remember to add one.
+  RAISE_EXCEPTION: { actor: 'DRIVER', from: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'], to: 'EXCEPTION', appliesTo: ['DELIVERY'] },
   CANCEL: { actor: 'ADMIN', from: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED', 'EXCEPTION'], to: 'CANCELLED' },
-} as const satisfies Record<string, { actor: DeliveryActor; from: readonly DeliveryStatus[]; to: DeliveryStatus }>;
+} as const satisfies Record<
+  string,
+  { actor: DeliveryActor; from: readonly DeliveryStatus[]; to: DeliveryStatus; appliesTo?: readonly DeliveryEntityKind[] }
+>;
 
 export type DeliveryAction = keyof typeof DELIVERY_ACTIONS;
 
-/** Is `action` legal from `current`? */
-export function canPerform(action: DeliveryAction, current: DeliveryStatus): boolean {
-  return (DELIVERY_ACTIONS[action].from as readonly DeliveryStatus[]).includes(current);
+/**
+ * Is `action` legal from `current`?
+ *
+ * `entity` is OPTIONAL and FAIL-CLOSED on purpose. Every existing caller —
+ * every one of them, in both apps/api/src/dispatch and
+ * apps/api/src/shipping — predates this parameter and calls with two
+ * arguments, because until MDF-927 no action cared which record kind it
+ * ran against. Only an action with `appliesTo` set is affected at all: if
+ * it has one and the caller didn't pass a matching `entity`, this refuses
+ * rather than assumes — so an UNMODIFIED courier-leg call site (no entity
+ * passed, because it was never told to) is refused automatically the
+ * first time it tries an entity-scoped action, with no caller-side check
+ * for anyone to add, forget, or route around. An action with no
+ * `appliesTo` is unaffected either way, exactly as before.
+ */
+export function canPerform(action: DeliveryAction, current: DeliveryStatus, entity?: DeliveryEntityKind): boolean {
+  const def = DELIVERY_ACTIONS[action];
+  const appliesTo = (def as { appliesTo?: readonly DeliveryEntityKind[] }).appliesTo;
+  if (appliesTo && (!entity || !appliesTo.includes(entity))) return false;
+  return (def.from as readonly DeliveryStatus[]).includes(current);
 }
 
 /** The status an action moves the delivery to. */
