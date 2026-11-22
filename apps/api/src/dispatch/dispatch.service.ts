@@ -440,8 +440,20 @@ export class DispatchService {
    * decision, not an engineering one. Rather than invent one, this REFUSES
    * the whole release while any of this order's deliveries is in one of
    * those three statuses (the admin sees why; the release can be retried once
-   * the delivery resolves itself) — flagged to Michael as the one slice of
-   * this gap that may need the owner's call, not decided silently here.
+   * the delivery resolves itself).
+   *
+   * This refusal is the deliberate, Michael-ruled conservative default,
+   * pending a separate owner decision (raised as its own card) on whether a
+   * released order with goods already in a driver's hands should instead
+   * cascade-cancel and recall. The asymmetry: a refusal fails loudly — the
+   * admin sees the error and can escalate — while silently letting the
+   * release proceed would leave goods in transit against a cancelled
+   * payment, an untracked physical-and-financial state nobody is watching.
+   * Refusing is recoverable (the policy can change later, or the delivery
+   * can simply complete and the money question be handled after); a silent
+   * release is not. If the owner later rules for cascade-and-recall, that is
+   * a follow-up diff — not a reason to hold this guard, which prevents real
+   * money loss today.
    */
   async cancelForReleasedOrder(tx: Prisma.TransactionClient, orderId: string, actorId: string | null): Promise<void> {
     const deliveries = await tx.orderDelivery.findMany({
