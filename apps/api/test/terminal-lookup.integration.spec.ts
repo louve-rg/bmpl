@@ -80,6 +80,21 @@ async function bookDoorToDoor(cookies: string[], net: { originCity: string; dest
   return r.body;
 }
 
+/** Same network, booked HUB_TO_HUB instead of DOOR_TO_DOOR — no FIRST_MILE leg,
+ *  so AWAITING_PICKUP means the opposite real-world thing (see P2-PARITY-API test below). */
+async function bookHubToHub(cookies: string[], net: { originHubId: string; destinationHubId: string }) {
+  const r = await post(cookies, 'shipping', {
+    service: 'HUB_TO_HUB',
+    origin: { hubId: net.originHubId, name: 'Sender Name', phone: '501-2223333' },
+    destination: { hubId: net.destinationHubId, name: 'Recipient Name', phone: '501-4445555' },
+    preferredMode: 'SEA',
+    description: 'One box of mangoes',
+    payWithWallet: true,
+  });
+  expect(r.status).toBe(201);
+  return r.body;
+}
+
 async function makeTerminalStaff(hubIds: string[]) {
   const s = uniq();
   const { cookies, userId } = await registerUser(`staff_${s}@example.com`);
@@ -193,6 +208,32 @@ describe('MDF-699 (TERM-LOOKUP): GET /terminal/shipments/:reference', () => {
       expect(res.status).toBe(404);
       expect(res.body.message).toBe('No shipment with that reference.');
     }
+  });
+
+  /**
+   * P2-PARITY-API, finding 1: AWAITING_PICKUP means two opposite things
+   * depending on `service` (`shipmentStatusLabel`'s own doc) and
+   * `lookupForTerminal` used to select only `status`, so a clerk had no way
+   * to tell which. These two cases are deliberately in one test: a DOOR
+   * service's label and a HUB service's label on the SAME raw status, so a
+   * regression that collapses them back to one string fails here instead of
+   * silently passing two separate tests that each only check their own case.
+   */
+  it('the terminal lookup labels AWAITING_PICKUP correctly for both a door service and a hub service', async () => {
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.originHubId, net.destinationHubId]);
+
+    const doorShipment = await bookDoorToDoor(await fundedSender(), net);
+    const doorRes = await get(staff.cookies, `terminal/shipments/${doorShipment.reference}`);
+    expect(doorRes.status).toBe(200);
+    expect(doorRes.body.status).toBe('AWAITING_PICKUP');
+    expect(doorRes.body.statusLabel).toBe('Waiting to be collected');
+
+    const hubShipment = await bookHubToHub(await fundedSender(), net);
+    const hubRes = await get(staff.cookies, `terminal/shipments/${hubShipment.reference}`);
+    expect(hubRes.status).toBe(200);
+    expect(hubRes.body.status).toBe('AWAITING_PICKUP');
+    expect(hubRes.body.statusLabel).toBe('Awaiting drop-off at the departure terminal');
   });
 
   it('a non-member is refused identically for a real reference and a fake one — its guard never reaches the lookup', async () => {

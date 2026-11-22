@@ -693,6 +693,78 @@ describe('DISPATCH-2: a human assignment\'s silent wait is made visible on the o
   });
 });
 
+describe('P2-PARITY-API: needsDriverReason parity between the ops board and the admin detail page', () => {
+  /**
+   * CLOSE-20's board test above proves `needsDriverReason` on
+   * `admin/logistics/shipments` (listForOps). Before this card, the SAME
+   * leg's `admin/logistics/shipments/:reference` detail page (`track` ->
+   * `serialize`) never sent `needsDriverReason`, `dispatchExhaustedAt` or
+   * `dispatchUnavailableAt` at all — an admin saw "No driver found" on the
+   * board and bare leg status on that leg's own detail page. Same shape as
+   * the MDF-624 `manualAssignmentPendingSince` parity test above: one
+   * fixture, read through both endpoints, asserting they agree — and a
+   * third read through the CUSTOMER-facing endpoint for the same reference,
+   * asserting the three fields are absent there, since this is an admin
+   * addition, not a new disclosure to the shipment's own customer.
+   */
+  it('the admin detail page carries the same needsDriverReason/dispatchExhaustedAt/dispatchUnavailableAt the board already shows, and the customer-facing endpoint still shows none of them', async () => {
+    const customer = await registerCustomer(`paritydetail_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    // STANN_CREEK: covered only by the baseline (permanently OFFLINE) courier
+    // — same zero-eligible-pool condition the CLOSE-20 tests above use, so
+    // the booking succeeds (TEMPORARILY_UNAVAILABLE) rather than being
+    // refused outright the way TOLEDO's genuinely zero-coverage case is.
+    // An earlier test in this file (MDF-624, above) brought an online driver
+    // into STANN_CREEK and never took it offline again — take every
+    // non-baseline STANN_CREEK driver offline first so this fixture is
+    // genuinely zero-eligible regardless of what ran before it in this file.
+    await ctx.prisma.driverProfile.updateMany({
+      where: { serviceAreas: { some: { district: 'STANN_CREEK' } }, user: { email: { not: 'it-baseline-courier@example.bz' } } },
+      data: { availability: 'OFFLINE' },
+    });
+    const r = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+
+    const boardLeg = async () => {
+      const list = await get(admin, 'admin/logistics/shipments?pageSize=100');
+      expect(list.status).toBe(200);
+      const shipment = list.body.rows.find((s: { id: string }) => s.id === r.body.id);
+      return shipment.legs.find((l: { id: string }) => l.id === leg.id);
+    };
+    const detailLeg = async () => {
+      const detail = await get(admin, `admin/logistics/shipments/${r.body.reference}`);
+      expect(detail.status).toBe(200);
+      return detail.body.legs.find((l: { id: string }) => l.id === leg.id);
+    };
+
+    expect((await boardLeg()).needsDriverReason).toBe('UNAVAILABLE');
+    const detailUnavailable = await detailLeg();
+    expect(detailUnavailable.needsDriverReason).toBe('UNAVAILABLE');
+    expect(detailUnavailable.dispatchUnavailableAt).not.toBeNull();
+    expect(detailUnavailable.dispatchExhaustedAt).toBeNull();
+
+    // Same leg, now also EXHAUSTED — EXHAUSTED must win on BOTH endpoints,
+    // not just the board, or the two screens disagree again.
+    await ctx.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { dispatchExhaustedAt: new Date() } });
+    expect((await boardLeg()).needsDriverReason).toBe('EXHAUSTED');
+    const detailExhausted = await detailLeg();
+    expect(detailExhausted.needsDriverReason).toBe('EXHAUSTED');
+    expect(detailExhausted.dispatchExhaustedAt).not.toBeNull();
+
+    // The customer reads the identical reference through their own
+    // endpoint — the field is present on the shape (same serializer, same
+    // leg object literal) but redacted to null for a non-staff audience,
+    // same as every other staff-only field this serializer already gates.
+    const customerView = await get(customer.cookies, `shipping/${r.body.reference}`);
+    expect(customerView.status).toBe(200);
+    const customerLeg = customerView.body.legs.find((l: { id: string }) => l.id === leg.id);
+    expect(customerLeg.needsDriverReason).toBeNull();
+    expect(customerLeg.dispatchExhaustedAt).toBeNull();
+    expect(customerLeg.dispatchUnavailableAt).toBeNull();
+  });
+});
+
 describe('a blocked leg is still safely cancellable and refundable', () => {
   it('cancels a TEMPORARILY_UNAVAILABLE shipment before it moves and refunds in full', async () => {
     const customer = await registerCustomer(`cancel_${uniq()}@example.com`);
