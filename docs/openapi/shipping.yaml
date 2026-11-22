@@ -1534,6 +1534,33 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/profile/resubmit:
+    post:
+      tags: [ShippingProvider]
+      summary: REJECTED -> PENDING, carrier-initiated (CUSTOMER role; audited)
+      description: >-
+        D5's one self-service status transition. No body — there is nothing
+        to submit beyond "review me again"; a carrier editing what was wrong
+        uses PATCH profile first. Lands on PENDING, which carries zero
+        operational privilege, so this is not an escalation. This is NOT the
+        same door as the admin's own `reopen`/`reapply` on
+        /admin/logistics/providers/{id} (also PENDING-for-review paths, but
+        admin-triggered): this is the carrier's OWN action, and it is the
+        only one of the nine status-lifecycle edges a carrier may trigger
+        themselves. In particular, a REVOKED carrier CANNOT reach PENDING
+        this way or any other self-service way — only an admin's `reapply`
+        can move a REVOKED organization again; there is no carrier-initiated
+        edge out of REVOKED anywhere in this API. 400 if the carrier's
+        current status is not REJECTED, 404 if no application exists yet.
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/provider/legs:
     get:
       tags: [ShippingProvider]
@@ -1562,6 +1589,103 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs/{id}/code:
+    get:
+      tags: [ShippingProvider]
+      summary: My organization's own handoff code for this leg (SHIPPING_PROVIDER role)
+      description: >-
+        "MDF-611: the carrier's own code to present at the destination hub
+        counter — the LINE_HAUL analogue of DriverShippingController's
+        `/driver/shipping-jobs/:id/code`. Always `kind: 'handoff'` (a
+        LINE_HAUL leg has no pickup code of its own to present) — kept in
+        the same shape as that endpoint for contract parity, not a narrower
+        one invented here." (quoted from this route's own doc comment).
+        Refuses until the leg has arrived at its destination terminal, and
+        once the leg is COMPLETED or CANCELLED the code is no longer valid
+        — the exposure window is no wider than the window in which the code
+        can actually be used. Org ownership is asserted first; a foreign
+        leg answers 404 exactly like a missing one.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: The leg's own handoff code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind: { type: string, const: handoff }
+                  code: { type: [string, "null"] }
+                  attempts: { type: integer }
+        "400": { description: "Not a LINE_HAUL leg, the leg is already finished, or it has not yet arrived" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs/{id}/accept:
+    post:
+      tags: [ShippingProvider]
+      summary: Accept a proposed leg (SHIPPING_PROVIDER role; audited)
+      description: >-
+        MDF-COURIER D3, mutual consent: the admin's `POST
+        /admin/logistics/legs/{id}/operator` only PROPOSES an operator; this
+        is the carrier accepting that proposal before depart/arrive/schedule
+        unlock. No body. 400 if the leg was already accepted or already
+        rejected; 409 if the leg changed between read and write (reload and
+        retry). A SUSPENDED or REVOKED organization is refused here even
+        though it still owns the leg: accepting is a NEW commitment, not a
+        continuation of one already made.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The updated leg
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The leg changed before the acceptance could be recorded — reload and try again" }
+  /shipping/provider/legs/{id}/reject:
+    post:
+      tags: [ShippingProvider]
+      summary: Reject a proposed leg (SHIPPING_PROVIDER role; audited)
+      description: >-
+        The other half of D3's mutual consent — the owner's named risk
+        area: a rejected assignment must NOT silently advance the shipment.
+        Clears the leg back to unassigned and alerts the operations team
+        (logistics.read); does NOT set the leg's own `status` to EXCEPTION —
+        nothing is wrong with the parcel, only with who is carrying it.
+        `reason` is required and goes to the admin alert, not to the
+        carrier-visible side of anything. Unlike accept, this is NOT status-
+        gated: giving back work a suspended or revoked org was never going
+        to fulfil is the intended behaviour, not a hole. 400 if the leg was
+        already rejected, or already accepted (once accepted this is no
+        longer a rejectable proposal — see `canReject` on the response).
+        409 if the leg changed between read and write. The response is the
+        caller's own leg shape one more time, for symmetry with every other
+        provider action — but by the time it is returned the leg no longer
+        belongs to their organization.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+      responses:
+        "201":
+          description: The leg, one last time, now unassigned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The leg changed before the rejection could be recorded — reload and try again" }
   /shipping/provider/legs/{id}/depart:
     post:
       tags: [ShippingProvider]
@@ -1648,6 +1772,37 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/ProviderRouteBrief" } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /shipping/provider/routes/available:
+    get:
+      tags: [ShippingProvider]
+      summary: Every active, unclaimed route on my side of the simulation boundary (MDF-526)
+      description: >-
+        How a carrier finds a route id to claim, without being handed or
+        typing one it cannot see named by hub. Gated by the SAME AND-gate
+        `claim` itself enforces (carrier org status APPROVED, AND-ed with
+        the SHIPPING_PROVIDER role status) — claiming is a new commitment,
+        so a SUSPENDED or REVOKED organization must not even be able to
+        enumerate what is newly claimable. The response is NOT a bare
+        array: `statusGateEligible`/`statusGateReason` report whether ANY
+        of the caller's organizations currently passes that gate (the
+        common case is exactly one org) BEFORE `routes` is considered;
+        `routes` is an empty array whenever the gate fails, disclosing
+        nothing new to an organization that could not act on it anyway.
+        Read-only and advisory — never a reservation. `claim`'s own
+        compare-and-set is the only authority on who actually gets a route.
+      responses:
+        "200":
+          description: The gate result, and the matching unclaimed routes if it passes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusGateEligible: { type: boolean }
+                  statusGateReason: { type: [string, "null"] }
+                  routes: { type: array, items: { $ref: "#/components/schemas/ProviderRouteBrief" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /shipping/provider/routes/{id}/schedule:
     get:
       tags: [ShippingProvider]
@@ -1731,6 +1886,140 @@ paths:
               schema: { type: object, properties: { removed: { type: boolean, const: true } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: "Exception not found, or its route is not one of my organizations'" }
+  /shipping/provider/routes/{id}/claim:
+    post:
+      tags: [ShippingProvider]
+      summary: Claim an existing, unclaimed route (SHIPPING_PROVIDER role; audited)
+      description: >-
+        "A carrier CLAIMS an EXISTING, currently-UNASSIGNED route — never
+        creates one, and never touches its price or mode. Those stay
+        admin-entered business configuration." (quoted from this route's
+        own doc comment, `claimRoute` in shipping-provider.service.ts).
+        `providerProfileId` in the body is optional, resolved to the
+        caller's own organization when they belong to exactly one, and
+        required only when genuinely ambiguous. Any ACTIVE member may
+        claim on behalf of their org, not owner-only — this is an
+        operational act like depart/arrive/schedule, not a membership
+        change. Status-gated exactly like accepting a leg proposal: a
+        PENDING/SUSPENDED/REVOKED organization gets 400. 409 if another
+        carrier claimed the route first (reload and try again). The
+        response is the caller's organization's full route list after the
+        claim, not only the one route just claimed.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { providerProfileId: { type: string } }
+      responses:
+        "201":
+          description: My organization's routes, including the one just claimed
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderRouteBrief" } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Another carrier claimed this route first — reload and try again" }
+  /shipping/provider/routes/{id}/release:
+    post:
+      tags: [ShippingProvider]
+      summary: Give up a route my organization currently operates (SHIPPING_PROVIDER role; audited)
+      description: >-
+        The reverse of claim. Scoped exactly like depart/arrive/schedule —
+        a cross-org route id answers 404, never a 403 that would confirm
+        the route exists. Deliberately NOT status-gated: giving up a route
+        is not a new commitment, so a suspended or revoked organization may
+        still release one. 409 if the route changed before the release
+        could be recorded. The response is the caller's organization's
+        full remaining route list, not only the one just released.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      responses:
+        "201":
+          description: My organization's remaining routes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderRouteBrief" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The route changed before it could be released — reload and try again" }
+  # ---- Carrier own-membership self-service (MDF-COURIER) ----
+  # Same shape as the admin members door (/admin/logistics/providers/{id}/members,
+  # above), but scoped to the caller's OWN organization, and gated by a THIRD
+  # check beyond role + org-membership: only the org's OWNER membership may
+  # add or end anyone else here, exactly mirroring the asymmetry the admin
+  # door already enforces. A plain 403 ("Only an organization owner may
+  # manage its members") if the caller is not that OWNER.
+  /shipping/provider/members:
+    get:
+      tags: [ShippingProvider]
+      summary: My organization's current (ACTIVE) roster (SHIPPING_PROVIDER role, OWNER only)
+      responses:
+        "200":
+          description: Active members only, owner first then staff, oldest first within each
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderSelfMember" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Not SHIPPING_PROVIDER, or not this organization's OWNER" }
+    post:
+      tags: [ShippingProvider]
+      summary: Add or reactivate a member of my own organization (SHIPPING_PROVIDER role, OWNER only; audited)
+      description: >-
+        Delegates to the SAME write the admin door uses — one
+        implementation, resolving providerProfileId from the caller's own
+        org here instead of a path param. One row per person per org:
+        re-adding reactivates the existing row rather than growing a
+        second one. 400 if `userId` names the existing OWNER being
+        re-added as STAFF — the owner's role never changes through this
+        route; it ends only with the organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string }
+                memberRole: { type: string, enum: [OWNER, STAFF] }
+      responses:
+        "201":
+          description: The membership row
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderSelfMember" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Not SHIPPING_PROVIDER, or not this organization's OWNER" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/members/{userId}/end:
+    post:
+      tags: [ShippingProvider]
+      summary: End a STAFF member's own-organization membership (SHIPPING_PROVIDER role, OWNER only; audited)
+      description: >-
+        Delegates to the same write the admin door uses. 400 if `userId`
+        names the OWNER — the owner's membership ends with the
+        organization itself, never through this route (deactivate the
+        carrier profile instead). 404 if there is no active membership to
+        end.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: The ended membership row
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderSelfMember" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Not SHIPPING_PROVIDER, or not this organization's OWNER" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/providers:
     get:
       tags: [AdminLogistics]
@@ -3463,12 +3752,31 @@ components:
         status: { type: string, enum: [ACTIVE, ENDED] }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, "null"], format: date-time }
+    ProviderSelfMember:
+      type: object
+      description: >-
+        A carrier organization's own membership row, self-service view —
+        deliberately leaner than the admin roster's ProviderMember (no
+        name/email): an admin needs a name to confirm against before
+        ending someone's access; an owner managing their own org already
+        knows who they are adding or ending.
+      properties:
+        id: { type: string }
+        providerProfileId: { type: string }
+        userId: { type: string }
+        memberRole: { type: string, enum: [OWNER, STAFF] }
+        status: { type: string, enum: [ACTIVE, ENDED] }
+        endedAt: { type: [string, "null"], format: date-time }
     ProviderLeg:
       type: object
       description: >-
         The carrier-safe projection of a transport leg. A hand-written
         allowlist — sender and recipient names, phones, addresses, door
         coordinates, every PIN and the customer's price never appear.
+        `operatorAcceptedAt`/`operatorRejectedAt`/`canAccept`/`canReject`
+        were missing from this schema until the D3 mutual-consent accept/
+        reject routes were documented — present on every real response
+        that returns this shape, not only those two routes' own responses.
       properties:
         id: { type: string }
         reference: { type: string }
@@ -3490,6 +3798,13 @@ components:
         carrierName: { type: [string, "null"] }
         carrierBookingRef: { type: [string, "null"] }
         isTest: { type: boolean }
+        operatorAcceptedAt:
+          type: [string, "null"]
+          format: date-time
+          description: "Both this and operatorRejectedAt null = a live operator proposal awaiting this org's response."
+        operatorRejectedAt: { type: [string, "null"], format: date-time }
+        canAccept: { type: boolean, description: "operatorAcceptedAt and operatorRejectedAt are both null" }
+        canReject: { type: boolean, description: "operatorAcceptedAt and operatorRejectedAt are both null" }
         canDepart: { type: boolean, description: "READY or IN_PROGRESS, not yet departed, and its turn has come" }
         canArrive: { type: boolean, description: "IN_PROGRESS and not yet arrived" }
         canSchedule: { type: boolean, description: "PENDING, READY, IN_PROGRESS or EXCEPTION — every status except the two terminal ones (BMPL-346)" }
