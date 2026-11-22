@@ -219,7 +219,62 @@ describe('funding a wallet', () => {
     await post(c.cookies, 'wallet/top-up', { amountMinor: 7500 });
     const r = await get(c.cookies, 'wallet/transactions');
     expect(r.status).toBe(200);
-    expect(r.body[0]).toMatchObject({ type: 'TOPUP', direction: 'IN', signedMinor: 7500, isTest: true });
+    expect(r.body.rows[0]).toMatchObject({ type: 'TOPUP', direction: 'IN', signedMinor: 7500, isTest: true });
+  });
+
+  it('paginates the history server-side — a page smaller than the result set is disjoint from the next, and the total never moves', async () => {
+    const c = await makeTestCustomer();
+    for (let i = 0; i < 3; i++) await post(c.cookies, 'wallet/top-up', { amountMinor: 1000 + i });
+
+    const defaultPage = await get(c.cookies, 'wallet/transactions');
+    expect(defaultPage.status).toBe(200);
+    expect(defaultPage.body).toMatchObject({ page: 1, pageSize: 20 });
+    expect(defaultPage.body.total).toBeGreaterThanOrEqual(3);
+
+    const page1 = await get(c.cookies, 'wallet/transactions?page=1&pageSize=2');
+    const page2 = await get(c.cookies, 'wallet/transactions?page=2&pageSize=2');
+    expect(page1.status).toBe(200);
+    expect(page2.status).toBe(200);
+    expect(page1.body.rows).toHaveLength(2);
+    expect(page1.body.total).toBe(page2.body.total);
+    const page1Ids = page1.body.rows.map((t: { id: string }) => t.id);
+    const page2Ids = page2.body.rows.map((t: { id: string }) => t.id);
+    // Disjoint pages, newest-first: nothing on page 1 reappears on page 2.
+    expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
+  });
+
+  it('pages stay disjoint even when every transaction shares one createdAt — the sort has a tiebreaker', async () => {
+    const c = await makeTestCustomer();
+    for (let i = 0; i < 3; i++) await post(c.cookies, 'wallet/top-up', { amountMinor: 2000 + i });
+
+    // The point of this test. Ordering by createdAt alone is only stable while the
+    // timestamps differ, which they usually do by luck of the clock. Force the tie
+    // that luck hides: three transactions on the same instant. With a single-key
+    // sort the database may return them in any order per query, so paging with
+    // skip/take can show one row twice and drop another. The ids below must still
+    // come back as three distinct rows covering the whole set.
+    const mine = await ctx.prisma.walletTransaction.findMany({
+      where: { entries: { some: { account: { userId: c.userId } } } },
+      select: { id: true },
+    });
+    expect(mine.length).toBeGreaterThanOrEqual(3);
+    const sameInstant = new Date('2026-11-22T12:00:00.000Z');
+    await ctx.prisma.walletTransaction.updateMany({
+      where: { id: { in: mine.map((t) => t.id) } },
+      data: { createdAt: sameInstant },
+    });
+
+    const seen: string[] = [];
+    for (let page = 1; page <= mine.length; page++) {
+      const r = await get(c.cookies, `wallet/transactions?page=${page}&pageSize=1`);
+      expect(r.status).toBe(200);
+      expect(r.body.total).toBe(mine.length);
+      expect(r.body.rows).toHaveLength(1);
+      seen.push(r.body.rows[0].id);
+    }
+    // No repeats and nothing missing: walking one row at a time saw each exactly once.
+    expect(new Set(seen).size).toBe(mine.length);
+    expect([...seen].sort()).toEqual(mine.map((t) => t.id).sort());
   });
 });
 
@@ -473,7 +528,7 @@ describe('the boundaries around other people\u2019s money', () => {
     const owner = await makeTestCustomer();
     await post(owner.cookies, 'wallet/top-up', { amountMinor: 5000 });
     const mine = await get(owner.cookies, 'wallet/transactions');
-    const id = mine.body[0].id;
+    const id = mine.body.rows[0].id;
 
     const stranger = await registerCustomer(`stranger_${uniq()}@example.com`);
     const peek = await get(stranger.cookies, `wallet/transactions/${id}`);

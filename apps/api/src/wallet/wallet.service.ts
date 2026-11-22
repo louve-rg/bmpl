@@ -545,33 +545,48 @@ export class WalletService {
     };
   }
 
-  /** The customer's own transaction history, newest first. */
-  async listForUser(userId: string, take = 50) {
-    const rows = await this.prisma.walletTransaction.findMany({
-      where: { entries: { some: { account: { userId } } } },
-      orderBy: { createdAt: 'desc' },
-      take,
-      include: { entries: { include: { account: { select: { id: true, type: true, userId: true } } } } },
-    });
-    return rows.map((t) => {
-      const mine = t.entries.filter((e) => e.account.userId === userId);
-      // Signed from the CUSTOMER's point of view: a credit to their account is
-      // money in, a debit is money out. The raw entries are symmetrical; the
-      // customer only cares about their own side of them.
-      const signedMinor = mine.reduce((acc, e) => acc + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
-      return {
-        id: t.id,
-        type: t.type,
-        status: t.status,
-        currency: t.currency,
-        description: t.description,
-        isTest: t.isTest,
-        signedMinor: money(signedMinor),
-        direction: signedMinor >= 0n ? ('IN' as const) : ('OUT' as const),
-        postedAt: t.postedAt,
-        createdAt: t.createdAt,
-      };
-    });
+  /** The customer's own transaction history, newest first, server-paginated. */
+  async listForUser(userId: string, pagination: { page?: number; pageSize?: number } = {}) {
+    const page = pagination.page ?? 1;
+    const pageSize = pagination.pageSize ?? 20;
+    const where: Prisma.WalletTransactionWhereInput = { entries: { some: { account: { userId } } } };
+    const [rows, total] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where,
+        // Two keys, not one. createdAt is not unique - transactions posted in the
+        // same millisecond have no defined order, so with skip/take a tied row
+        // could repeat on one page and vanish from the next. id breaks every tie.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { entries: { include: { account: { select: { id: true, type: true, userId: true } } } } },
+      }),
+      this.prisma.walletTransaction.count({ where }),
+    ]);
+    return {
+      rows: rows.map((t) => {
+        const mine = t.entries.filter((e) => e.account.userId === userId);
+        // Signed from the CUSTOMER's point of view: a credit to their account is
+        // money in, a debit is money out. The raw entries are symmetrical; the
+        // customer only cares about their own side of them.
+        const signedMinor = mine.reduce((acc, e) => acc + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+        return {
+          id: t.id,
+          type: t.type,
+          status: t.status,
+          currency: t.currency,
+          description: t.description,
+          isTest: t.isTest,
+          signedMinor: money(signedMinor),
+          direction: signedMinor >= 0n ? ('IN' as const) : ('OUT' as const),
+          postedAt: t.postedAt,
+          createdAt: t.createdAt,
+        };
+      }),
+      total,
+      page,
+      pageSize,
+    };
   }
 
 
@@ -582,7 +597,7 @@ export class WalletService {
       include: { entries: { include: { account: { select: { id: true, type: true, userId: true, currency: true } } } } },
     });
     if (!t || !t.entries.some((e) => e.account.userId === userId)) throw new NotFoundException('Wallet transaction not found.');
-    return this.shape(t);
+    return this.shape(t, userId);
   }
 
   async adminList() {
@@ -722,10 +737,16 @@ export class WalletService {
     return rows.map((a) => ({ id: a.id, type: a.type, currency: a.currency, status: a.status, cachedBalanceMinor: money(a.cachedBalanceMinor) }));
   }
 
+  /**
+   * @param viewerUserId the customer reading this, when there is exactly one.
+   *   Given it, `isCustomer` means "this entry is YOUR wallet"; without it (the
+   *   admin list, which has no single viewer) it keeps its older, weaker meaning
+   *   of "some user's wallet rather than a system account".
+   */
   private shape(t: {
     id: string; type: string; status: string; currency: string; isTest: boolean; reference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
     entries: Array<{ id: string; direction: string; amountMinor: bigint; account: { type: string; userId: string | null } }>;
-  }) {
+  }, viewerUserId?: string) {
     return {
       id: t.id,
       type: t.type,
@@ -739,7 +760,12 @@ export class WalletService {
       description: t.description,
       postedAt: t.postedAt,
       createdAt: t.createdAt,
-      entries: t.entries.map((e) => ({ direction: e.direction, amountMinor: money(e.amountMinor), accountType: e.account.type, isCustomer: !!e.account.userId })),
+      // "Is this MY wallet", not merely "is this somebody's wallet". The customer
+      // detail page prints "Your wallet" for a true entry, so the weaker test would
+      // mislabel a second person's wallet the day a user-to-user movement exists.
+      // No such movement exists today - there is no transfer endpoint - so this is
+      // closing the gap before a feature can walk into it, not fixing a live bug.
+      entries: t.entries.map((e) => ({ direction: e.direction, amountMinor: money(e.amountMinor), accountType: e.account.type, isCustomer: viewerUserId ? e.account.userId === viewerUserId : !!e.account.userId })),
       balanced: t.entries.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n) === 0n,
     };
   }

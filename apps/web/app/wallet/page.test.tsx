@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WalletPage from './page';
-import type { WalletSummary, WalletTransactionRow, TestFundingStatus } from '../../lib/wallet';
+import type { WalletSummary, WalletTransactionRow, WalletTransactionHistory, TestFundingStatus } from '../../lib/wallet';
 
 // Same convention as apps/web/app/checkout/page.test.tsx -- react-dom's
 // act() checks this flag; no @testing-library/react dependency in this repo.
@@ -36,10 +36,13 @@ const SUMMARY: WalletSummary = {
   exists: true,
 };
 const ROWS: WalletTransactionRow[] = [];
+// The envelope the server now returns. Before paging this mock resolved to a bare
+// array; the page reads .rows and .total, so it has to resolve to the envelope.
+const HISTORY: WalletTransactionHistory = { rows: ROWS, total: 0, page: 1, pageSize: 20 };
 const TEST_FUNDING: TestFundingStatus = { enabled: false };
 
 const walletSummary = vi.fn(() => Promise.resolve(SUMMARY));
-const walletTransactions = vi.fn(() => Promise.resolve(ROWS));
+const walletTransactions = vi.fn((_page = 1, _pageSize = 20) => Promise.resolve(HISTORY));
 const walletTestFundingStatus = vi.fn(() => Promise.resolve(TEST_FUNDING));
 const walletTopUp = vi.fn((_amountMinor: number) => Promise.resolve(SUMMARY));
 const walletClaimTestFunds = vi.fn(() => Promise.resolve({ transactionId: 't1', creditedMinor: 0, cumulativeMinor: 0, remainingMinor: 0, wallet: SUMMARY }));
@@ -48,7 +51,7 @@ vi.mock('../../lib/wallet', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/wallet')>()),
   walletApi: {
     summary: () => walletSummary(),
-    transactions: () => walletTransactions(),
+    transactions: (page?: number, pageSize?: number) => walletTransactions(page, pageSize),
     testFundingStatus: () => walletTestFundingStatus(),
     topUp: (amountMinor: number) => walletTopUp(amountMinor),
     claimTestFunds: () => walletClaimTestFunds(),

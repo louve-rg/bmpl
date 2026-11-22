@@ -105,7 +105,7 @@ describe('self-service UAT wallet funding', () => {
     // N · it reads back in their own history, with no system account leaked.
     const history = await get(me.cookies, 'wallet/transactions');
     expect(history.status).toBe(200);
-    const row = history.body.find((t: { id: string }) => t.id === res.body.transactionId);
+    const row = history.body.rows.find((t: { id: string }) => t.id === res.body.transactionId);
     expect(row).toMatchObject({ description: 'Self-Service Test Credit', direction: 'IN', signedMinor: CAP, isTest: true });
     expect(JSON.stringify(history.body)).not.toContain('SYSTEM_TOPUP_CLEARING');
   });
@@ -248,7 +248,7 @@ describe('self-service UAT wallet funding', () => {
     // Both credits stand, as separate transactions, and the balance is the sum.
     const summary = await get(me.cookies, 'wallet');
     expect(summary.body.totalMinor).toBe(CAP + 8_000);
-    const descriptions = (await get(me.cookies, 'wallet/transactions')).body.map((t: { description: string }) => t.description);
+    const descriptions = (await get(me.cookies, 'wallet/transactions')).body.rows.map((t: { description: string }) => t.description);
     expect(descriptions).toContain('Administrative Test Credit');
     expect(descriptions).toContain('Self-Service Test Credit');
   });
