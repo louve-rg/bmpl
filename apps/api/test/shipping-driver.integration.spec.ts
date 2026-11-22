@@ -1507,9 +1507,13 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
 
     const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
     expect(after.status).toBe('EXCEPTION');
-    // Escalation only — the driver's own acceptance is never undone and no
-    // terminal action fires on an unverified report.
-    expect(after.courierStatus).toBe('DRIVER_ACCEPTED');
+    // SHIP-S1: report-issue goes through the same flagException() as a
+    // staff flag (MDF-232, see the comment below), so the driver's own
+    // screen now reads EXCEPTION too, not a stale DRIVER_ACCEPTED — the
+    // escalation is still never undone, just recorded in
+    // courierStatusBeforeException instead of left in courierStatus.
+    expect(after.courierStatus).toBe('EXCEPTION');
+    expect(after.courierStatusBeforeException).toBe('DRIVER_ACCEPTED');
     expect(after.exceptionReason).toBe('Arrived at the pickup address; nobody answered after repeated attempts.');
     expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('EXCEPTION');
 
@@ -1614,13 +1618,19 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Flat tire, pulled over.' })).status).toBe(201);
     const flagged = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
     expect(flagged.status).toBe('EXCEPTION');
-    expect(flagged.courierStatus).toBe('PICKUP_CONFIRMED'); // untouched, same as a staff flag
+    // SHIP-S1: same flagException() as a staff flag, so courierStatus is now
+    // EXCEPTION too (previously left stale at PICKUP_CONFIRMED, which is the
+    // defect this card closes) — the prior value is preserved, just in
+    // courierStatusBeforeException rather than left sitting in courierStatus.
+    expect(flagged.courierStatus).toBe('EXCEPTION');
+    expect(flagged.courierStatusBeforeException).toBe('PICKUP_CONFIRMED');
 
     const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
-    expect(after.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(after.courierStatus).toBe('EXCEPTION');
+    expect(after.courierStatusBeforeException).toBe('PICKUP_CONFIRMED');
     expect(after.inTransitAt).toBeNull();
   });
 });

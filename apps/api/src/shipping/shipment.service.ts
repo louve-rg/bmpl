@@ -6347,9 +6347,6 @@ export class ShipmentService {
     if (leg.assignedDriverProfileId == null) {
       throw new BadRequestException('No courier is assigned to this leg yet.');
     }
-    if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
-      throw new BadRequestException('This leg is not ready to be released to its courier.');
-    }
 
     const presentedCourierUserId = input.presentedCourierUserId ?? (
       await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
@@ -6363,6 +6360,22 @@ export class ShipmentService {
       // transaction would roll back when that transaction throws, and the
       // counter would never climb.
       await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
+    }
+
+    // SHIP-S1: moved below verifyLegPinOrThrow, not above it. Since
+    // flagException now also writes courierStatus (this card's whole fix),
+    // a leg locked out by five bad codes reads courierStatus === 'EXCEPTION'
+    // here, same as any other committed-state exception. Checking that
+    // BEFORE the pin call would throw this generic "not ready" 400 and bury
+    // verifyLegPinOrThrow's own specific, correct 403 ("too many incorrect
+    // codes") for every attempt after the lockout — the identical
+    // assertNotException-vs-assertAction shadowing this PR already fixed in
+    // ShipmentDriverService, one call site this file's own audit missed.
+    // Checking it here instead means the lockout's 403 still fires first,
+    // and this stays only a backstop for every other "not DRIVER_ACCEPTED"
+    // reason (already released, already in transit, ...).
+    if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
+      throw new BadRequestException('This leg is not ready to be released to its courier.');
     }
 
     // MDF-926 item 3: folded into ONE transaction with the leg-start write —
