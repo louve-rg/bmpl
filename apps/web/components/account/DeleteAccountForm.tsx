@@ -141,8 +141,9 @@ export function DeleteAccountForm() {
       <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">
         This anonymizes your profile -- your name, contact details and saved addresses are removed and your login is
         disabled. It does <strong>not</strong> erase your history: completed orders and shipments keep their stored
-        recipient name and address, and your wallet keeps its past transaction history, by policy, and will show
-        &ldquo;Deleted User&rdquo; in place of your account going forward. This cannot be undone.
+        recipient name and address, and your wallet keeps its past transaction history, by policy. Wherever your name
+        would show on any of those, it will show &ldquo;Deleted User&rdquo; in place of your account going forward.
+        This cannot be undone.
       </p>
       {/*
        * Required (acceptance round 1): every sentence here is sourced to a
