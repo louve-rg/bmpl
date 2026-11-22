@@ -12,6 +12,7 @@ import {
   canPerform,
   userInitials,
   type DeliveryAction,
+  type DeliveryEntityKind,
   type DeliveryStatus,
 } from '@bmpl/shared';
 import type { AuditAction } from '@bmpl/shared';
@@ -45,6 +46,7 @@ export const AUDIT_FOR_ACTION: Record<DeliveryAction, AuditAction> = {
   IN_TRANSIT: 'DELIVERY_IN_TRANSIT',
   ARRIVING: 'DELIVERY_ARRIVING',
   DELIVER: 'DELIVERY_COMPLETED',
+  RAISE_EXCEPTION: 'DELIVERY_EXCEPTION_RAISED',
 };
 
 /** Full relation graph needed to serialize a delivery for any audience. */
@@ -130,8 +132,8 @@ export class DeliveryCoreService {
   ) {}
 
   /** Guard: throw unless `action` is legal from `current`. */
-  assertAction(action: DeliveryAction, current: DeliveryStatus): void {
-    if (!canPerform(action, current)) {
+  assertAction(action: DeliveryAction, current: DeliveryStatus, entity: DeliveryEntityKind = 'DELIVERY'): void {
+    if (!canPerform(action, current, entity)) {
       const label = DELIVERY_STATUS_LABELS[current] ?? current;
       throw new BadRequestException(`Cannot ${action.toLowerCase().replace('_', ' ')} a delivery that is "${label}".`);
     }
@@ -226,17 +228,47 @@ export class DeliveryCoreService {
     // Display name only — never legal name, phone, documents, or emergency contact.
     // The face is the point here: a customer opening the door should be able to
     // check that the person in front of them is the driver they were assigned.
+    //
+    // Pre-existing display defect, found from the account-deletion side (not
+    // part of the MDF-927 exception work, but this is the file that already
+    // touches this method): initials must come from the name actually shown,
+    // not from a different source. displayName is a DriverProfile field a
+    // driver sets themselves — a nickname, by design — while initials were
+    // derived from the user row's legal firstName/lastName. Any nicknamed
+    // driver showed, and still would have shown, a nickname beside the
+    // initials of a legal name it doesn't share ("Big Mike" next to "MS").
+    // userInitials() already handles a single-string name correctly (falls
+    // back to its first two letters), so splitting displayName into its
+    // first and last word and reusing it needs no new helper.
+    const [firstWord, ...rest] = d.displayName.trim().split(/\s+/);
+    const lastWord = rest.length ? rest[rest.length - 1] : undefined;
     return {
       displayName: d.displayName,
       ratingAverage: d.ratingAverage,
       completedDeliveries: d.completedDeliveries,
-      initials: userInitials(d.user.firstName, d.user.lastName),
+      initials: userInitials(firstWord, lastWord),
       avatarUrl: publicAvatarUrl(d.user),
     };
   }
 
   timeline(d: DeliveryWithGraph) {
     return d.timeline.map((t) => ({ event: t.event, fromStatus: t.fromStatus, toStatus: t.toStatus, actorRole: t.actorRole, note: t.note, createdAt: t.createdAt }));
+  }
+
+  /**
+   * MDF-927: `timeline()`'s `note` is whichever actor's own free text landed
+   * on that transition — an admin's cancellationReason, a driver's
+   * declineReason or exceptionReason, ... None of that is safe for an
+   * audience other than the actor who wrote it (and staff/admin, who already
+   * see it all operationally): a driver's own exceptionReason is surfaced
+   * separately as its own field for exactly that driver, and the customer
+   * gets the fixed, status-derived statusLabel instead of anyone's words. So
+   * DRIVER and CUSTOMER both get the event/status/time shape with every
+   * actor's note stripped, never the unfiltered timeline ADMIN and VENDOR
+   * receive.
+   */
+  private redactedTimeline(d: DeliveryWithGraph) {
+    return this.timeline(d).map(({ note: _note, ...rest }) => rest);
   }
 
   assignmentHistory(d: DeliveryWithGraph) {
@@ -296,6 +328,7 @@ export class DeliveryCoreService {
         arrivingAt: d.arrivingAt,
         deliveredAt: d.deliveredAt,
         cancelledAt: d.cancelledAt,
+        exceptionAt: d.exceptionAt,
       },
       placedAt: order.placedAt,
       createdAt: d.createdAt,
@@ -357,6 +390,8 @@ export class DeliveryCoreService {
 
       return {
         ...base,
+        // See redactedTimeline()'s own comment: never another actor's words.
+        timeline: this.redactedTimeline(d),
         // Area only until accepted; full fulfilment details afterwards.
         deliveryAddress: driverAddress,
         /** Whether `deliveryAddress` is the full address or the area-only view. */
@@ -389,6 +424,11 @@ export class DeliveryCoreService {
         // Whether the driver still needs a PIN (never the PIN itself).
         requiresPickupPin: !!d.pickupPin && d.pickupVerificationStatus === 'PENDING',
         requiresDeliveryPin: !!d.deliveryPin && d.deliveryVerificationStatus === 'PENDING',
+        // MDF-927: the driver's OWN report, read back to the driver who
+        // wrote it. Never a staff-entered reason (cancellationReason /
+        // reassignmentReason) — those are not in this audience's payload
+        // at all, by the same rule that keeps every other staff note out.
+        exceptionReason: d.exceptionReason,
       };
     }
 
@@ -399,6 +439,8 @@ export class DeliveryCoreService {
       // always returns the full set of steps, reached or not.
       return {
         ...base,
+        // See redactedTimeline()'s own comment: never another actor's words.
+        timeline: this.redactedTimeline(d),
         deliveryAddress,
         items,
         podPhotoUrls,
@@ -413,6 +455,7 @@ export class DeliveryCoreService {
           arrivingAt: d.arrivingAt,
           deliveredAt: d.deliveredAt,
           cancelledAt: d.cancelledAt,
+          exceptionAt: d.exceptionAt,
         }),
       };
     }
@@ -443,6 +486,11 @@ export class DeliveryCoreService {
       deliveryPinAttempts: d.deliveryPinAttempts,
       assignedByUserId: d.assignedByUserId,
       podPhotoUrls,
+      // MDF-927: the driver's own report, operationally needed here to
+      // decide what to do next. cancellationReason/reassignmentReason are
+      // deliberately NOT added alongside it — this change doesn't touch
+      // their pre-existing (also absent) exposure, in or out of scope.
+      exceptionReason: d.exceptionReason,
       assignmentHistory: this.assignmentHistory(d),
       payment: order.payment ? { status: order.payment.status, amountMinor: money(order.payment.amountMinor), currency: order.payment.currency } : null,
       orderStatus: order.status,

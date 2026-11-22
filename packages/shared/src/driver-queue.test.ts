@@ -26,6 +26,10 @@ describe('driverViewForStatus', () => {
     expect(driverViewForStatus('ARRIVING', ACCEPTED)).toBe('active');
   });
 
+  it('MDF-927: keeps a reported EXCEPTION in active — the driver still physically holds it', () => {
+    expect(driverViewForStatus('EXCEPTION', ACCEPTED)).toBe('active');
+  });
+
   it('maps DELIVERED to completed', () => {
     expect(driverViewForStatus('DELIVERED', ACCEPTED)).toBe('completed');
   });
@@ -125,6 +129,11 @@ describe('canReorderQueueItem', () => {
     expect(canReorderQueueItem('DELIVERED', ACCEPTED)).toBe(false);
     expect(canReorderQueueItem('CANCELLED', ACCEPTED)).toBe(false);
     expect(reorderBlockedReason('ARRIVING', ACCEPTED)).toBeTruthy();
+  });
+
+  it('MDF-927: pins a reported EXCEPTION out of the route too, with its own reason', () => {
+    expect(canReorderQueueItem('EXCEPTION', ACCEPTED)).toBe(false);
+    expect(reorderBlockedReason('EXCEPTION', ACCEPTED)).toMatch(/problem was reported/i);
   });
 
   it('gives no blocked reason when reordering is allowed', () => {

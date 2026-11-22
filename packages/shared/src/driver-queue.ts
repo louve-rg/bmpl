@@ -48,7 +48,9 @@ export const DRIVER_VIEW_DESCRIPTIONS: Record<DriverDeliveryView, string> = {
 export const DRIVER_VIEW_STATUSES: Record<DriverDeliveryView, readonly DeliveryStatus[]> = {
   available: ['ASSIGNED'],
   assigned: ['ASSIGNED', 'DRIVER_ACCEPTED'],
-  active: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'],
+  // MDF-927: EXCEPTION stays in `active` — the driver still physically
+  // holds the job, there is just nothing left for THEM to do with it.
+  active: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING', 'EXCEPTION'],
   completed: ['DELIVERED'],
 };
 
@@ -59,6 +61,7 @@ export const DRIVER_OPEN_STATUSES: readonly DeliveryStatus[] = [
   'PICKUP_CONFIRMED',
   'IN_TRANSIT',
   'ARRIVING',
+  'EXCEPTION',
 ];
 
 export function isDriverDeliveryView(v: string | null | undefined): v is DriverDeliveryView {
@@ -89,6 +92,7 @@ export function driverViewForStatus(
     case 'PICKUP_CONFIRMED':
     case 'IN_TRANSIT':
     case 'ARRIVING':
+    case 'EXCEPTION':
       return 'active';
     case 'DELIVERED':
       return 'completed';
@@ -129,6 +133,8 @@ export function nextDriverAction(
       return { kind: 'ARRIVING', label: 'Mark arriving' };
     case 'ARRIVING':
       return { kind: 'DELIVER', label: 'Complete the delivery' };
+    case 'EXCEPTION':
+      return { kind: 'NONE', label: 'Problem reported — waiting on dispatch' };
     default:
       return { kind: 'NONE', label: 'Nothing to do' };
   }
@@ -178,5 +184,6 @@ export function reorderBlockedReason(
   if (canReorderQueueItem(status, acceptedAt)) return null;
   if (status === 'ASSIGNED' && !acceptedAt) return 'Accept this offer before adding it to your route.';
   if (status === 'ARRIVING') return 'You’re arriving at this drop — finish it before reordering.';
+  if (status === 'EXCEPTION') return 'A problem was reported on this delivery — it is not part of your route until dispatch resolves it.';
   return 'This delivery can no longer be reordered.';
 }

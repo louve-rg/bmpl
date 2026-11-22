@@ -211,6 +211,10 @@ enum AuditAction {
   DELIVERY_PICKUP_CONFIRMED
   DELIVERY_IN_TRANSIT
   DELIVERY_ARRIVING
+  // MDF-927: a driver reported a problem after pickup (recipient unreachable,
+  // wrong address, unsafe handoff) that the existing forward-only lifecycle
+  // had no way to record. See DeliveryStatus.EXCEPTION below.
+  DELIVERY_EXCEPTION_RAISED
   DELIVERY_COMPLETED
   DELIVERY_POD_UPLOADED
   DELIVERY_PICKUP_PIN_FAILED
@@ -1354,6 +1358,16 @@ enum DeliveryStatus {
   PICKUP_CONFIRMED
   IN_TRANSIT
   ARRIVING
+  // MDF-927, owner directive 2026-11-22: the shipment lifecycle's unhappy
+  // ends (failed attempt, exception, cancellation after dispatch, return)
+  // were required for marketplace delivery, which previously had none —
+  // every edge from here moved the delivery FORWARD or not at all. EXCEPTION
+  // is the one way off that track: a driver who reaches PICKUP_CONFIRMED,
+  // IN_TRANSIT or ARRIVING and cannot complete the job reports it here
+  // (RAISE_EXCEPTION, @bmpl/shared `DELIVERY_ACTIONS`) instead of being
+  // stuck with no legal next action. Not terminal — see CANCEL's own `from`
+  // list, the only legal way out of it today.
+  EXCEPTION
   DELIVERED
   CANCELLED
 }
@@ -2132,11 +2146,19 @@ model OrderDelivery {
   deliveredAt       DateTime?
   reassignedAt      DateTime?
   cancelledAt       DateTime?
+  // MDF-927: when the driver themselves raised EXCEPTION (RAISE_EXCEPTION).
+  exceptionAt       DateTime?
 
   declineReason      String?
   reassignmentReason String?
   cancellationReason String?
   deliveryNotes      String?
+  // MDF-927: the driver's own account of what went wrong. Driver-authored,
+  // not staff-authored -- the existing "raw staff reason never reaches a
+  // courier" rule (ShipmentLeg.exceptionReason, shipment.service.ts) governs
+  // the opposite direction and a different field; this one is returned to
+  // the driver who wrote it, never to a different courier.
+  exceptionReason    String?
 
   // ---- Automatic dispatch (M26.3) ----
   // The engine offers a delivery to one driver at a time and rolls forward when

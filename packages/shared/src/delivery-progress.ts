@@ -59,6 +59,8 @@ export interface DeliveryProgressInput {
   arrivingAt: Date | null;
   deliveredAt: Date | null;
   cancelledAt: Date | null;
+  /** MDF-927: a driver-reported post-pickup problem. Freezes progress the same way cancelledAt does. */
+  exceptionAt: Date | null;
 }
 
 /**
@@ -72,6 +74,11 @@ export interface DeliveryProgressInput {
  * A cancelled delivery keeps whatever it achieved and simply has no current
  * step; the caller renders the cancellation itself, which carries a reason this
  * list has no room for.
+ *
+ * MDF-927: an EXCEPTION (a driver-reported problem post-pickup) freezes the
+ * same way, for the same reason — the status label already carries a safe,
+ * fixed sentence ("Delivery problem reported"); the driver's own free-text
+ * reason does not belong here any more than a cancellation's does.
  */
 export function buildDeliveryProgress(input: DeliveryProgressInput): ProgressEntry[] {
   const at: Record<DeliveryProgressStep, Date | null> = {
@@ -92,7 +99,10 @@ export function buildDeliveryProgress(input: DeliveryProgressInput): ProgressEnt
     if (at[step]) lastReached = i;
   });
 
-  const cancelled = !!input.cancelledAt;
+  // MDF-927: EXCEPTION freezes the timeline the same way CANCELLED does —
+  // whatever was reached stays DONE, and there is no live CURRENT step to
+  // park on while the problem is unresolved.
+  const frozen = !!input.cancelledAt || !!input.exceptionAt;
   const finished = !!input.deliveredAt;
 
   return DELIVERY_PROGRESS_STEPS.map((step, i) => ({
@@ -103,7 +113,7 @@ export function buildDeliveryProgress(input: DeliveryProgressInput): ProgressEnt
       i < lastReached || (finished && i <= lastReached)
         ? 'DONE'
         : i === lastReached
-          ? cancelled
+          ? frozen
             ? 'DONE'
             : 'CURRENT'
           : 'PENDING',

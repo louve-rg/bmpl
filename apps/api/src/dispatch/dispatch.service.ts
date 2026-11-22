@@ -346,6 +346,16 @@ export class DispatchService {
     return this.get(deliveryId);
   }
 
+  /**
+   * MDF-927: `from` now also includes EXCEPTION (a driver-reported,
+   * post-pickup problem — packages/shared/dispatch.ts). Deliberate gap,
+   * not an oversight: cancelling from EXCEPTION moves state only. It does
+   * not reverse `inventoryFinalizedAt` (already set at CONFIRM_PICKUP) and
+   * touches no payment/escrow/settlement row — a paid order nobody can
+   * unwind after a failed post-pickup delivery is a real, separate,
+   * owner-level money decision, already raised to the owner, not a step
+   * this edge or this method is authorized to take.
+   */
   async cancel(actor: Actor, deliveryId: string, dto: CancelDeliveryInput) {
     const current = await this.core.loadOrThrow(deliveryId);
     this.core.assertAction('CANCEL', current.status);

@@ -18,6 +18,7 @@ const input = (over: Partial<DeliveryProgressInput> = {}): DeliveryProgressInput
   arrivingAt: null,
   deliveredAt: null,
   cancelledAt: null,
+  exceptionAt: null,
   ...over,
 });
 
@@ -89,5 +90,16 @@ describe('buildDeliveryProgress', () => {
     const entries = buildDeliveryProgress(input({ preparingAt: T(5), cancelledAt: T(7) }));
     expect(entries.some((e) => e.state === 'CURRENT')).toBe(false);
     expect(stateOf(entries, 'PREPARING')).toBe('DONE');
+  });
+
+  it('MDF-927: leaves no step CURRENT when a driver has raised an exception, same as cancelled', () => {
+    // The caller renders the status label ("Delivery problem reported"), a
+    // fixed sentence derived from status — never the driver's own free-text
+    // reason. A step still blinking "in progress" would look like nothing
+    // was wrong.
+    const entries = buildDeliveryProgress(input({ preparingAt: T(5), pickupConfirmedAt: T(20), exceptionAt: T(30) }));
+    expect(entries.some((e) => e.state === 'CURRENT')).toBe(false);
+    expect(stateOf(entries, 'PICKED_UP')).toBe('DONE');
+    expect(stateOf(entries, 'IN_TRANSIT')).toBe('PENDING');
   });
 });
