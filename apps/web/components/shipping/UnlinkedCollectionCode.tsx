@@ -171,9 +171,29 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
         collectionCode ? (
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{collectionCode}</p>
         ) : holdMessage ? (
-          <p className="mt-3 text-sm text-slate-600">
-            <CollectionHoldMessageText message={holdMessage} />
-          </p>
+          <>
+            <p className="mt-3 text-sm text-slate-600">
+              <CollectionHoldMessageText message={holdMessage} />
+            </p>
+            {/*
+             * MDF-942 (quality owner's finding, this path ONLY): the request
+             * endpoint never checks lock state and the mailed token is only
+             * valid 15 minutes against a 5-minute resend cooldown, so a
+             * locked-out holder CAN always get a fresh token by asking again
+             * -- the product just never tells them to. SenderCollectionCode
+             * and RecipientCollectionCode have no token/request concept at
+             * all (their code reappears on its own once staff clear the
+             * lock), so this line is deliberately NOT shared with them --
+             * telling those two audiences to "request a new code" would be
+             * false guidance, the same defect class pointed the other way.
+             * Names the action and the trigger without promising the
+             * CURRENT token's fate either way, since that depends on timing
+             * this component cannot see.
+             */}
+            <p className="mt-2 text-sm text-slate-600">
+              If this isn&rsquo;t resolved soon, you may need to request a new code once our team has cleared the hold.
+            </p>
+          </>
         ) : (
           <p className="mt-3 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
         )

@@ -51,5 +51,10 @@ describe('SenderCollectionCode', () => {
     // MDF-942: that sentence must give a way to act on it, not just name the problem.
     const link = el.querySelector('a');
     expect(link?.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
+
+    // MDF-942, deliberately NOT this component: the sender has no token to
+    // re-request -- their code reappears on its own once staff clear the
+    // lock. Telling them to "request a new code" would be false guidance.
+    expect(el.textContent).not.toMatch(/request a new code/i);
   });
 });
