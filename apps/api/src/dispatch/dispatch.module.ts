@@ -43,7 +43,10 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
   ],
   // Exported so vendor fulfilment can start dispatch the moment an order is
   // marked ready — the vendor's action, not an administrator's, puts the job in
-  // front of a driver.
-  exports: [DispatchEngineService, DriverJobFeedService],
+  // front of a driver. DispatchService is exported for the reverse direction
+  // (ORD-RELEASE-AFTER-READY): OrdersService.releaseReservationsInTx calls
+  // DispatchService.cancelForReleasedOrder to resolve a delivery that already
+  // exists for an order whose payment is being returned.
+  exports: [DispatchEngineService, DriverJobFeedService, DispatchService],
 })
 export class DispatchModule {}
