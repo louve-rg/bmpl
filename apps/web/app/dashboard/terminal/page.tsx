@@ -245,6 +245,8 @@ interface LookupResult {
   shipmentId: string;
   reference: string;
   status: string;
+  /** P2-PARITY-API (#800): server-computed via `shipmentStatusLabel` -- already resolves AWAITING_PICKUP correctly per service. Render this, never title-case `status`. */
+  statusLabel: string;
   description: string;
   pieces: number;
   isTest: boolean;
@@ -277,6 +279,8 @@ interface HistoryRow {
   shipmentId: string;
   reference: string;
   status: string;
+  /** P2-PARITY-API (#800): same server-computed label as `LookupResult.statusLabel`. */
+  statusLabel: string;
   parcel: string;
   isTest: boolean;
   createdAt: string;
@@ -1562,12 +1566,7 @@ function HistoryPanel({
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <div className="flex items-center gap-1.5">
                   {row.isTest && <Badge tone="neutral">Demo</Badge>}
-                  {/* P2-SHIPMENT-PARITY: the SAME gap as the Lookup tab above
-                      -- `terminalHistory` (shipment.service.ts) also selects
-                      only raw `status`, no `statusLabel`/`service`. Likely
-                      the same API fix closes both; wire `label=` here too
-                      once it does. */}
-                  <StatusBadge status={row.status} />
+                  <StatusBadge status={row.status} label={row.statusLabel} />
                 </div>
                 <p className="text-[10px] uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Shipment status</p>
               </div>
@@ -2320,19 +2319,7 @@ function LookupPanel({
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               {result.isTest && <Badge tone="neutral">Demo</Badge>}
-              {/* P2-SHIPMENT-PARITY, prepared but not yet wired: `status`
-                  alone can mean two different things for the same value
-                  depending on this shipment's `service` (shared/src/
-                  shipping.ts's `shipmentStatusLabel`) -- every other
-                  surface (customer, admin) renders the server-computed
-                  `statusLabel` instead of this raw enum, but
-                  `lookupForTerminal` (shipment.service.ts) never selects it.
-                  `StatusBadge` already supports an optional `label` prop for
-                  exactly this (apps/web/components/ui.tsx) -- once the API
-                  change lands, read the real field name from that PR and
-                  pass `label={result.statusLabel}` here; do not guess the
-                  name now. */}
-              <StatusBadge status={result.status} />
+              <StatusBadge status={result.status} label={result.statusLabel} />
             </div>
           </div>
           <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">

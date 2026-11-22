@@ -12,6 +12,7 @@ import { ExceptionRecovery } from '../../../../components/logistics/ExceptionRec
 import { LegAssignModal } from '../../../../components/logistics/LegAssignModal';
 import { AddressMapPreview } from '../../../../components/maps/AddressMapPreview';
 import type { MapPoint } from '../../../../lib/trip-map';
+import { legState } from '../../../../lib/leg-state';
 
 /**
  * Operating one shipment.
@@ -79,6 +80,18 @@ interface Leg {
    */
   manualAssignmentPendingSince?: string | null;
   courier?: { displayName: string | null } | null;
+  /**
+   * P2-PARITY-API (#800): the SAME dispatch-exhaustion fields `listForOps`
+   * already sends the ops board, now also on this single-shipment endpoint
+   * (`serialize()`, STAFF audience only -- null for CUSTOMER). EXHAUSTED
+   * takes precedence over UNAVAILABLE whenever a leg could claim both,
+   * resolved server-side; `legState()` (lib/leg-state.ts) already encodes
+   * that same precedence, so render through it rather than re-deriving.
+   * Optional for the same cross-deploy reason as pickupPhotoUrls above.
+   */
+  needsDriverReason?: 'EXHAUSTED' | 'UNAVAILABLE' | null;
+  dispatchExhaustedAt?: string | null;
+  dispatchUnavailableAt?: string | null;
 }
 
 interface Provider {
@@ -574,23 +587,26 @@ export default function ShipmentOpsPage() {
                           </div>
                         )}
                       </div>
-                      {/* P2-SHIPMENT-PARITY, prepared but not yet wired: this
-                          leg can be stuck exactly the way the ops board
-                          (`/dashboard/logistics`) already flags with "No
-                          driver found" / "No driver online" / "No carrier
-                          assigned" (see `apps/admin/lib/leg-state.ts`,
-                          extracted from that board for this exact reuse) --
-                          but THIS page's own `Leg` type has no field to feed
-                          it, because the single-shipment `serialize()` never
-                          selects the dispatch-exhaustion columns `listForOps`
-                          does. Once that API change lands: add the field(s)
-                          it adds to the `Leg` interface above (read her PR
-                          for the real name(s) -- do not guess one here) and
-                          replace this bare badge with `legState({ ...leg,
-                          operator: leg.operatorName, needsDriver: ... })`. */}
-                      <Badge tone={leg.status === 'COMPLETED' ? 'success' : leg.status === 'EXCEPTION' ? 'warning' : 'info'}>
-                        {leg.status.replace(/_/g, ' ').toLowerCase()}
-                      </Badge>
+                      {(() => {
+                        // P2-SHIPMENT-PARITY/P2-PARITY-API (#800): same words
+                        // as the ops board for the same leg, via the shared
+                        // legState() this page couldn't call until serialize()
+                        // started sending needsDriverReason. `needsDriver` is
+                        // derived, not sent, on this endpoint -- unlike the
+                        // ops board's OpsLeg, this one has no separate boolean
+                        // field, only the reason enum, and legState() only
+                        // ever reads needsDriver as a plain truthiness check
+                        // once needsDriverReason is not the UNAVAILABLE case.
+                        const state = legState({
+                          kind: leg.kind,
+                          status: leg.status,
+                          operator: leg.operatorName ?? null,
+                          operatedByProviderId: leg.operatedByProviderId ?? null,
+                          needsDriver: !!leg.needsDriverReason,
+                          needsDriverReason: leg.needsDriverReason,
+                        });
+                        return <Badge tone={state.tone}>{state.label}</Badge>;
+                      })()}
                     </div>
 
                     {leg.manualAssignmentPendingSince && (
