@@ -297,7 +297,7 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
               >
                 {job.kindLabel}
               </span>
-              <StatusBadge status={job.status} />
+              <StatusBadge status={job.status} label={job.statusLabel} />
             </div>
 
             <p className="mt-1.5 break-words text-sm font-semibold text-[color:var(--bmpl-text)]">

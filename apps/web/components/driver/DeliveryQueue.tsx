@@ -260,7 +260,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                     >
                       {item.kind === 'MARKETPLACE' ? `Order #${item.orderNumber}` : item.reference}
                     </Link>
-                    <StatusBadge status={item.status} />
+                    <StatusBadge status={item.status} label={item.statusLabel} />
                     {item.recommendedPosition != null && item.recommendedPosition !== item.position && (
                       <Badge tone="brand">Suggested #{item.recommendedPosition}</Badge>
                     )}

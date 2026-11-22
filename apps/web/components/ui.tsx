@@ -243,12 +243,21 @@ const DOT: Record<Tone, string> = {
   neutral: 'bg-slate-400', brand: 'bg-belize-blue', success: 'bg-emerald-500', warning: 'bg-amber-500', error: 'bg-red-500', info: 'bg-sky-500',
 };
 
-export function StatusBadge({ status, className = '' }: { status: string; className?: string }) {
+/**
+ * P2-SHIPMENT-PARITY: `label` is optional and additive — every existing
+ * caller passes `status` alone and keeps rendering the title-cased raw enum
+ * exactly as before. Pass `label` once a caller's own API response carries a
+ * real human label (e.g. a shipment's `statusLabel`, already computed
+ * server-side by `shipmentStatusLabel()`) for the SAME `status` value this
+ * badge's tone is still keyed on — the raw enum is a legible fallback, not a
+ * design choice, for any caller whose response doesn't carry one yet.
+ */
+export function StatusBadge({ status, label, className = '' }: { status: string; label?: string; className?: string }) {
   const tone = STATUS_TONE[status] ?? 'neutral';
   return (
     <Badge tone={tone} className={className}>
       <span className={`h-1.5 w-1.5 rounded-full ${DOT[tone]}`} aria-hidden />
-      {status.replace(/_/g, ' ')}
+      {label ?? status.replace(/_/g, ' ')}
     </Badge>
   );
 }

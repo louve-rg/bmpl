@@ -458,7 +458,7 @@ export default function DriverShippingJobPage() {
           />
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <StatusBadge status={job.status} />
+            <StatusBadge status={job.status} label={job.statusLabel} />
             <span className="text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">{money(job.feeMinor)}</span>
           </div>
 

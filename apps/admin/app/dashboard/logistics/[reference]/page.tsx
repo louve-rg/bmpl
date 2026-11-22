@@ -574,6 +574,20 @@ export default function ShipmentOpsPage() {
                           </div>
                         )}
                       </div>
+                      {/* P2-SHIPMENT-PARITY, prepared but not yet wired: this
+                          leg can be stuck exactly the way the ops board
+                          (`/dashboard/logistics`) already flags with "No
+                          driver found" / "No driver online" / "No carrier
+                          assigned" (see `apps/admin/lib/leg-state.ts`,
+                          extracted from that board for this exact reuse) --
+                          but THIS page's own `Leg` type has no field to feed
+                          it, because the single-shipment `serialize()` never
+                          selects the dispatch-exhaustion columns `listForOps`
+                          does. Once that API change lands: add the field(s)
+                          it adds to the `Leg` interface above (read her PR
+                          for the real name(s) -- do not guess one here) and
+                          replace this bare badge with `legState({ ...leg,
+                          operator: leg.operatorName, needsDriver: ... })`. */}
                       <Badge tone={leg.status === 'COMPLETED' ? 'success' : leg.status === 'EXCEPTION' ? 'warning' : 'info'}>
                         {leg.status.replace(/_/g, ' ').toLowerCase()}
                       </Badge>

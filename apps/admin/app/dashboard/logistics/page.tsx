@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { legAssignMode } from '../../../lib/leg-assign';
+import { legNeedsCarrier, legState, manualAssignmentIsStale, MANUAL_ASSIGNMENT_STALE_HOURS } from '../../../lib/leg-state';
 import { LegAssignModal } from '../../../components/logistics/LegAssignModal';
 import { relativeTime } from '../../../lib/notifications';
 import { Alert, Badge, Button, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../components/ui';
@@ -65,8 +66,8 @@ interface OpsLeg {
    * sets `offerExpiresAt: null` on purpose), which is exactly why a 3-day-
    * silent one looks identical to a 1-minute-old one without this. The API
    * gives a timestamp, not an `isStale` flag, on purpose — "too long" is a
-   * UI judgement (see MANUAL_ASSIGNMENT_STALE_HOURS below), not a backend
-   * truth. Optional for the same cross-deploy reason as needsDriverReason.
+   * UI judgement (see `MANUAL_ASSIGNMENT_STALE_HOURS` in lib/leg-state.ts),
+   * not a backend truth. Optional for the same cross-deploy reason as needsDriverReason.
    */
   manualAssignmentPendingSince?: string | null;
 }
@@ -96,62 +97,6 @@ const STATUSES = [
 ];
 
 const money = (n: number) => `$${(n / 100).toFixed(2)}`;
-
-/**
- * MDF-560 (owner): "booked but no carrier to move it" must read as awaiting
- * fulfilment, not as ordinary progress. A LINE_HAUL leg is never dispatched
- * to a driver — `leg-assign.ts`'s own `legAssignMode` refuses it outright —
- * so `needsDriver` (dispatch exhaustion) can never fire for one, and without
- * this check an unassigned transport leg fell through to the same neutral
- * "Waiting" every ordinarily-queued leg gets. Checked ahead of the generic
- * fallback, same position `needsDriver` already holds for the courier case.
- */
-function legNeedsCarrier(leg: OpsLeg): boolean {
-  return (
-    leg.kind === 'LINE_HAUL' &&
-    !leg.operator &&
-    !leg.operatedByProviderId &&
-    leg.status !== 'COMPLETED' &&
-    leg.status !== 'CANCELLED' &&
-    leg.status !== 'EXCEPTION'
-  );
-}
-
-/**
- * MDF-624: the line god drew explicitly — the API hands over a raw instant,
- * never an "is this stale" verdict, so the threshold for "too long" has to
- * live here, where an operator can read it in the source and argue with it,
- * rather than inside a backend field nobody reading this screen can see.
- * 24 hours is a judgement call, not a derived fact: a manual assignment is
- * always shown with its real age regardless of this number — this only
- * decides when the badge switches from informational to a warning.
- */
-const MANUAL_ASSIGNMENT_STALE_HOURS = 24;
-
-function manualAssignmentIsStale(iso: string): boolean {
-  const hours = (Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60);
-  return hours >= MANUAL_ASSIGNMENT_STALE_HOURS;
-}
-
-/** The leg's own state, in the vocabulary the operator uses out loud. */
-function legState(leg: OpsLeg): { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' } {
-  if (leg.status === 'COMPLETED') return { label: 'Done', tone: 'success' };
-  if (leg.status === 'EXCEPTION') return { label: 'Problem', tone: 'warning' };
-  if (leg.status === 'CANCELLED') return { label: 'Cancelled', tone: 'neutral' };
-  // CLOSE-20: UNAVAILABLE ("nobody was ever eligible to ask") is a different
-  // claim from EXHAUSTED ("we asked everyone and nobody took it") and can
-  // resolve on its own the moment a driver comes online, which exhaustion
-  // cannot — so it gets its own badge, in a tone that doesn't read as the
-  // same hand-assign alarm. The backend already resolves EXHAUSTED first
-  // whenever a leg could claim both (see needsDriverReason's own precedence
-  // comment), so checking this branch first never shadows an exhausted leg.
-  if (leg.needsDriverReason === 'UNAVAILABLE') return { label: 'No driver online', tone: 'info' };
-  if (leg.needsDriver) return { label: 'No driver found', tone: 'warning' };
-  if (legNeedsCarrier(leg)) return { label: 'No carrier assigned', tone: 'warning' };
-  if (leg.status === 'IN_PROGRESS') return { label: 'Moving', tone: 'info' };
-  if (leg.status === 'READY') return { label: 'Ready', tone: 'info' };
-  return { label: 'Waiting', tone: 'neutral' };
-}
 
 export default function LogisticsOpsPage() {
   const [rows, setRows] = useState<OpsRow[]>([]);

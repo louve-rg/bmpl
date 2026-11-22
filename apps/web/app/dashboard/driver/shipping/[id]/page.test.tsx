@@ -731,3 +731,16 @@ describe('DriverShippingJobPage — report-issue is itself blocked during an ope
     expect(el.textContent).toContain('Report an issue');
   });
 });
+
+// P2-SHIPMENT-PARITY: the API already computes a human statusLabel
+// (DELIVERY_STATUS_LABELS) for this exact `status` value — this badge used
+// to ignore it and show the raw courierStatus enum instead.
+describe('DriverShippingJobPage — status badge shows the API\'s own statusLabel, not the raw enum', () => {
+  it('shows "Accepted" for DRIVER_ACCEPTED, never the raw enum text', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', statusLabel: 'Accepted' }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('Accepted');
+    expect(el.textContent).not.toMatch(/DRIVER ACCEPTED/);
+  });
+});
