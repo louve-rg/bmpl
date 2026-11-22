@@ -199,6 +199,92 @@ describe('UnlinkedCollectionCode — reveal step', () => {
 });
 
 /**
+ * WEB-HOLD-RESEND-BUTTON-OFF-SCREEN: the "you may need to request a new
+ * code" sentence (MDF-942) told the reader what to do, but the only
+ * request/resend control lived in the `phase !== 'revealed'` branch, which
+ * this hold-message state never reaches -- so there was nothing on screen
+ * to act on it with. These pin that a control now exists here, and that it
+ * is the SAME request flow (same cooldown, same endpoint), not a second
+ * one.
+ */
+describe('UnlinkedCollectionCode — acting on the hold-message resend hint (WEB-HOLD-RESEND-BUTTON-OFF-SCREEN)', () => {
+  async function revealIntoHoldMessage() {
+    requestCollectionCodeEmail.mockResolvedValue({ requested: true });
+    const el = await mount('HOLD-TOK-01');
+    await clickAndFlush(findButton(el, 'Email me a collection code')!);
+
+    const input = el.querySelector('input') as HTMLInputElement;
+    setInputValue(input, 'ABCDEFGHJK');
+    revealCollectionCode.mockResolvedValue({
+      reference: 'BML-ABCD2345',
+      collectionCode: null,
+      collectionHoldMessage:
+        'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.',
+    });
+    await clickAndFlush(findButton(el, 'Confirm token')!);
+    return el;
+  }
+
+  it('shows a request control next to the hold message, disabled while the original cooldown is still running', async () => {
+    const el = await revealIntoHoldMessage();
+
+    // The first request's 5-minute cooldown is still running at this point
+    // (requesting and revealing happen back to back in the test) -- the
+    // button must read that, not offer a fresh send the server would
+    // reject anyway.
+    const cooldownBtn = Array.from(el.querySelectorAll('button')).find((b) => /You can request another token in/.test(b.textContent ?? ''));
+    expect(cooldownBtn).toBeTruthy();
+    expect(cooldownBtn!.hasAttribute('disabled')).toBe(true);
+    expect(el.textContent).not.toContain('Email me a new token');
+  });
+
+  it('once the cooldown has passed, clicking it re-requests and hands off to the same token-entry UI', async () => {
+    vi.useFakeTimers();
+    try {
+      const el = await revealIntoHoldMessage();
+
+      // The component's own 1s interval ticks `now` forward -- advancing
+      // fake time past the 5-minute cooldown is what actually flips
+      // `onCooldown` false here, same clock the real button reads from.
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60_000 + 1_000);
+      });
+
+      requestCollectionCodeEmail.mockClear();
+      requestCollectionCodeEmail.mockResolvedValue({ requested: true });
+
+      const resendBtn = findButton(el, 'Email me a new token');
+      expect(resendBtn).toBeTruthy();
+      await clickAndFlush(resendBtn!);
+
+      expect(requestCollectionCodeEmail).toHaveBeenCalledWith('HOLD-TOK-01');
+      // Back to the token-entry UI, not stuck on the hold message.
+      expect(el.textContent).toContain('Check your inbox');
+      expect(el.querySelector('input')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the request error inline here too, rather than failing silently', async () => {
+    vi.useFakeTimers();
+    try {
+      const el = await revealIntoHoldMessage();
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60_000 + 1_000);
+      });
+
+      requestCollectionCodeEmail.mockRejectedValueOnce({ status: 429, message: 'Too many requests. Try again shortly.' });
+      await clickAndFlush(findButton(el, 'Email me a new token')!);
+
+      expect(el.textContent).toContain('Too many requests. Try again shortly.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
  * MDF-738, second deliverable: the resend cooldown used to be in-memory
  * only, so a reload of /track/[token] brought the button back while the
  * server was still inside its own cooldown -- a request made right after
