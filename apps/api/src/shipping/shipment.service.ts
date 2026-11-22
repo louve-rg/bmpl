@@ -1846,6 +1846,13 @@ export class ShipmentService {
    * who never touched the parcel. The driver's own path (`confirmPickup`)
    * already asserts this via `ownedLeg` before reaching here; this closes the
    * same gap for the admin desk, the way BMPL-174 closed it for handoff.
+   *
+   * HAZARD FOR THE NEXT EDITOR (MDF-926 item 3): `confirmAndStartLeg` below
+   * carries its own copy of the LINE_HAUL guard, the READY guard, and this
+   * driver-match check, plus an identical `appendCustody` call — deliberately
+   * duplicated rather than shared, so the courier-pickup write can land in the
+   * same transaction as the leg-start write. A guard added here will NOT apply
+   * to the pickup path. Check whether `confirmAndStartLeg` needs the same change.
    */
   async startLeg(legId: string, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
