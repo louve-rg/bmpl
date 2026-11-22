@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import {
   hashToken,
   issueToken,
@@ -113,6 +113,15 @@ export class SessionService {
     };
   }
 
+  /**
+   * Revoke by raw session id, no ownership check at all. Safe TODAY only
+   * because every existing caller already holds an id it owns outright —
+   * `logout`/`changePassword` pass the JWT's own `sid` claim (the request's
+   * own session), `revokeAllForUser` below takes a userId directly instead
+   * of an id. NEVER call this with an id that came from a path/body
+   * parameter of an authenticated request — that is exactly the hazard
+   * {@link revokeOwn} exists to close. See ACCT-SESSIONS.
+   */
   async revoke(sessionId: string): Promise<void> {
     await this.prisma.session.updateMany({
       where: { id: sessionId, revokedAt: null },
@@ -125,5 +134,74 @@ export class SessionService {
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  /**
+   * This user's own LIVE sessions — never revoked, not yet expired. A
+   * revoked or expired row is nothing the caller can act on, so it is left
+   * out rather than shown as inert clutter the list screen would otherwise
+   * have to explain. Never selects `refreshTokenHash` — there is no reason
+   * for that value, or anything derived from it, to leave this service.
+   */
+  async listForUser(userId: string) {
+    return this.prisma.session.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: {
+        id: true,
+        userAgent: true,
+        ipAddress: true,
+        client: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+      },
+      orderBy: { lastUsedAt: 'desc' },
+    });
+  }
+
+  /**
+   * ACCT-SESSIONS: revoke exactly one of THIS user's own sessions, for use
+   * directly behind an authenticated route taking a session id as a path
+   * parameter. Ownership is enforced INSIDE this method's own query — `id`
+   * AND `userId` in the same `where` — rather than left to a guard above
+   * it, because the guard only proves the caller is signed in as someone,
+   * never that the id they supplied is their own, and the next person
+   * calling this method will not re-read this comment. Chosen over adding
+   * `userId` to the existing `revoke(sessionId)` above: that method is
+   * called internally with ids already known-owned by construction (the
+   * caller's own `sid` claim), and giving it a parameter none of its
+   * current callers have would invite one to pass the wrong thing; a
+   * second, purpose-built method for the one caller that genuinely takes
+   * an id from the outside keeps the hazard scoped to where it actually is.
+   *
+   * 404s a session that does not exist OR belongs to someone else — the
+   * same "indistinguishable from not found" reasoning as
+   * `AddressesService.ownedOrThrow`, so a caller fishing for other users'
+   * session ids learns nothing by probing. Idempotent on an already-revoked
+   * or already-expired session (a stale list the browser still has open
+   * must not turn into an error) — the `updateMany` only ever touches a
+   * still-live row, and does nothing, successfully, otherwise.
+   */
+  async revokeOwn(userId: string, sessionId: string): Promise<void> {
+    const owned = await this.prisma.session.findFirst({ where: { id: sessionId, userId }, select: { id: true } });
+    if (!owned) throw new NotFoundException('Session not found.');
+    await this.prisma.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /**
+   * "Sign out everywhere else": revoke every OTHER live session for this
+   * user, deliberately leaving `exceptSessionId` (the caller's own current
+   * session, making this very call) untouched — the whole point of the
+   * action is that the browser calling it stays signed in.
+   */
+  async revokeOthersForUser(userId: string, exceptSessionId: string): Promise<{ revokedCount: number }> {
+    const result = await this.prisma.session.updateMany({
+      where: { userId, revokedAt: null, id: { not: exceptSessionId } },
+      data: { revokedAt: new Date() },
+    });
+    return { revokedCount: result.count };
   }
 }
