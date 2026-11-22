@@ -2,9 +2,12 @@
 /**
  * measure-openapi-route-drift-all-specs — generalizes
  * detect-terminal-openapi-route-drift.mjs's mechanism (route-decorator
- * parsing + spec-path diff) across ALL FIVE hand-maintained specs under
- * docs/openapi/ (driver.yaml, marketplace.yaml, passenger.yaml,
- * shipping.yaml, terminal.yaml), not just the terminal family.
+ * parsing + spec-path diff) across ALL hand-maintained specs under
+ * docs/openapi/ (account.yaml, driver.yaml, marketplace.yaml,
+ * passenger.yaml, shipping.yaml, terminal.yaml), not just the terminal
+ * family. account.yaml added 2026-11-22 (#815/MDF-952); update SPEC_FILES
+ * below whenever a new spec file is added under docs/openapi/, or this
+ * tool goes stale about its own coverage — see CI-OPENAPI-DRIFT-MEASURE-AND-ADOPT.
  * (OPENAPI-DRIFT-MEASURE, follow-up to MDF-742/TERM-OPENAPI-GUARD.)
  *
  * THIS IS A MEASUREMENT TOOL, NOT A CI CHECK. It is deliberately NOT
@@ -41,7 +44,7 @@
  *   the same family key. A route whose family key matches a spec file's
  *   claimed set is checked against that file's real path+method entries.
  *   A route whose family key matches NO spec file at all (an entire
- *   undocumented domain, e.g. `admin/drivers`, `auth`, `users`) is
+ *   undocumented domain, e.g. `admin/drivers`, `users`) is
  *   reported separately as NO-SPEC-FOR-FAMILY — a different, larger kind
  *   of gap than drift inside a spec that otherwise covers the family,
  *   and deliberately not folded into any one file's undocumented count.
@@ -61,7 +64,7 @@ const asJson = args.includes('--json');
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SEARCH_ROOT = path.join(REPO_ROOT, 'apps/api/src');
-const SPEC_FILES = ['driver.yaml', 'marketplace.yaml', 'passenger.yaml', 'shipping.yaml', 'terminal.yaml'];
+const SPEC_FILES = ['account.yaml', 'driver.yaml', 'marketplace.yaml', 'passenger.yaml', 'shipping.yaml', 'terminal.yaml'];
 const SKIP_DIRS = new Set(['node_modules', '.turbo', 'dist', '.git']);
 const METHODS = ['Get', 'Post', 'Patch', 'Put', 'Delete'];
 const SHARED_SEGMENTS = new Set(['admin', 'driver']);
