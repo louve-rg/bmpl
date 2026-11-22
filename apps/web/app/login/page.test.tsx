@@ -24,6 +24,70 @@ afterEach(() => {
   container = null;
 });
 
+describe('MDF-925/MDF-923 -- the password-changed notice', () => {
+  it('shows the confirmation when arriving with ?reason=password-changed', async () => {
+    window.history.replaceState(null, '', '/login?reason=password-changed');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(container.textContent).toContain('Your password was changed. Please sign in again.');
+  });
+
+  it('shows nothing extra for a plain visit, with no ?reason at all', async () => {
+    window.history.replaceState(null, '', '/login');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(container.textContent).not.toContain('password was changed');
+  });
+
+  it('ignores an unrecognized reason rather than rendering it verbatim', async () => {
+    window.history.replaceState(null, '', '/login?reason=something-made-up');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(container.textContent).not.toContain('something-made-up');
+  });
+
+  it('strips ?reason= from the URL after reading it, so a reload does not re-show it', async () => {
+    window.history.replaceState(null, '', '/login?reason=password-changed');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(window.location.search).toBe('');
+    expect(window.location.pathname).toBe('/login');
+  });
+
+  it('keeps ?next= when stripping ?reason=, so a failed sign-in retry still returns to the right page', async () => {
+    window.history.replaceState(null, '', '/login?reason=password-changed&next=%2Fdashboard%2Fsettings');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<LoginPage />);
+    });
+
+    expect(new URLSearchParams(window.location.search).get('reason')).toBeNull();
+    expect(new URLSearchParams(window.location.search).get('next')).toBe('/dashboard/settings');
+  });
+});
+
 describe('SEC-LOGIN-PASSWORD-IN-URL', () => {
   it('the form defaults to POST, not GET, before React ever attaches a submit handler', async () => {
     // The defect: before hydration completes, a click on "Sign in" has no
