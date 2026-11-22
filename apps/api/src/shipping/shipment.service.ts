@@ -2602,9 +2602,37 @@ export class ShipmentService {
       // several non-terminal statuses, not just IN_PROGRESS), inside the
       // write, so a concurrent completeLeg() on the same leg cannot silently
       // lose or be lost.
+      // SHIP-S1: `status` above is the SHIPMENT's view and already blocks
+      // every forward transition the instant it reads EXCEPTION — but
+      // `courierStatus` is the DRIVER'S view, and nothing wrote it, so a
+      // driver's own screen kept showing whatever it held before (ASSIGNED,
+      // IN_TRANSIT, ...) with no sign anything was wrong. Record-and-restore,
+      // not recompute: the value this leg held is saved here so resolve's
+      // RESUME can put it back exactly rather than guess one.
+      //
+      // Left untouched for two shapes, deliberately, not merely "whenever
+      // there happens to be nothing interesting to save":
+      //  - LINE_HAUL, carrier- not driver-operated, has no `courierStatus`
+      //    to begin with (always null).
+      //  - `ASSIGNED` — a still-outstanding, not-yet-accepted offer. DECLINE
+      //    is legal ONLY from ASSIGNED (`DELIVERY_ACTIONS`), and declining an
+      //    offer is deliberately NOT blocked by an open exception (giving a
+      //    job back is not forward progression — see
+      //    ShipmentDriverService.decline's own test). Overwriting ASSIGNED
+      //    to EXCEPTION here would silently revoke that still-legal decline,
+      //    which is a real behaviour regression, not a display improvement.
+      //    A driver who has not yet committed to the job is not the "driver
+      //    blind to an exception on their own leg" this card is about.
       const claimed = await tx.shipmentLeg.updateMany({
         where: { id: leg.id, status: leg.status },
-        data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: input.reason },
+        data: {
+          status: 'EXCEPTION',
+          exceptionAt: new Date(),
+          exceptionReason: input.reason,
+          ...(leg.courierStatus != null && leg.courierStatus !== 'ASSIGNED'
+            ? { courierStatus: 'EXCEPTION', courierStatusBeforeException: leg.courierStatus }
+            : {}),
+        },
       });
       if (claimed.count === 0) {
         throw new ConflictException('This leg changed state before the exception could be recorded — reload and try again.');
@@ -2735,6 +2763,20 @@ export class ShipmentService {
             status: restored,
             exceptionAt: null,
             exceptionReason: null,
+            // SHIP-S1: RESTORE, never recompute — and only touch courierStatus
+            // at all when flagException actually saved something. A null
+            // courierStatusBeforeException means either LINE_HAUL (no
+            // courierStatus ever existed) or the leg was still an outstanding
+            // ASSIGNED offer when flagged (flagException deliberately left
+            // it alone — see that method's own comment); writing `null` over
+            // courierStatus unconditionally here would wrongly erase a real,
+            // never-touched ASSIGNED value. When something WAS saved, putting
+            // back anything else (e.g. a freshly-derived "ASSIGNED") risks
+            // reviving the leg at a stage earlier than the driver was really
+            // at — a worse contradiction than the one this card closes.
+            ...(leg.courierStatusBeforeException != null
+              ? { courierStatus: leg.courierStatusBeforeException, courierStatusBeforeException: null }
+              : {}),
             ...(handoffPinWasLocked ? { handoffPinAttempts: 0 } : {}),
             ...(pickupPinWasLocked ? { pickupPinAttempts: 0 } : {}),
           },
@@ -2776,8 +2818,14 @@ export class ShipmentService {
             exceptionAt: null,
             exceptionReason: null,
             // Back to the pool, exactly as cancel() clears the courier half —
-            // except the destination is dispatchable, not terminal.
+            // except the destination is dispatchable, not terminal. This is a
+            // deliberate NEW status, not a restore — the driver who held it
+            // is being released, so there is nothing to put back the leg to.
+            // The saved pre-exception value is now moot either way; cleared
+            // so it cannot linger and describe a driver who no longer holds
+            // this leg.
             courierStatus: 'PENDING_ASSIGNMENT',
+            courierStatusBeforeException: null,
             assignedDriverProfileId: null,
             assignedVehicleId: null,
             offerExpiresAt: null,
@@ -6299,13 +6347,29 @@ export class ShipmentService {
     if (leg.assignedDriverProfileId == null) {
       throw new BadRequestException('No courier is assigned to this leg yet.');
     }
-    if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
-      throw new BadRequestException('This leg is not ready to be released to its courier.');
-    }
 
     const presentedCourierUserId = input.presentedCourierUserId ?? (
       await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
     ).userId;
+
+    // SHIP-S1: a loose, deliberate duplicate of the strict check below —
+    // not a stray leftover. flagException now also writes courierStatus, so
+    // a leg locked out by five bad codes reads courierStatus === 'EXCEPTION'
+    // by the time a later attempt arrives. verifyLegPinOrThrow's wrong-code
+    // branch is NOT side-effect-free (it increments the attempt counter,
+    // writes an audit row, and can itself call flagException on the
+    // exhausting attempt) — so a leg that is "not ready" for any OTHER
+    // reason (already released, already IN_TRANSIT, ...) must be refused
+    // HERE, before the pin call, or a wrong code against it would consume an
+    // attempt and could flag a brand-new exception on a leg nobody is
+    // actually PIN-locking. EXCEPTION is the one status let through to the
+    // pin call anyway, so the lockout's own specific 403 ("too many
+    // incorrect codes") still fires first for a genuinely locked leg — the
+    // strict check below is what catches it for every other non-EXCEPTION,
+    // non-DRIVER_ACCEPTED status.
+    if (leg.courierStatus !== 'DRIVER_ACCEPTED' && leg.courierStatus !== 'EXCEPTION') {
+      throw new BadRequestException('This leg is not ready to be released to its courier.');
+    }
 
     // Only a grandfathered leg skips this — see the method's own comment.
     // A leg with a real pin still must match it, exactly as before.
@@ -6315,6 +6379,18 @@ export class ShipmentService {
       // transaction would roll back when that transaction throws, and the
       // counter would never climb.
       await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
+    }
+
+    // SHIP-S1: the strict half of the pair above — this is what actually
+    // catches an EXCEPTION leg once it's past the loose check. Kept BELOW
+    // verifyLegPinOrThrow, not above it: checking first would throw this
+    // generic "not ready" 400 and bury verifyLegPinOrThrow's own specific,
+    // correct 403 for a locked leg — the identical assertNotException-vs-
+    // assertAction shadowing this PR already fixed in ShipmentDriverService,
+    // one call site this file's own audit missed. Checking it here means
+    // the lockout's 403 still wins.
+    if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
+      throw new BadRequestException('This leg is not ready to be released to its courier.');
     }
 
     // MDF-926 item 3: folded into ONE transaction with the leg-start write —

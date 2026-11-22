@@ -5455,6 +5455,18 @@ model ShipmentLeg {
   // on a shipment leg without a single new branch. `status` above stays the
   // SHIPMENT's view of the leg; this is the DRIVER's view of the same thing.
   courierStatus           DeliveryStatus?
+  /// SHIP-S1: flagException overwrites `courierStatus` to EXCEPTION so the
+  /// driver app's own state machine (which reads ONLY this column, never
+  /// `status`) actually shows the hold instead of a stale prior state. This
+  /// is where the value it overwrote is kept so resolve's RESUME can put it
+  /// back exactly — never recomputed, never guessed. No existing column
+  /// could hold this: every other DateTime/boolean column on this leg means
+  /// one specific fact, and overloading one to double as "the courierStatus
+  /// before the last exception" would make it lie the rest of the time it
+  /// is read for its real purpose. Null whenever there is no exception in
+  /// progress, including for a LINE_HAUL leg, which has no courierStatus at
+  /// all to save.
+  courierStatusBeforeException DeliveryStatus?
   assignedDriverProfileId String?
   assignedDriver          DriverProfile?  @relation("DriverShipmentLegs", fields: [assignedDriverProfileId], references: [id], onDelete: SetNull)
   assignedVehicleId       String?

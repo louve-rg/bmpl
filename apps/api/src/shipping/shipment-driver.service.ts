@@ -147,8 +147,13 @@ export class ShipmentDriverService {
   async accept(actor: Actor, legId: string) {
     const { leg, profileId } = await this.ownedLeg(actor.userId, legId);
     if (leg.courierStatus === 'DRIVER_ACCEPTED') return this.serialize(leg); // idempotent
-    this.assertAction('ACCEPT', leg.courierStatus);
+    // Before assertAction, not after (SHIP-S1): courierStatus now reads
+    // EXCEPTION during a hold, so assertAction alone would already refuse
+    // this — but with its own generic "cannot ACCEPT a job that is..."
+    // wording. Checking the specific reason first keeps the driver's
+    // message the named, actionable one assertNotException gives.
     this.assertNotException(leg);
+    this.assertAction('ACCEPT', leg.courierStatus);
 
     const won = await this.prisma.$transaction(async (tx) => {
       // Conditional write, exactly as delivery acceptance does it: the sweeper
@@ -243,8 +248,9 @@ export class ShipmentDriverService {
    */
   async confirmPickup(actor: Actor, legId: string, dto: LegPickupInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
-    this.assertAction('CONFIRM_PICKUP', leg.courierStatus);
+    // Before assertAction — see accept()'s identical comment (SHIP-S1).
     this.assertNotException(leg);
+    this.assertAction('CONFIRM_PICKUP', leg.courierStatus);
     if (!isLegActionable(leg.shipment.legs as LegView[], leg.sequence)) {
       throw new BadRequestException('The parcel has not reached this leg yet.');
     }
@@ -415,8 +421,9 @@ export class ShipmentDriverService {
     auditAction: AuditAction,
   ) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
-    this.assertAction(action, leg.courierStatus);
+    // Before assertAction — see accept()'s identical comment (SHIP-S1).
     this.assertNotException(leg);
+    this.assertAction(action, leg.courierStatus);
     // Conditional, not an update by id: re-asserting the courier status just
     // read closes the same window a concurrent exception flag (or a second
     // tap of this same button) would otherwise land in.
@@ -487,8 +494,9 @@ export class ShipmentDriverService {
    */
   async completeHandoff(actor: Actor, legId: string, dto: LegHandoffInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
-    this.assertAction('DELIVER', leg.courierStatus);
+    // Before assertAction — see accept()'s identical comment (SHIP-S1).
     this.assertNotException(leg);
+    this.assertAction('DELIVER', leg.courierStatus);
 
     // `completeLeg` already runs through `ShipmentService.transition()`,
     // which re-reads the leg and refuses it via `isLegActionable` the moment
@@ -559,12 +567,18 @@ export class ShipmentDriverService {
    * Owner ruling: an active exception blocks every forward courier
    * transition until authorized staff resolve it
    * (`ShipmentService.resolveException`) — never an automatic status, fee or
-   * settlement side effect. `courierStatus` and `status` are two separate
-   * columns on the same row; nothing upstream kept them in step, so each
-   * transition must check `status` itself rather than inferring it from
-   * `courierStatus`. This is the clear, same-request rejection; the
-   * conditional write each caller makes right after is what actually closes
-   * the race against staff flagging the exception a moment later.
+   * settlement side effect.
+   *
+   * SHIP-S1: `flagException` now writes `courierStatus: 'EXCEPTION'` too, so
+   * `assertAction` alone would already refuse every caller here on its own
+   * — EXCEPTION is not a legal `from` state for any driver action. This
+   * check stays, called FIRST, for two reasons that still hold: the message
+   * is the specific, named, actionable one ("Staff must resolve it...")
+   * rather than assertAction's generic "cannot X a job that is EXCEPTION",
+   * and `status` and `courierStatus` are still two separate columns on the
+   * same row — the conditional write each caller makes right after this is
+   * what actually closes the race against staff flagging the exception a
+   * moment after this read.
    */
   private assertNotException(leg: { status: LegStatus; shipment: { reference: string } }) {
     if (leg.status === 'EXCEPTION') {
