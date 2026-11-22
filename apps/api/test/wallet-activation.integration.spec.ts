@@ -242,6 +242,40 @@ describe('funding a wallet', () => {
     // Disjoint pages, newest-first: nothing on page 1 reappears on page 2.
     expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
   });
+
+  it('pages stay disjoint even when every transaction shares one createdAt — the sort has a tiebreaker', async () => {
+    const c = await makeTestCustomer();
+    for (let i = 0; i < 3; i++) await post(c.cookies, 'wallet/top-up', { amountMinor: 2000 + i });
+
+    // The point of this test. Ordering by createdAt alone is only stable while the
+    // timestamps differ, which they usually do by luck of the clock. Force the tie
+    // that luck hides: three transactions on the same instant. With a single-key
+    // sort the database may return them in any order per query, so paging with
+    // skip/take can show one row twice and drop another. The ids below must still
+    // come back as three distinct rows covering the whole set.
+    const mine = await ctx.prisma.walletTransaction.findMany({
+      where: { entries: { some: { account: { userId: c.userId } } } },
+      select: { id: true },
+    });
+    expect(mine.length).toBeGreaterThanOrEqual(3);
+    const sameInstant = new Date('2026-11-22T12:00:00.000Z');
+    await ctx.prisma.walletTransaction.updateMany({
+      where: { id: { in: mine.map((t) => t.id) } },
+      data: { createdAt: sameInstant },
+    });
+
+    const seen: string[] = [];
+    for (let page = 1; page <= mine.length; page++) {
+      const r = await get(c.cookies, `wallet/transactions?page=${page}&pageSize=1`);
+      expect(r.status).toBe(200);
+      expect(r.body.total).toBe(mine.length);
+      expect(r.body.rows).toHaveLength(1);
+      seen.push(r.body.rows[0].id);
+    }
+    // No repeats and nothing missing: walking one row at a time saw each exactly once.
+    expect(new Set(seen).size).toBe(mine.length);
+    expect([...seen].sort()).toEqual(mine.map((t) => t.id).sort());
+  });
 });
 
 describe('paying for an order from the wallet', () => {
