@@ -123,6 +123,21 @@ async function bookDoorToHub(cookies: string[], net: { originCity: string; desti
   return r.body;
 }
 
+/** Same network, booked HUB_TO_HUB instead of DOOR_TO_DOOR — no FIRST_MILE
+ *  leg, so AWAITING_PICKUP means the opposite real-world thing. */
+async function bookHubToHub(cookies: string[], net: { originHubId: string; destinationHubId: string }, description: string) {
+  const r = await post(cookies, 'shipping', {
+    service: 'HUB_TO_HUB',
+    origin: { hubId: net.originHubId, name: 'Sender', phone: '501-2223333' },
+    destination: { hubId: net.destinationHubId, name: 'Recipient', phone: '501-4445555' },
+    preferredMode: 'SEA',
+    description,
+    payWithWallet: true,
+  });
+  expect(r.status).toBe(201);
+  return r.body;
+}
+
 async function makeCompany(businessName: string) {
   return (await post(admin, 'admin/terminal/companies', { businessName, contactEmail: `${businessName.toLowerCase().replace(/\s+/g, '')}_${uniq()}@example.com` })).body;
 }
@@ -226,6 +241,33 @@ describe('MDF-701 (TERM-HISTORY): GET /terminal/history', () => {
     expect(res.status).toBe(200);
     expect(res.body.items.map((i: { shipmentId: string }) => i.shipmentId)).not.toContain(ungranted.id);
     expect(res.body.items).toHaveLength(0);
+  });
+
+  /**
+   * P2-PARITY-API: same contradiction as the Lookup tab's own test
+   * (terminal-lookup.integration.spec.ts) — AWAITING_PICKUP means two
+   * opposite things depending on `service`, and this endpoint used to
+   * select neither `service` nor the label. Both a door-service and a
+   * hub-service booking in one test, same raw status, so a regression
+   * collapsing the two labels back together fails here.
+   */
+  it('history rows label AWAITING_PICKUP correctly for both a door service and a hub service', async () => {
+    const net = await makeNetwork();
+    const company = await makeCompany(`Parity Co ${uniq()}`);
+    const loc = await addLocation(company.id, net.originHubId);
+    const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const door = await bookDoorToDoor(await fundedSender(), net, 'Door parcel');
+    const hub = await bookHubToHub(await fundedSender(), net, 'Hub parcel');
+
+    const res = await get(manager.cookies, 'terminal/history?limit=10');
+    expect(res.status).toBe(200);
+    const doorItem = res.body.items.find((i: { shipmentId: string }) => i.shipmentId === door.id);
+    const hubItem = res.body.items.find((i: { shipmentId: string }) => i.shipmentId === hub.id);
+    expect(doorItem.status).toBe('AWAITING_PICKUP');
+    expect(doorItem.statusLabel).toBe('Waiting to be collected');
+    expect(hubItem.status).toBe('AWAITING_PICKUP');
+    expect(hubItem.statusLabel).toBe('Awaiting drop-off at the departure terminal');
   });
 
   it('an OPERATOR is refused, same as GET /terminal/staff', async () => {

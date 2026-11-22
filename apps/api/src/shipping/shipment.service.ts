@@ -5939,6 +5939,13 @@ export class ShipmentService {
    * no pin, code, token, money, or the counterparty's contact details —
    * only what a terminal clerk reviewing their own counter's past work
    * needs to see.
+   *
+   * P2-PARITY-API: same root cause as `lookupForTerminal` (below) — this
+   * method selected `status` but never `service` or the label, so History
+   * rows rendered the same ambiguous raw `AWAITING_PICKUP` enum. Confirmed
+   * by reading this method directly rather than assuming the fix there
+   * also covers here: the two were hand-built separately and select
+   * differently in every other field, but both omitted the same one.
    */
   async terminalHistory(hubIds: string[], opts: { cursor?: string; limit?: number } = {}) {
     if (hubIds.length === 0) return { items: [], nextCursor: null };
@@ -5952,6 +5959,7 @@ export class ShipmentService {
         id: true,
         reference: true,
         status: true,
+        service: true,
         description: true,
         pieces: true,
         isTest: true,
@@ -5979,6 +5987,10 @@ export class ShipmentService {
         shipmentId: s.id,
         reference: s.reference,
         status: s.status,
+        // P2-PARITY-API: same root cause and same fix as `lookupForTerminal`
+        // — see that method's doc for why this is the server-computed label
+        // and not the raw `service` enum.
+        statusLabel: shipmentStatusLabel(s.status, s.service),
         parcel: this.parcelLabel(s),
         isTest: s.isTest,
         createdAt: s.createdAt,
