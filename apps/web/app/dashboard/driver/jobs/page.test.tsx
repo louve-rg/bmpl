@@ -108,6 +108,15 @@ describe('DriverJobsPage — list carries kind and availability windows (SHIP-B)
     // the window phrasing specifically, not the word.
     expect(container.textContent).not.toMatch(/Available \d/);
   });
+
+  // P2-SHIPMENT-PARITY: the API already computes a human statusLabel
+  // (DELIVERY_STATUS_LABELS) for this exact `status` value — this card used
+  // to ignore it and show the raw courierStatus enum instead.
+  it('shows the API\'s own statusLabel on the status badge, not the raw courierStatus enum', async () => {
+    const { container } = await renderPage([job({ status: 'DRIVER_ACCEPTED', statusLabel: 'Driver accepted' })]);
+    expect(container.textContent).toContain('Driver accepted');
+    expect(container.textContent).not.toMatch(/DRIVER ACCEPTED/);
+  });
 });
 
 /**
