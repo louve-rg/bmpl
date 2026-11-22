@@ -756,6 +756,143 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/{id}/routing-proposal:
+    get:
+      tags: [Shipping]
+      summary: The price and plan for whatever return or reroute staff has prepared on this shipment
+      description: >-
+        BMPL-375. The price staff has PREPARED (a return, or a
+        charge-increasing reroute) — recomputed fresh here, never the
+        number stored at prepare time. Ownership is enforced inside the
+        service: a wrong-owner lookup answers the same 404 as "nothing is
+        pending," never an enumeration oracle
+        (`ShipmentService.routingProposalForCustomer`).
+      parameters:
+        - { $ref: "#/components/parameters/shipmentId" }
+      responses:
+        "200":
+          description: The recomputed preview for whichever proposal (return or reroute) is pending
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - type: object
+                        properties:
+                          kind: { type: string, const: RETURN }
+                          legId: { type: string }
+                          note: { type: [string, "null"] }
+                          preparedAt: { type: string, format: date-time }
+                      - oneOf:
+                          - $ref: "#/components/schemas/QuoteAvailable"
+                          - $ref: "#/components/schemas/QuoteUnavailable"
+                          - $ref: "#/components/schemas/MidCarryUnavailable"
+                  - allOf:
+                      - type: object
+                        properties:
+                          kind: { type: string, const: REROUTE }
+                          legId: { type: string }
+                          destination:
+                            type: object
+                            description: The operator-chosen new destination, as stored on the proposal
+                          note: { type: [string, "null"] }
+                          preparedAt: { type: string, format: date-time }
+                      - oneOf:
+                          - allOf:
+                              - $ref: "#/components/schemas/QuoteAvailable"
+                              - type: object
+                                properties:
+                                  legCostsMoreThanOriginal: { type: boolean, description: Whether the recomputed price is higher than the original shipment's own price }
+                          - $ref: "#/components/schemas/QuoteUnavailable"
+                          - $ref: "#/components/schemas/MidCarryUnavailable"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "No shipment with that id, or no return/reroute is currently awaiting confirmation" }
+  /shipping/{id}/routing-proposal/confirm:
+    post:
+      tags: [Shipping]
+      summary: Confirm and book the prepared return or reroute — the only call that may charge for it
+      description: >-
+        THE CONFIRMATION — owner ruling (BMPL-375): staff preparing a
+        return or reroute never authorizes a wallet charge by itself; only
+        the shipment's own customer, calling this route, may. The price is
+        recomputed fresh here too, exactly like the GET preview above,
+        never the number staff saw at prepare time. If no valid price can
+        be calculated the outcome is PENDING_MANUAL rather than a guess —
+        nothing is charged and no shipment is created either way. Otherwise
+        this books and charges a brand-new shipment for the return/reroute,
+        linked back to the original (`ShipmentService.confirmRouting`).
+      parameters:
+        - { $ref: "#/components/parameters/shipmentId" }
+      responses:
+        "201":
+          description: PENDING_MANUAL (nothing charged), or the new linked shipment that was just booked and charged
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      outcome: { type: string, const: PENDING_MANUAL }
+                      reason: { type: string }
+                  - type: object
+                    description: A confirmed return
+                    properties:
+                      outcome: { type: string, const: INITIATED }
+                      returnShipment: { $ref: "#/components/schemas/ShipmentView" }
+                  - type: object
+                    description: A confirmed reroute
+                    properties:
+                      outcome: { type: string, const: INITIATED }
+                      rerouteShipment: { $ref: "#/components/schemas/ShipmentView" }
+                      legCostsMoreThanOriginal: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "No shipment with that id, or no return/reroute is currently awaiting confirmation" }
+  /shipping/{id}/availability-windows:
+    put:
+      tags: [Shipping]
+      summary: The sender's own write surface for pickup/delivery availability windows (BMPL-285)
+      description: >-
+        Replace-all, same shape as the admin hub-hours PUT — a window the
+        sender no longer submits no longer applies; there is never a stale
+        row left sitting beside new ones. By id, since the sender's own
+        shipment view already carries it. A linked recipient uses the
+        separate by-reference routes on `ShipmentRecipientController`
+        instead (`PUT /shipping/incoming/{reference}/availability-window`)
+        and may only touch their own RECIPIENT-role window — see
+        `ShipmentService.setAvailabilityWindows` for the whole
+        authorization rule. Refused (400) for a role whose governing leg
+        (the pickup leg for SENDER, the delivery leg for RECIPIENT) has
+        already started; clearing (submitting no windows for that role) is
+        always allowed. Up to 10 windows total across both roles.
+      parameters:
+        - { $ref: "#/components/parameters/shipmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [windows]
+              properties:
+                windows:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [role, startTime, endTime]
+                    properties:
+                      role: { type: string, enum: [SENDER, RECIPIENT] }
+                      startTime: { type: string, example: "09:00" }
+                      endTime: { type: string, example: "17:00" }
+      responses:
+        "201":
+          description: The shipment, customer audience, reflecting the windows just set
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ---- Driver courier-leg jobs ----
   /driver/shipping-jobs/{id}:
@@ -831,6 +968,41 @@ paths:
                 properties:
                   declined: { type: boolean, const: true }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/code:
+    get:
+      tags: [DriverShippingJobs]
+      summary: My own pickup or handoff code for this leg (TERM-5)
+      description: >-
+        "TERM-5: the courier's own code to present at a hub counter — never
+        the recipient's delivery code." (quoted from this route's own doc
+        comment; verification is `ShipmentService.revealCourierCode`).
+        Strictly throttled. `kind` depends on the leg: `handoff` for
+        FIRST_MILE, `pickup` for LAST_MILE — DIRECT and LINE_HAUL have no
+        terminal code for a courier to present and are refused (400).
+        Deliberately never returns a LAST_MILE/DIRECT leg's own delivery
+        code or a FIRST_MILE/DIRECT leg's own collection code — those
+        belong to the recipient and the sender, never to the driver. Only
+        available once the leg has reached the eligible stage
+        (FIRST_MILE/ARRIVING or LAST_MILE/DRIVER_ACCEPTED) and before the
+        leg is COMPLETED or CANCELLED. `ownedLeg` scopes the route to the
+        caller's own job (404, not 403, on a foreign leg) before a second,
+        self-contained assigned-courier check runs.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: The leg's own pickup or handoff code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind: { type: string, enum: [pickup, handoff] }
+                  code: { type: [string, "null"] }
+                  attempts: { type: integer }
+        "400": { description: "DIRECT or LINE_HAUL (no terminal code for a courier to present), the leg is already finished, or it has not yet reached the eligible stage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Not the courier assigned to this leg" }
         "404": { $ref: "#/components/responses/NotFound" }
   /driver/shipping-jobs/{id}/pickup:
     post:
@@ -966,6 +1138,38 @@ paths:
       responses:
         "201":
           description: The job after attaching the photo(s)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/report-issue:
+    post:
+      tags: [DriverShippingJobs]
+      summary: The courier reports something wrong with this leg (MDF-96)
+      description: >-
+        The same exception gate staff use
+        (`ShipmentService.flagException`), reused rather than duplicated.
+        `ownedLeg` scopes it to the caller's own job (404 on a foreign
+        leg). Refused (400) unless the leg's courier status is currently
+        one of DRIVER_ACCEPTED, PICKUP_CONFIRMED, IN_TRANSIT, or ARRIVING —
+        a positive allow-list (`REPORTABLE_COURIER_STATUSES`); DELIVERED
+        and CANCELLED are terminal and were never going to be members of
+        it.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 4, maxLength: 500 }
+      responses:
+        "201":
+          description: The job after the exception is flagged
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DriverShippingJob" }
@@ -3153,6 +3357,19 @@ components:
         requestedDate: { type: string, format: date, description: "BMPL-283. The date (YYYY-MM-DD, Belize calendar) that was checked — the requested date, or today when none was given." }
         dateUnavailable: { type: boolean, description: "BMPL-283. True when the SAME journey plans fine without a date — so the requested date, specifically, is why this failed. False means the date was never the problem (no route/hub/mode at all)." }
         nextAvailableDate: { type: [string, "null"], format: date, description: "BMPL-283. The next date the real planner itself confirms this journey would work, found by searching forward up to 14 days — never a guess from partial schedule rows. Null when dateUnavailable is false, or when nothing within the horizon is confirmed (degrades to plain unavailability rather than a guess)." }
+    MidCarryUnavailable:
+      type: object
+      description: >-
+        A return or reroute cannot be priced because the leg it would apply
+        to is still mid-journey, not at a delivery attempt — redirecting or
+        returning from wherever the parcel currently sits is a different
+        movement than a shipment-level quote, so pricing it needs a human
+        decision, not a guess (`MID_CARRY_RETURN_MESSAGE`/
+        `MID_CARRY_REROUTE_MESSAGE`).
+      properties:
+        available: { type: boolean, const: false }
+        reason: { type: string, const: MID_CARRY }
+        message: { type: string }
     HubBrief:
       type: [object, "null"]
       properties:
@@ -3452,6 +3669,16 @@ components:
         custody:
           type: array
           items: { $ref: "#/components/schemas/CustodyEventView" }
+        availabilityWindows:
+          type: array
+          description: "BMPL-285. Empty means unconstrained — attempt pickup/delivery at any time. Was already returned by `ShipmentService.serialize` for every customer-audience response before this PR; missing from this schema until now."
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              role: { type: string, enum: [SENDER, RECIPIENT] }
+              startTime: { type: string, example: "09:00" }
+              endTime: { type: string, example: "17:00" }
     RecipientTrackingView:
       type: object
       description: >-
