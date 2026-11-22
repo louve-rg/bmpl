@@ -193,6 +193,34 @@ export function UnlinkedCollectionCode({ token }: { token: string }) {
             <p className="mt-2 text-sm text-slate-600">
               If this isn&rsquo;t resolved soon, you may need to request a new code once our team has cleared the hold.
             </p>
+            {/*
+             * WEB-HOLD-RESEND-BUTTON-OFF-SCREEN: the sentence above told the
+             * reader to request a new code, but the control that does it
+             * lived only in the `phase !== 'revealed'` branch below, which
+             * this branch never reaches -- so there was no way to act on it
+             * from here. Calling requestCode() flips `phase` to 'sent',
+             * which hands off to that existing input/resend UI; the
+             * cooldown state is already shared (persisted per-token), so a
+             * recent request from before this reveal is still honored.
+             */}
+            {requestError && (
+              <Alert tone="warning" className="mt-3">
+                {requestError}
+              </Alert>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void requestCode()}
+              disabled={requesting || onCooldown}
+              className="mt-3"
+            >
+              {requesting
+                ? 'Sending…'
+                : onCooldown
+                  ? `You can request another token in ${formatRemaining(cooldownRemaining)}`
+                  : 'Email me a new token'}
+            </Button>
           </>
         ) : (
           <p className="mt-3 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
