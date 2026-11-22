@@ -127,6 +127,7 @@ test.describe('/dashboard/orders/[id] (vendor) never overflows on customer free 
       const count = await cards.count();
       for (let i = 0; i < count; i++) {
         const measured = await cards.nth(i).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
         expect(
           measured.scrollWidth,
           `card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,

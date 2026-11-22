@@ -144,6 +144,7 @@ test.describe('/dashboard/driver/jobs/[id] never overflows on free text', () => 
       const header = page.locator('h1', { hasText: 'Order #10234' }).locator('..');
       const measured = await header.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
 
+      console.log(`PageHeader title/description wrapper scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
       expect(
         measured.scrollWidth,
         `PageHeader title/description wrapper scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,
@@ -158,6 +159,7 @@ test.describe('/dashboard/driver/jobs/[id] never overflows on free text', () => 
     const main = page.locator('main');
     const measured = await main.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
 
+    console.log(`dashboard main scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at 320px`);
     expect(
       measured.scrollWidth,
       `dashboard main scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at 320px`,

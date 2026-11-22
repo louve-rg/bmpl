@@ -104,6 +104,7 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] sh
 
       const measured = await parcelRow!.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
 
+      console.log(`Parcel row scrollWidth ${measured.scrollWidth} vs its own clientWidth ${measured.clientWidth} at ${width}px -- the row should never overflow itself`);
       expect(
         measured.scrollWidth,
         `Parcel row scrollWidth ${measured.scrollWidth} vs its own clientWidth ${measured.clientWidth} at ${width}px -- the row should never overflow itself`,

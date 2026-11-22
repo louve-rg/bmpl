@@ -72,6 +72,7 @@ test.describe('cart with a real item stays inside the viewport at 320px', () => 
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }));
+    console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px`);
     expect(scrollWidth, 'page overflow at 320px').toBeLessThanOrEqual(clientWidth + 1);
   });
 });

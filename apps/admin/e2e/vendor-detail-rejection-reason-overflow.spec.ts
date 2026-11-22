@@ -81,6 +81,7 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] Al
       });
 
       expect(measured, 'alert element not found').not.toBeNull();
+      console.log(`alert scrollWidth ${measured!.scrollWidth} vs its own clientWidth ${measured!.clientWidth} at ${width}px`);
       expect(
         measured!.scrollWidth,
         `alert scrollWidth ${measured!.scrollWidth} vs its own clientWidth ${measured!.clientWidth} at ${width}px`,

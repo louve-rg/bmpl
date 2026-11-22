@@ -140,6 +140,7 @@ test.describe('/dashboard/products/[id] never overflows on vendor free text', ()
       const count = await cards.count();
       for (let i = 0; i < count; i++) {
         const measured = await cards.nth(i).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+        console.log(`card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`);
         expect(
           measured.scrollWidth,
           `card #${i} scrollWidth ${measured.scrollWidth} vs clientWidth ${measured.clientWidth} at ${width}px`,
@@ -148,6 +149,7 @@ test.describe('/dashboard/products/[id] never overflows on vendor free text', ()
 
       const header = page.locator('h1').locator('..');
       const headerMeasured = await header.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      console.log(`title block scrollWidth ${headerMeasured.scrollWidth} vs clientWidth ${headerMeasured.clientWidth} at ${width}px`);
       expect(
         headerMeasured.scrollWidth,
         `title block scrollWidth ${headerMeasured.scrollWidth} vs clientWidth ${headerMeasured.clientWidth} at ${width}px`,
@@ -155,6 +157,7 @@ test.describe('/dashboard/products/[id] never overflows on vendor free text', ()
 
       const breadcrumbNav = page.getByRole('navigation', { name: 'Breadcrumb' });
       const breadcrumbMeasured = await breadcrumbNav.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      console.log(`breadcrumb nav scrollWidth ${breadcrumbMeasured.scrollWidth} vs clientWidth ${breadcrumbMeasured.clientWidth} at ${width}px`);
       expect(
         breadcrumbMeasured.scrollWidth,
         `breadcrumb nav scrollWidth ${breadcrumbMeasured.scrollWidth} vs clientWidth ${breadcrumbMeasured.clientWidth} at ${width}px`,

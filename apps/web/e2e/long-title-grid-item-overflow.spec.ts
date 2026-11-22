@@ -70,6 +70,7 @@ test.describe('an unbroken long title does not overflow the page at 320px', () =
     await page.goto('/products');
     const result = await injectLongTextAndMeasure(page, 'p.mt-3.font-semibold.text-belize-navy');
     test.skip(!result.found, 'No ProductCard rendered -- the API is dead in this environment, so there is no card to inject a long title into.');
+    console.log(`page scrollWidth ${result.scrollWidth} vs clientWidth ${result.clientWidth} at 320px after an unbroken long title`);
     expect(result.scrollWidth, 'page overflow at 320px after an unbroken long title').toBeLessThanOrEqual(result.clientWidth! + 1);
   });
 
@@ -78,6 +79,7 @@ test.describe('an unbroken long title does not overflow the page at 320px', () =
     await page.goto('/jobs');
     const result = await injectLongTextAndMeasure(page, 'h3.font-bold.text-belize-navy');
     test.skip(!result.found, 'No JobCard rendered -- the API is dead in this environment, so there is no card to inject a long title into.');
+    console.log(`page scrollWidth ${result.scrollWidth} vs clientWidth ${result.clientWidth} at 320px after an unbroken long title`);
     expect(result.scrollWidth, 'page overflow at 320px after an unbroken long title').toBeLessThanOrEqual(result.clientWidth! + 1);
   });
 
@@ -86,6 +88,7 @@ test.describe('an unbroken long title does not overflow the page at 320px', () =
     await page.goto('/vendors');
     const result = await injectLongTextAndMeasure(page, 'a[href^="/store/"] p.font-semibold');
     test.skip(!result.found, 'No vendor card rendered -- the API is dead in this environment, so there is no card to inject a long business name into.');
+    console.log(`page scrollWidth ${result.scrollWidth} vs clientWidth ${result.clientWidth} at 320px after an unbroken long business name`);
     expect(result.scrollWidth, 'page overflow at 320px after an unbroken long business name').toBeLessThanOrEqual(result.clientWidth! + 1);
   });
 });

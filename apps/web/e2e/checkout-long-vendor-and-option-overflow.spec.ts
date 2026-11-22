@@ -102,6 +102,7 @@ test.describe('checkout never overflows the page on a long vendor name or produc
         clientWidth: document.documentElement.clientWidth,
       }));
 
+      console.log(`page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long vendor name or option value should never widen the page`);
       expect(
         scrollWidth,
         `page scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at ${width}px -- a long vendor name or option value should never widen the page`,
