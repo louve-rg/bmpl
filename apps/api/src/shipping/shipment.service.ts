@@ -6352,6 +6352,25 @@ export class ShipmentService {
       await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
     ).userId;
 
+    // SHIP-S1: a loose, deliberate duplicate of the strict check below —
+    // not a stray leftover. flagException now also writes courierStatus, so
+    // a leg locked out by five bad codes reads courierStatus === 'EXCEPTION'
+    // by the time a later attempt arrives. verifyLegPinOrThrow's wrong-code
+    // branch is NOT side-effect-free (it increments the attempt counter,
+    // writes an audit row, and can itself call flagException on the
+    // exhausting attempt) — so a leg that is "not ready" for any OTHER
+    // reason (already released, already IN_TRANSIT, ...) must be refused
+    // HERE, before the pin call, or a wrong code against it would consume an
+    // attempt and could flag a brand-new exception on a leg nobody is
+    // actually PIN-locking. EXCEPTION is the one status let through to the
+    // pin call anyway, so the lockout's own specific 403 ("too many
+    // incorrect codes") still fires first for a genuinely locked leg — the
+    // strict check below is what catches it for every other non-EXCEPTION,
+    // non-DRIVER_ACCEPTED status.
+    if (leg.courierStatus !== 'DRIVER_ACCEPTED' && leg.courierStatus !== 'EXCEPTION') {
+      throw new BadRequestException('This leg is not ready to be released to its courier.');
+    }
+
     // Only a grandfathered leg skips this — see the method's own comment.
     // A leg with a real pin still must match it, exactly as before.
     if (!leg.pickupPinGrandfathered) {
@@ -6362,18 +6381,14 @@ export class ShipmentService {
       await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
     }
 
-    // SHIP-S1: moved below verifyLegPinOrThrow, not above it. Since
-    // flagException now also writes courierStatus (this card's whole fix),
-    // a leg locked out by five bad codes reads courierStatus === 'EXCEPTION'
-    // here, same as any other committed-state exception. Checking that
-    // BEFORE the pin call would throw this generic "not ready" 400 and bury
-    // verifyLegPinOrThrow's own specific, correct 403 ("too many incorrect
-    // codes") for every attempt after the lockout — the identical
-    // assertNotException-vs-assertAction shadowing this PR already fixed in
-    // ShipmentDriverService, one call site this file's own audit missed.
-    // Checking it here instead means the lockout's 403 still fires first,
-    // and this stays only a backstop for every other "not DRIVER_ACCEPTED"
-    // reason (already released, already in transit, ...).
+    // SHIP-S1: the strict half of the pair above — this is what actually
+    // catches an EXCEPTION leg once it's past the loose check. Kept BELOW
+    // verifyLegPinOrThrow, not above it: checking first would throw this
+    // generic "not ready" 400 and bury verifyLegPinOrThrow's own specific,
+    // correct 403 for a locked leg — the identical assertNotException-vs-
+    // assertAction shadowing this PR already fixed in ShipmentDriverService,
+    // one call site this file's own audit missed. Checking it here means
+    // the lockout's 403 still wins.
     if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
       throw new BadRequestException('This leg is not ready to be released to its courier.');
     }
