@@ -34,13 +34,14 @@ const ME: MeView = {
 };
 
 const apiGet = vi.fn((_path: string) => Promise.resolve(ME));
+const apiDel = vi.fn((..._args: [string, unknown?]) => Promise.resolve({ ok: true }));
 vi.mock('../../../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../lib/api')>()),
   api: {
     get: (...args: [string]) => apiGet(...args),
     post: vi.fn(),
     patch: vi.fn(() => Promise.resolve(ME)),
-    del: vi.fn(),
+    del: (...args: [string, unknown?]) => apiDel(...args),
   },
 }));
 
@@ -73,15 +74,16 @@ function mount() {
 }
 
 /**
- * MDF-925: the new account settings surface. Profile/contact (PATCH
- * /me/profile) and password security (Pam's MDF-923 contract, POST
- * /auth/change-password) are both live now -- the field-level behavior of
- * each lives in its own component's test file (`ContactInfoForm.test.tsx`,
- * `ChangePasswordForm.test.tsx`); this file only has to prove both sections
- * are actually mounted on this page. Session management and account
- * deletion still have no server route, so this card's own rule applies --
- * no control ships without one -- and those two sections must be genuinely
- * absent from the DOM, not present and disabled.
+ * MDF-925: the account settings surface. Profile/contact (PATCH
+ * /me/profile), password security (Pam's MDF-923 contract, POST
+ * /auth/change-password) and account deletion (DELETE /me, MDF-924) are
+ * all live now -- the field-level behavior of each lives in its own
+ * component's test file (`ContactInfoForm.test.tsx`,
+ * `ChangePasswordForm.test.tsx`, `DeleteAccountForm.test.tsx`); this file
+ * only has to prove all three sections are actually mounted on this page.
+ * Session management still has no server route, so this card's own rule
+ * applies -- no control ships without one -- and that section must be
+ * genuinely absent from the DOM, not present and disabled.
  */
 describe('SettingsPage (MDF-925)', () => {
   it('loads the signed-in person from /me and shows the profile/contact section', async () => {
@@ -113,21 +115,28 @@ describe('SettingsPage (MDF-925)', () => {
     expect(container!.textContent).not.toContain('SSO');
   });
 
-  it('does not render session or deletion controls -- their server routes are not merged yet', async () => {
+  it('renders the delete-account section now that DELETE /me has a route behind it', async () => {
+    mount();
+    await flush();
+
+    expect(container!.textContent).toContain('Delete account');
+    expect(container!.querySelector('#deleteAccountPassword')).not.toBeNull();
+    // ContactInfoForm's "Save changes" + ChangePasswordForm's "Change password" + DeleteAccountForm's "Delete account".
+    expect(container!.querySelectorAll('button[type="submit"]').length).toBe(3);
+  });
+
+  it('does not render session controls -- that server route is not merged yet', async () => {
     mount();
     await flush();
 
     expect(container!.textContent).not.toContain('Active sessions');
-    expect(container!.textContent).not.toContain('Delete account');
-    // ContactInfoForm's "Save changes" + ChangePasswordForm's "Change password".
-    expect(container!.querySelectorAll('button[type="submit"]').length).toBe(2);
   });
 
-  it('says honestly, in plain text, that the remaining sections are coming -- not silently absent', async () => {
+  it('says honestly, in plain text, that session management is still coming -- not silently absent', async () => {
     mount();
     await flush();
 
-    expect(container!.textContent).toContain('Active session management and account deletion are coming to this page soon.');
+    expect(container!.textContent).toContain('Active session management is coming to this page soon.');
   });
 
   it('shows a plain error instead of a blank page when /me fails to load', async () => {

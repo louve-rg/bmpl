@@ -13,6 +13,12 @@ const REASON_MESSAGES: Record<string, string> = {
   // the confirmation shows up HERE rather than as a toast on a dashboard
   // page whose session the server has already ended.
   'password-changed': 'Your password was changed. Please sign in again.',
+  // MDF-925/MDF-924: deleteAccount revokes every session the same way.
+  // Copy rule from the controller's own doc comment -- this is NOT a full
+  // erasure, so the confirmation says "anonymized," never "deleted": a
+  // completed order or shipment keeps its own stored recipient name and
+  // address by owner ruling.
+  'account-anonymized': 'Your profile has been anonymized and your past order records are retained.',
 };
 
 export default function LoginPage() {
