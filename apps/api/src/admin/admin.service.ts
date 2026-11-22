@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -466,6 +467,19 @@ export class AdminService {
     }
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found.');
+    // ACCT-DELETED-ACCOUNT-RESURRECTION: suspension and deletion both land on
+    // this same row (status + a suspendedAt/suspendedReason pair vs. status +
+    // deletedAt), and before this check this method could not tell them
+    // apart — it set status back to ACTIVE on either one. A suspension is
+    // this platform's decision and reversible by this platform; deletion is
+    // the account owner's own decision to be erased, and nothing here gets
+    // to override that unilaterally. deletedAt is therefore checked on its
+    // own, never folded into the suspendedAt/suspendedReason reset above.
+    if (user.deletedAt) {
+      throw new ConflictException(
+        'This account was deleted by its owner and cannot be restored.',
+      );
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },

@@ -165,7 +165,14 @@ export class AuthService {
 
   async resendVerification(email: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.emailVerifiedAt) return; // silent — no enumeration
+    // ACCT-DELETED-ACCOUNT-RESURRECTION: a deleted account is folded into
+    // the same silent no-op as "already verified" or "no such email" —
+    // it is anti-enumeration by construction (the caller cannot tell which
+    // of the three is true), and it is also correct on its own: no mail
+    // should ever go out, and no token should ever be mintable, for an
+    // account whose owner asked to be erased. Same rule, same shape, in
+    // forgotPassword below.
+    if (!user || user.emailVerifiedAt || user.deletedAt) return;
     const token = generateToken();
     await this.prisma.emailVerificationToken.create({
       data: {
@@ -182,10 +189,18 @@ export class AuthService {
     );
   }
 
-  /** Always returns success to prevent account enumeration. */
+  /**
+   * Always returns success to prevent account enumeration.
+   *
+   * ACCT-DELETED-ACCOUNT-RESURRECTION: folded into the same silent no-op as
+   * "no such email", for the same reason and the same rule as the twin
+   * check in {@link resendVerification} just above — no mail should ever go
+   * out, and no token should ever be mintable, for an account whose owner
+   * asked to be erased. Read as one decision made twice, not two.
+   */
   async forgotPassword(email: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) return;
+    if (!user || user.deletedAt) return;
     const token = generateToken();
     await this.prisma.passwordResetToken.create({
       data: {
@@ -205,8 +220,19 @@ export class AuthService {
   async resetPassword(input: ResetPasswordInput, meta: RequestMeta): Promise<void> {
     const record = await this.prisma.passwordResetToken.findUnique({
       where: { tokenHash: hashToken(input.token) },
+      include: { user: { select: { deletedAt: true } } },
     });
-    if (!record || record.consumedAt || record.expiresAt < new Date()) {
+    // ACCT-DELETED-ACCOUNT-RESURRECTION: a token minted BEFORE deletion is
+    // still unexpired and unconsumed at the time it's presented here — deletion
+    // writes `deletedAt` but never touches outstanding tokens, so without this
+    // check this would be a working account takeover on an account its owner
+    // erased. Folded into the same generic "invalid or expired" refusal as
+    // every other reason this token cannot be honored, rather than a distinct
+    // message: the token itself is the only thing that correlates a caller to
+    // this specific account, so there is no new enumeration surface either way,
+    // and a caller who legitimately has this token gets no less useful an
+    // answer than an expired one does today.
+    if (!record || record.consumedAt || record.expiresAt < new Date() || record.user.deletedAt) {
       throw new BadRequestException('This reset link is invalid or has expired.');
     }
     const passwordHash = await hashPassword(input.password);
