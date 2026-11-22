@@ -224,7 +224,14 @@ export class DriverJobFeedService {
       ...legs.map((l) => ({
         job: this.fromLeg(l),
         stop: this.legStop(l),
-        routable: l.acceptedAt != null && l.courierStatus !== 'ASSIGNED',
+        // SHIP-S1B: same shape as the marketplace branch above, and for the
+        // same reason — EXCEPTION has no legal next physical step, so
+        // routing to it would ask the optimizer to plan a stop the driver
+        // cannot act on. This exclusion only became meaningful once #834
+        // made flagException actually write courierStatus on a leg;
+        // before that a flagged leg's courierStatus was often left stale,
+        // so there was nothing here to exclude on.
+        routable: l.acceptedAt != null && l.courierStatus !== 'ASSIGNED' && l.courierStatus !== 'EXCEPTION',
       })),
     ].sort((a, b) => compareDriverJobs(a.job, b.job));
 
