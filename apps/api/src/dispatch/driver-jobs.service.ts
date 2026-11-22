@@ -18,7 +18,7 @@ import {
   type DriverDeliveryView,
   type LocationInput,
 } from '@bmpl/shared';
-import type { ConfirmDeliveryInput, ConfirmPickupInput, DeclineJobInput, PodConfirmInput, ReorderDriverQueueInput } from '@bmpl/validation';
+import type { ConfirmDeliveryInput, ConfirmPickupInput, DeclineJobInput, PodConfirmInput, ReorderDriverQueueInput, ReportDeliveryExceptionInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -739,6 +739,55 @@ export class DriverJobService {
     });
     if (!won) {
       throw new ConflictException('This delivery changed state before it could be updated — reload and try again.');
+    }
+    return this.getJob(actor.userId, deliveryId);
+  }
+
+  /**
+   * MDF-927: the driver reports that a job they already hold could not be
+   * completed. The one edge off the forward track once PICKUP_CONFIRMED is
+   * reached — see RAISE_EXCEPTION's own comment in packages/shared/dispatch.ts
+   * for why this is terminal-by-design (no retry edge) rather than a
+   * reassignment. Admin is told immediately: EXCEPTION has no automatic
+   * next step, so a silent one would be the exact "stuck with no next
+   * action" defect this exists to close.
+   */
+  async reportException(actor: Actor, deliveryId: string, dto: ReportDeliveryExceptionInput) {
+    const { d } = await this.ownedDelivery(actor.userId, deliveryId);
+    this.core.assertAction('RAISE_EXCEPTION', d.status);
+    const fromStatus = d.status;
+
+    // Conditional write, same shape as simpleTransition/confirmPickup above:
+    // no OTHER actor can reach PICKUP_CONFIRMED/IN_TRANSIT/ARRIVING (CANCEL's
+    // `from` stops at EXCEPTION, not these three — see dispatch.ts), so this
+    // only closes a same-driver double-submit, not a cross-actor race.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: fromStatus },
+        data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: dto.reason },
+      });
+      if (claimed.count === 0) return false;
+      await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus: 'EXCEPTION', event: 'RAISE_EXCEPTION', actorRole: 'DRIVER', actorUserId: actor.userId, note: dto.reason });
+      await this.core.auditTransition('RAISE_EXCEPTION', actor.userId, deliveryId, { reason: dto.reason }, tx);
+      return true;
+    });
+    if (!won) {
+      throw new ConflictException('This delivery changed state before the problem could be reported — reload and try again.');
+    }
+    // Best-effort, outside the transaction: an admin alert that fails to send
+    // must not roll back a report the driver has already made — the report
+    // standing (even silently) is strictly better than losing it because a
+    // notification failed.
+    try {
+      await this.core.notifyAdmins('deliveries.manage', {
+        category: 'ADMIN_ALERT',
+        event: 'DELIVERY_EXCEPTION_RAISED',
+        title: 'Delivery problem reported',
+        body: `A driver could not complete order ${d.vendorOrder.order.orderNumber}: ${dto.reason}`,
+        data: { deliveryId },
+      });
+    } catch (err) {
+      this.logger.warn(`admin alert for delivery exception ${deliveryId} failed: ${String(err)}`);
     }
     return this.getJob(actor.userId, deliveryId);
   }

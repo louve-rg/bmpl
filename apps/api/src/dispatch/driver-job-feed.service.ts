@@ -216,7 +216,10 @@ export class DriverJobFeedService {
       ...deliveries.map((d) => ({
         job: this.fromDelivery(d),
         stop: this.deliveryStop(d),
-        routable: d.acceptedAt != null && d.status !== 'ASSIGNED',
+        // MDF-927: a delivery in EXCEPTION has no legal next physical step —
+        // routing it would ask the optimizer to plan a stop the driver
+        // cannot act on.
+        routable: d.acceptedAt != null && d.status !== 'ASSIGNED' && d.status !== 'EXCEPTION',
       })),
       ...legs.map((l) => ({
         job: this.fromLeg(l),
@@ -471,7 +474,8 @@ function deliveryScope(scope: DriverDeliveryView | 'open' | 'all'): Prisma.Order
     case 'assigned':
       return { OR: [{ status: 'ASSIGNED', acceptedAt: { not: null } }, { status: 'DRIVER_ACCEPTED' }] };
     case 'active':
-      return { status: { in: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] as never } };
+      // MDF-927: EXCEPTION stays in `active` — see DRIVER_VIEW_STATUSES.
+      return { status: { in: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING', 'EXCEPTION'] as never } };
     case 'completed':
       return { status: 'DELIVERED' };
     case 'open':

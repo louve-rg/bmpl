@@ -8,12 +8,14 @@ import {
   imagePresignSchema,
   podConfirmSchema,
   reorderDriverQueueSchema,
+  reportDeliveryExceptionSchema,
   type ConfirmDeliveryInput,
   type ConfirmPickupInput,
   type DeclineJobInput,
   type ImagePresignInput,
   type PodConfirmInput,
   type ReorderDriverQueueInput,
+  type ReportDeliveryExceptionInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { rawBody, uploadFileName } from '../common/raw-upload';
@@ -134,6 +136,17 @@ export class DriverJobsController {
   @Post(':id/arriving')
   arriving(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
     return this.jobs.markArriving(this.actor(u, req), id);
+  }
+
+  /**
+   * MDF-927: the driver reports that a job already in their hands
+   * (PICKUP_CONFIRMED / IN_TRANSIT / ARRIVING) could not be completed.
+   * See DriverJobService.reportException for why this is the one edge off
+   * the forward track rather than a retry.
+   */
+  @Post(':id/report-exception')
+  reportException(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(reportDeliveryExceptionSchema)) b: ReportDeliveryExceptionInput) {
+    return this.jobs.reportException(this.actor(u, req), id, b);
   }
 
   @StrictThrottle()

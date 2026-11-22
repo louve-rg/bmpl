@@ -22,6 +22,11 @@ export const DELIVERY_STATUSES = [
   'IN_TRANSIT',
   'ARRIVING',
   'DELIVERED',
+  // MDF-927: the driver's own report that a job reached PICKUP_CONFIRMED,
+  // IN_TRANSIT or ARRIVING and could not be completed (see RAISE_EXCEPTION
+  // below). Deliberately NOT in TERMINAL_DELIVERY_STATUSES — it still has a
+  // pending fate, it just has no further DRIVER action, only admin CANCEL.
+  'EXCEPTION',
   'CANCELLED',
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
@@ -49,9 +54,37 @@ export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
 /**
  * The delivery actions and their legal (from → to) edges + required actor.
- * Cancellation is allowed ONLY from pre-pickup states — once goods are picked up
- * (PICKUP_CONFIRMED) inventory is finalized and reversal is out of M15 scope
- * (refunds/settlement are explicitly deferred).
+ *
+ * CANCEL's reach was ONLY pre-pickup from M15 through 2026-11-22: once goods
+ * were picked up, reversal was out of scope (refunds/settlement explicitly
+ * deferred), so there was no edge back off the forward track at all past
+ * PICKUP_CONFIRMED — a driver who could not complete a job after pickup, or
+ * an admin who needed to stop one, had no legal next action. Superseded,
+ * not ignored: the owner directive of 2026-11-22 (MDF-927) names a failed
+ * attempt, an exception, a post-dispatch cancellation and a return as
+ * required parts of the shipment lifecycle. The fix is ONE new edge, not
+ * four: RAISE_EXCEPTION gives the driver a way to report the problem
+ * (PICKUP_CONFIRMED/IN_TRANSIT/ARRIVING → EXCEPTION), and CANCEL's `from`
+ * gained EXCEPTION as the one way an admin can resolve it — still no
+ * refund/escrow/settlement step here, deliberately; that is a separate,
+ * owner-level money decision (MDF-927), not state the dispatch edge moves.
+ *
+ * RAISE_EXCEPTION is written for OrderDelivery (marketplace) only, even
+ * though ShipmentLeg.courierStatus shares this exact enum and table. A
+ * courier leg already has its own staff/system-driven exception mechanism
+ * on ShipmentLeg.status (apps/api/src/shipping/shipment.service.ts) — a
+ * second, courierStatus-driven one would be two sources for the same fact.
+ * Nothing in apps/api/src/shipping calls RAISE_EXCEPTION; keep it that way
+ * unless that leg-side mechanism is reconciled with this one first.
+ *
+ * TERMINAL BY DESIGN, NOT BY DEFAULT: EXCEPTION has exactly one way out
+ * (admin CANCEL) rather than a retry edge back to ASSIGNED, because the
+ * existing REASSIGN edge means "re-offer this SAME vendor pickup to a
+ * different driver" — correct pre-pickup, wrong once a driver already
+ * holds the parcel (the new driver would be told to collect from the
+ * vendor, which is no longer where the goods are). A true retry needs a
+ * driver-to-driver handoff flow this table does not have yet; that is
+ * future scope, not this edge.
  */
 export const DELIVERY_ACTIONS = {
   ASSIGN: { actor: 'ADMIN', from: ['PENDING_ASSIGNMENT'], to: 'ASSIGNED' },
@@ -74,7 +107,11 @@ export const DELIVERY_ACTIONS = {
   IN_TRANSIT: { actor: 'DRIVER', from: ['PICKUP_CONFIRMED'], to: 'IN_TRANSIT' },
   ARRIVING: { actor: 'DRIVER', from: ['IN_TRANSIT'], to: 'ARRIVING' },
   DELIVER: { actor: 'DRIVER', from: ['ARRIVING'], to: 'DELIVERED' },
-  CANCEL: { actor: 'ADMIN', from: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED'], to: 'CANCELLED' },
+  // MDF-927: the only edge off the forward track once a job is in the
+  // driver's hands. Scoped to marketplace OrderDelivery — see this table's
+  // own header comment for why it must not be wired to a courier leg as-is.
+  RAISE_EXCEPTION: { actor: 'DRIVER', from: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'], to: 'EXCEPTION' },
+  CANCEL: { actor: 'ADMIN', from: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED', 'EXCEPTION'], to: 'CANCELLED' },
 } as const satisfies Record<string, { actor: DeliveryActor; from: readonly DeliveryStatus[]; to: DeliveryStatus }>;
 
 export type DeliveryAction = keyof typeof DELIVERY_ACTIONS;
@@ -112,6 +149,7 @@ export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
   IN_TRANSIT: 'On the way',
   ARRIVING: 'Arriving',
   DELIVERED: 'Delivered',
+  EXCEPTION: 'Delivery problem reported',
   CANCELLED: 'Cancelled',
 };
 

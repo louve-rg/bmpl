@@ -31,13 +31,25 @@ export const reassignDeliverySchema = z.object({
 });
 export type ReassignDeliveryInput = z.infer<typeof reassignDeliverySchema>;
 
-/** Admin cancels an assignment (only legal before pickup). Reason mandatory. */
+/**
+ * Admin cancels an assignment — legal before pickup, or from EXCEPTION
+ * (MDF-927: a reported, unresolved post-pickup problem). Reason mandatory.
+ */
 export const cancelDeliverySchema = z.object({ reason });
 export type CancelDeliveryInput = z.infer<typeof cancelDeliverySchema>;
 
 /** Driver declines an assignment; a reason is mandatory. */
 export const declineJobSchema = z.object({ reason });
 export type DeclineJobInput = z.infer<typeof declineJobSchema>;
+
+/**
+ * Driver reports that a job they already hold (PICKUP_CONFIRMED, IN_TRANSIT
+ * or ARRIVING) could not be completed — recipient unreachable, wrong
+ * address, unsafe handoff, or similar (MDF-927). Reason mandatory; this is
+ * the driver's own account, not a staff-entered one.
+ */
+export const reportDeliveryExceptionSchema = z.object({ reason });
+export type ReportDeliveryExceptionInput = z.infer<typeof reportDeliveryExceptionSchema>;
 
 /** Driver confirms pickup by submitting the vendor-held pickup PIN. Also reused by
  *  vendor pickup-collection confirmation (M18.1). */

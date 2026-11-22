@@ -45,6 +45,7 @@ export const AUDIT_FOR_ACTION: Record<DeliveryAction, AuditAction> = {
   IN_TRANSIT: 'DELIVERY_IN_TRANSIT',
   ARRIVING: 'DELIVERY_ARRIVING',
   DELIVER: 'DELIVERY_COMPLETED',
+  RAISE_EXCEPTION: 'DELIVERY_EXCEPTION_RAISED',
 };
 
 /** Full relation graph needed to serialize a delivery for any audience. */
@@ -296,6 +297,7 @@ export class DeliveryCoreService {
         arrivingAt: d.arrivingAt,
         deliveredAt: d.deliveredAt,
         cancelledAt: d.cancelledAt,
+        exceptionAt: d.exceptionAt,
       },
       placedAt: order.placedAt,
       createdAt: d.createdAt,
@@ -389,6 +391,11 @@ export class DeliveryCoreService {
         // Whether the driver still needs a PIN (never the PIN itself).
         requiresPickupPin: !!d.pickupPin && d.pickupVerificationStatus === 'PENDING',
         requiresDeliveryPin: !!d.deliveryPin && d.deliveryVerificationStatus === 'PENDING',
+        // MDF-927: the driver's OWN report, read back to the driver who
+        // wrote it. Never a staff-entered reason (cancellationReason /
+        // reassignmentReason) — those are not in this audience's payload
+        // at all, by the same rule that keeps every other staff note out.
+        exceptionReason: d.exceptionReason,
       };
     }
 
@@ -443,6 +450,11 @@ export class DeliveryCoreService {
       deliveryPinAttempts: d.deliveryPinAttempts,
       assignedByUserId: d.assignedByUserId,
       podPhotoUrls,
+      // MDF-927: the driver's own report, operationally needed here to
+      // decide what to do next. cancellationReason/reassignmentReason are
+      // deliberately NOT added alongside it — this change doesn't touch
+      // their pre-existing (also absent) exposure, in or out of scope.
+      exceptionReason: d.exceptionReason,
       assignmentHistory: this.assignmentHistory(d),
       payment: order.payment ? { status: order.payment.status, amountMinor: money(order.payment.amountMinor), currency: order.payment.currency } : null,
       orderStatus: order.status,
