@@ -557,6 +557,12 @@ describe('account deletion — refusals', () => {
         licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
       },
     });
+    // MDF-949: this account's OWN passenger vehicle — the passenger-transport
+    // equivalent of the DriverVehicle below. Must be anonymized the same way.
+    const paxVehicle = await ctx.prisma.passengerVehicle.create({
+      data: { ownerDriverProfileId: paxDriver.id, type: 'CAR', make: 'Honda', model: 'Civic', licencePlate: 'REAL-PAX-PLATE-1', seatCapacity: 3 },
+    });
+
     // Defect 1 (acceptance): a COMPLETED delivery this driver already
     // finished, read back through the customer's OWN tracking endpoint
     // after deletion — proving the leak is closed at the actual read site,
@@ -608,6 +614,21 @@ describe('account deletion — refusals', () => {
         userId, businessName: 'Full Sweep Carrier', contactEmail: 'carrierops@example.bz', contactPhone: '6650020',
         addressLine1: '321 Real Dock Rd', operatingLicenceNumber: 'REAL-CARRIER-LICENCE-1',
       },
+    });
+
+    // MDF-949: a FLEET vehicle belonging to this account's OWN passenger-
+    // transport business, currently assigned to a SEPARATE, still-active
+    // driver. Must be LEFT ALONE even though the fleet's owner is the
+    // account being deleted — that driver may be using it right now.
+    const otherPaxDriverUser = await ctx.prisma.user.create({ data: { email: 'other-pax-driver@example.bz', passwordHash: 'x', firstName: 'Other', lastName: 'PaxDriver' } });
+    const otherPaxDriver = await ctx.prisma.passengerDriverProfile.create({
+      data: { userId: otherPaxDriverUser.id, legalName: 'Other Pax Driver', displayName: 'Other Pax Driver', phone: '6650098', homeDistrict: 'BELIZE', licenceNumber: 'OTHER-PAX-LICENCE-1', licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) },
+    });
+    const fleetVehicle = await ctx.prisma.passengerVehicle.create({
+      data: { providerProfileId: passengerProvider.id, type: 'VAN', make: 'Toyota', model: 'Hiace', licencePlate: 'REAL-FLEET-PLATE-1', seatCapacity: 10 },
+    });
+    await ctx.prisma.passengerFleetAffiliation.create({
+      data: { providerProfileId: passengerProvider.id, driverProfileId: otherPaxDriver.id, initiatedBy: 'PROVIDER', status: 'ACCEPTED', acceptedAt: new Date() },
     });
     const roleApplication = await ctx.prisma.roleApplication.create({
       data: { userId, roleCode: 'DELIVERY_DRIVER', status: 'PENDING' },
@@ -696,6 +717,17 @@ describe('account deletion — refusals', () => {
     expect(paxDriverAfter.displayName).toBe('Deleted Driver');
     expect(paxDriverAfter.licenceNumber).toBe(`DELETED-${paxDriver.id}`);
     expect(paxDriverAfter.isActive).toBe(false);
+
+    // MDF-949: this account's own passenger vehicle is anonymized, the same
+    // treatment as DriverVehicle.
+    const paxVehicleAfter = await ctx.prisma.passengerVehicle.findUniqueOrThrow({ where: { id: paxVehicle.id } });
+    expect(paxVehicleAfter.licencePlate).toBe(`DELETED-${paxVehicle.id}`);
+
+    // MDF-949: a fleet vehicle this account's business owns, but which a
+    // SEPARATE still-active driver is assigned to, is left completely
+    // alone — see anonymizePersonalData's doc comment for why.
+    const fleetVehicleAfter = await ctx.prisma.passengerVehicle.findUniqueOrThrow({ where: { id: fleetVehicle.id } });
+    expect(fleetVehicleAfter.licencePlate).toBe('REAL-FLEET-PLATE-1');
 
     // Defect 1, read through the ACTUAL customer-facing endpoint, not just
     // the row — delivery-core.service.ts's driverSummary() reads

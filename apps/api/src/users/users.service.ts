@@ -676,6 +676,62 @@ export class UsersService {
    *   dated record of what was actually said, and rewriting half of a
    *   two-sided conversation after the fact is worse than leaving it.
    *
+   * MDF-949 — full re-trace against `schema.prisma` (not this method) as the
+   * source of truth, prompted by two families the delivery report recorded
+   * as "checked? no": NOTIFICATIONS, and whatever else outside the
+   * user/profile graph had never been looked at.
+   *
+   * - `Notification` / `NotificationRecipient` / `NotificationPreference` —
+   *   traced, nothing to fix. `Notification.title`/`body` is system-authored
+   *   event text describing the SUBJECT of the event (an order, a vehicle, a
+   *   job) — surveyed roughly 15 call sites across the API and found none
+   *   that interpolate the recipient's own name/email/phone/address into the
+   *   text; a notification is addressed "Your ..."/"You ...", never by name.
+   *   `NotificationRecipient` and `NotificationPreference` carry no personal
+   *   field of their own at all beyond the `userId` FK, which already reads
+   *   through to the anonymized `User` row. Nothing here is a personal
+   *   identifier this method needs to touch.
+   * - `PassengerVehicle` — the real gap. Its own schema comment says it
+   *   "mirrors DriverVehicle's approval/registration/insurance shape", and
+   *   `DriverVehicle` already gets exactly that treatment above — but
+   *   nothing anonymized `PassengerVehicle` at all. Fixed below, reached via
+   *   `ownerDriverProfileId` only: that is the ONE vehicle this passenger
+   *   driver personally owns, the passenger-transport equivalent of the
+   *   single `DriverVehicle` a delivery driver owns. Deliberately NOT
+   *   reached via `providerProfileId`: that is a FLEET vehicle a provider
+   *   makes available to potentially several drivers via
+   *   `PassengerFleetAffiliation`, any of whom may be actively assigned to
+   *   it right now — the same still-active-other-party reasoning round 4
+   *   gave for not touching an agent-represented `PropertyDocument`.
+   *   `liveResponsibilities` has no check at all today for a
+   *   `PassengerProviderProfile` with active fleet/trip obligations; that is
+   *   a real gap, but a different one — a missing deletion-refusal business
+   *   rule, not a missed anonymization — and is reported rather than
+   *   invented here, same as the uncarded shipping-carrier-owner floor above.
+   *
+   * Surveyed and left alone, for the reasons already given above for a
+   * similarly-shaped field, not re-explained per table: `RoleApplication.
+   * message`, `JobApplication.coverLetter`/`employerNotes`,
+   * `JobApplicationAnswer`, `JobInterview.notes`/`location`,
+   * `PassengerFleetAffiliation.message`, `Conversation.subject`,
+   * `ReviewReport.note` (free text / bilateral record, the
+   * headline-or-Message reasoning above). `PropertyEnquiry.message`/
+   * `contactPhone` and `PropertyViewingRequest.message` (a message sent TO a
+   * listing owner who has not deleted their account — the Message
+   * reasoning, not the SavedAddress one). `TerminalCompanyProfile.
+   * contactEmail`/`contactPhone` and `TerminalCompanyInvite.email` (the
+   * company's own multi-member business record, never 1:1 with a single
+   * deleting user the way `VendorProfile` is). `Review`/`ReviewMedia`/
+   * `ReviewResponse` (the author's name/face is a live join to the already-
+   * anonymized `User` row, never a separately stored copy; `title`/`body`
+   * are the same free-text judgment call as `JobSeekerProfile.headline`).
+   * `Session.userAgent`/`ipAddress` on an already-revoked row (security/
+   * audit retention, the same standing as `AuditLog`). `PassengerBooking`'s
+   * pickup/dropoff snapshot (the `OrderAddress`/`OrderDelivery` owner-ruling
+   * precedent — a completed trip record, and any live display of who the
+   * rider was already resolves through the anonymized `User` row, same as
+   * `Review`).
+   *
    * Returns every storage key this pass orphaned, so the caller deletes the
    * actual objects AFTER the transaction commits — best-effort, same
    * pattern as the avatar cleanup in {@link deleteAccount} and
@@ -753,6 +809,36 @@ export class UsersService {
           availability: 'OFFLINE',
         },
       });
+      // PassengerVehicle: the schema's own comment says it "mirrors
+      // DriverVehicle's approval/registration/insurance shape" -- and
+      // DriverVehicle gets exactly this treatment above. Only the
+      // ownerDriverProfileId path: this is the ONE vehicle this driver
+      // personally owns, the passenger-transport equivalent of the
+      // single DriverVehicle a delivery driver owns. A vehicle reached
+      // instead via providerProfileId is a FLEET asset a provider makes
+      // available to potentially several drivers at once (see
+      // PassengerFleetAffiliation) -- other, still-active drivers may be
+      // assigned to it right now, so it is deliberately NOT touched here
+      // even when the provider itself is the account being deleted (see
+      // MDF-949's PR body for why that is reported, not fixed, in this
+      // card).
+      const ownedPassengerVehicles = await tx.passengerVehicle.findMany({
+        where: { ownerDriverProfileId: passengerDriver.id },
+        select: { id: true, photoKeys: true },
+      });
+      for (const vehicle of ownedPassengerVehicles) {
+        orphanedKeys.push(...vehicle.photoKeys);
+        await tx.passengerVehicle.update({
+          where: { id: vehicle.id },
+          data: {
+            licencePlate: `DELETED-${vehicle.id}`,
+            registrationNumber: null,
+            insuranceProvider: null,
+            insurancePolicyNumber: null,
+            photoKeys: [],
+          },
+        });
+      }
     }
 
     const jobSeeker = await tx.jobSeekerProfile.findUnique({
