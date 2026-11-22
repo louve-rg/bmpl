@@ -72,9 +72,26 @@ async function openSavedAddressConfirmation(page: Page) {
   return savedRow;
 }
 
+/**
+ * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): this spec failed once
+ * in CI -- `Error: locator.click: Test timeout of 30000ms exceeded`, waiting
+ * on the Delivery radio label at 375px -- and the 30000ms in that message is
+ * the TEST's own global timeout (playwright.config.ts), not an action wait,
+ * so raising only the click's own timeout would not have helped: the test
+ * dies at 30s regardless of what any inner wait is still doing. Every call
+ * this page makes (/api/cart, /api/wallet, /api/addresses) is already
+ * page.route()-mocked above -- there is no real backend in the critical
+ * path, so this is not backend latency. In the SAME run, this exact spec
+ * passed clean at the other four widths, and on the very next CI run it
+ * passed clean at all five -- this is single-worker CI runner variance
+ * (whatever else is on the box as this suite's ~151st-test-in-a-row render
+ * happens to land), not a slow product or a missing mock. Raising the TEST
+ * timeout to 60s gives that variance room without touching any assertion.
+ */
 test.describe('AddressField saved-address confirmation never widens the page on a long label', () => {
   for (const width of WIDTHS) {
     test(`page stays inside the viewport at ${width}px`, async ({ page }) => {
+      test.setTimeout(60_000);
       await page.setViewportSize({ width, height: 900 });
       await openSavedAddressConfirmation(page);
 

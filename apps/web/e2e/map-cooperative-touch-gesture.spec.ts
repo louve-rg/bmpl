@@ -121,8 +121,21 @@ async function newTouchContext(browser: Browser): Promise<{ context: BrowserCont
   return { context, page, cdp };
 }
 
+/**
+ * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): watch item, not an
+ * observed failure. `openEmbeddedCheckoutMap` clicks the same kind of
+ * Delivery-radio locator, on the same mocked /checkout page, that made
+ * address-saved-label-overflow.spec.ts fail once in CI with the test's own
+ * 30000ms global timeout exceeded (not an action wait -- raising only a
+ * locator/click timeout would not help). Every call this page makes
+ * (/api/cart) is already page.route()-mocked -- no real backend latency is
+ * in the critical path here either. This file has never failed in CI; the
+ * raise is pre-emptive single-worker CI runner variance insurance, not a
+ * reaction to a slow product.
+ */
 test.describe('embedded map cooperative touch gesture', () => {
   test('one-finger swipe scrolls the page, not the map', async ({ browser }) => {
+    test.setTimeout(60_000);
     const { context, page, cdp } = await newTouchContext(browser);
     const mapBox = await openEmbeddedCheckoutMap(page);
     const box = (await mapBox.boundingBox())!;
@@ -145,6 +158,7 @@ test.describe('embedded map cooperative touch gesture', () => {
   });
 
   test('verification 1: tap-to-place a pin still works with dragging disabled', async ({ browser }) => {
+    test.setTimeout(60_000);
     const { context, page, cdp } = await newTouchContext(browser);
     const mapBox = await openEmbeddedCheckoutMap(page);
     const box = (await mapBox.boundingBox())!;
@@ -162,6 +176,7 @@ test.describe('embedded map cooperative touch gesture', () => {
   });
 
   test('verification 2: a two-finger drag translates the map, not just zooms it', async ({ browser }) => {
+    test.setTimeout(60_000);
     const { context, page, cdp } = await newTouchContext(browser);
     const mapBox = await openEmbeddedCheckoutMap(page);
     const box = (await mapBox.boundingBox())!;
@@ -185,6 +200,7 @@ test.describe('embedded map cooperative touch gesture', () => {
   });
 
   test('verification 3: touchcancel does not leave dragging stuck disabled', async ({ browser }) => {
+    test.setTimeout(60_000);
     const { context, page, cdp } = await newTouchContext(browser);
     const mapBox = await openEmbeddedCheckoutMap(page);
     const box = (await mapBox.boundingBox())!;
@@ -213,6 +229,7 @@ test.describe('embedded map cooperative touch gesture', () => {
   });
 
   test('verification 4: the full-screen modal is unaffected -- the map still owns every gesture', async ({ browser }) => {
+    test.setTimeout(60_000);
     const { context, page, cdp } = await newTouchContext(browser);
     await openEmbeddedCheckoutMap(page);
     await page.getByRole('button', { name: /Full screen/i }).click();
