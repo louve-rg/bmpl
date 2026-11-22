@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { hashPassword, verifyPassword } from '@bmpl/authentication';
-import type { DeliveryStatus, VendorOrderStatus } from '@bmpl/database';
+import type { DeliveryStatus, PassengerTripStatus, VendorOrderStatus } from '@bmpl/database';
 import type { DeleteAccountInput, UpdateProfileInput } from '@bmpl/validation';
 import {
   AVATAR_REJECTION_REASONS,
@@ -29,6 +29,11 @@ import { publicAvatarUrl } from '../common/avatar-url';
 const LIVE_DRIVER_STATUSES: DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
 /** Vendor order states still awaiting the vendor's own action. */
 const LIVE_VENDOR_ORDER_STATUSES: VendorOrderStatus[] = ['PENDING', 'PREPARING', 'READY_FOR_PICKUP'];
+/** The same "accepted but not yet finished" shape as {@link LIVE_DRIVER_STATUSES},
+ *  applied to the separate PASSENGER_DRIVER vertical (PassengerTrip, not
+ *  OrderDelivery/ShipmentLeg): a trip the driver has taken on but not yet
+ *  completed, cancelled or exceptioned. */
+const LIVE_PASSENGER_TRIP_STATUSES: PassengerTripStatus[] = ['ASSIGNED', 'EN_ROUTE_TO_PICKUP', 'IN_PROGRESS'];
 
 /** Serializable view of the signed-in user + their roles. */
 export interface MeView {
@@ -440,8 +445,10 @@ export class UsersService {
    * Live, hand-off-worthy responsibilities that must block deletion — each
    * entry is a complete, honest explanation of what to do first, per
    * MDF-924's requirement that a refusal here is a real response, not a
-   * silent failure. Three checks, each with a concrete, pre-existing
-   * mechanism behind it (no invented floor):
+   * silent failure.
+   *
+   * Four checks, each with a concrete, pre-existing mechanism behind it
+   * (no invented business floor):
    *
    * - Terminal company: the SAME last-active-manager floor
    *   `assertManagerFloorHolds` enforces in `terminal.service.ts` — read
@@ -450,14 +457,30 @@ export class UsersService {
    *   definition, fix `terminal.service.ts` first and mirror it here.
    * - Vendor: an open VendorOrder (not yet PICKED_UP or CANCELLED) depends
    *   on the vendor actually doing something next.
-   * - Driver: a committed-but-unfinished marketplace OrderDelivery or
-   *   shipping ShipmentLeg (accepted, not yet delivered/cancelled/declined).
+   * - Driver (DELIVERY_DRIVER): a committed-but-unfinished marketplace
+   *   OrderDelivery or shipping ShipmentLeg (accepted, not yet
+   *   delivered/cancelled/declined).
+   * - Driver (PASSENGER_DRIVER): the identical shape applied to the separate
+   *   passenger-transport vertical — a PassengerTrip the driver has taken on
+   *   (ASSIGNED/EN_ROUTE_TO_PICKUP/IN_PROGRESS) but not yet completed,
+   *   cancelled or exceptioned. A passenger mid-trip is the same hand-off
+   *   problem as a parcel mid-delivery, just a different table.
    *
-   * Deliberately does NOT check: an "administrator" floor (no such
-   * last-admin concept exists anywhere in this codebase today — checked
-   * AdminPermissionGrant before deciding not to invent one) or a
-   * PASSENGER_DRIVER's active trip (out of this card's verified scope —
-   * flagged to god rather than guessed at).
+   * A fifth check is of a DIFFERENT KIND and is NOT a business floor: the
+   * last-super-admin guard below. There is no last-admin *business* rule
+   * anywhere in this codebase (checked `AdminPermissionGrant`/`UserRole`
+   * before deciding not to invent one) — but deleting the only remaining
+   * SUPER_ADMIN is an IRREVERSIBLE platform state (nobody left who can grant
+   * admin access to anyone, including back to this same person), whereas
+   * refusing it is recoverable in one step (promote another SUPER_ADMIN,
+   * then delete). This is an anti-lockout guard against an asymmetric,
+   * irreversible outcome, not a judgment about how many admins the business
+   * should have.
+   *
+   * Deliberately does NOT check: an "operator" floor (terminal OPERATOR has
+   * no floor in `assertManagerFloorHolds` either — only MANAGER count
+   * matters — mirroring how `staffDeactivateMember` already treats the two
+   * differently).
    */
   private async liveResponsibilities(userId: string): Promise<string[]> {
     const reasons: string[] = [];
@@ -514,6 +537,37 @@ export class UsersService {
       if (activeCount > 0) {
         reasons.push(
           `You have ${activeCount} delivery or shipment job${activeCount === 1 ? '' : 's'} in progress. Complete or hand ${activeCount === 1 ? 'it' : 'them'} off before deleting your account.`,
+        );
+      }
+    }
+
+    const passengerDriver = await this.prisma.passengerDriverProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (passengerDriver) {
+      const activeTrips = await this.prisma.passengerTrip.count({
+        where: { driverProfileId: passengerDriver.id, status: { in: LIVE_PASSENGER_TRIP_STATUSES } },
+      });
+      if (activeTrips > 0) {
+        reasons.push(
+          `You have ${activeTrips} passenger trip${activeTrips === 1 ? '' : 's'} in progress. Complete or hand ${activeTrips === 1 ? 'it' : 'them'} off before deleting your account.`,
+        );
+      }
+    }
+
+    // Anti-lockout guard, not a business floor — see the doc comment above.
+    const ownRole = await this.prisma.userRole.findUnique({
+      where: { userId_roleCode: { userId, roleCode: 'SUPER_ADMIN' } },
+      select: { status: true },
+    });
+    if (ownRole?.status === 'APPROVED') {
+      const otherSuperAdmins = await this.prisma.userRole.count({
+        where: { roleCode: 'SUPER_ADMIN', status: 'APPROVED', userId: { not: userId } },
+      });
+      if (otherSuperAdmins === 0) {
+        reasons.push(
+          'You are the only active super-admin. Deleting your account would leave the platform with no one able to grant admin access, and nobody inside the product could undo that. Grant super-admin to another account first, then delete yours.',
         );
       }
     }

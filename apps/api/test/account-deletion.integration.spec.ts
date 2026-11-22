@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, cookieValue, resetDb, seedRoles, type TestContext } from './helpers';
+import { bootApp, cookiesOf, cookieValue, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 
@@ -25,6 +25,11 @@ async function registerAndLogin(email: string, password: string) {
     .post('/api/auth/register')
     .send({ email, password, firstName: 'D', lastName: 'L', acceptedTerms: true });
   return { cookies: cookiesOf(reg), userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email } })).id };
+}
+
+async function login(email: string, password: string) {
+  const res = await request(ctx.server).post('/api/auth/login').send({ email, password });
+  return cookiesOf(res);
 }
 
 describe('account deletion — happy path', () => {
@@ -168,6 +173,17 @@ describe('account deletion — refusals', () => {
 
     const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(user.status).toBe('ACTIVE');
+
+    // Same underlying count-based query clears once the order is no longer open.
+    await ctx.prisma.vendorOrder.updateMany({
+      where: { vendorProfileId: vendor.id },
+      data: { status: 'CANCELLED' },
+    });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
   });
 
   it('refuses when the caller is a driver with a delivery still in progress', async () => {
@@ -214,7 +230,7 @@ describe('account deletion — refusals', () => {
         subtotalMinor: 1000n,
       },
     });
-    await ctx.prisma.orderDelivery.create({
+    const delivery = await ctx.prisma.orderDelivery.create({
       data: {
         vendorOrderId: vendorOrder.id,
         assignedDriverProfileId: driver.id,
@@ -231,5 +247,83 @@ describe('account deletion — refusals', () => {
 
     const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(user.status).toBe('ACTIVE');
+
+    // Same underlying count-based query clears once the delivery finishes.
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('refuses when the caller is a passenger driver with a trip still in progress, and allows it once the trip finishes', async () => {
+    const email = 'delete-active-trip@example.bz';
+    const password = 'PaxDriverPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const paxDriver = await ctx.prisma.passengerDriverProfile.create({
+      data: {
+        userId,
+        legalName: 'Test Pax Driver',
+        displayName: 'Test Pax Driver',
+        phone: '6650001',
+        homeDistrict: 'BELIZE',
+        licenceNumber: 'LIC-PAX-TEST-1',
+        licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const trip = await ctx.prisma.passengerTrip.create({
+      data: {
+        reference: 'PAX-DEL-TEST-1',
+        kind: 'ON_DEMAND',
+        status: 'IN_PROGRESS',
+        driverProfileId: paxDriver.id,
+      },
+    });
+
+    const refused = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(refused.status).toBe(409);
+    expect(refused.body.reasons.some((r: string) => /passenger trip/.test(r))).toBe(true);
+
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.status).toBe('ACTIVE');
+
+    // Same underlying count-based query clears once the trip finishes.
+    await ctx.prisma.passengerTrip.update({ where: { id: trip.id }, data: { status: 'COMPLETED' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('refuses when the caller is the only active super-admin (anti-lockout, not a business floor), and allows it once a second super-admin exists', async () => {
+    const password = 'SuperAdminPass12345';
+    const admin = await seedSuperAdmin(ctx.prisma, 'delete-last-admin@example.bz', password);
+    const cookies = await login(admin.email, password);
+
+    const refused = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(refused.status).toBe(409);
+    expect(refused.body.reasons.some((r: string) => /only active super-admin/.test(r))).toBe(true);
+
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    expect(user.status).toBe('ACTIVE');
+
+    // A second active super-admin removes the lockout risk — same pattern as
+    // the terminal sole-manager case: no code change needed to re-check, just
+    // the same query seeing a different state.
+    await seedSuperAdmin(ctx.prisma, 'delete-last-admin-other@example.bz', 'OtherAdminPass12345');
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
   });
 });
