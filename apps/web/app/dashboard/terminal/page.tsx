@@ -1698,12 +1698,14 @@ function StaffRosterPanel({
  *     own "end the membership and send a new invite" workaround doesn't
  *     apply here because the owner approved the route it was working
  *     around not having.
- *   - no `window.confirm` on "End membership" or a role change, same
- *     reasoning the admin card already states for its own "End membership":
- *     both are recoverable (Reactivate restores the original location
- *     grants; a role can be changed back), so the ONE truly irreversible
- *     control here -- revoking a single location grant -- is the only one
- *     that gets a confirmation step, naming both the member and the hub.
+ *   - `window.confirm` gates two of these three mutations: "End membership"
+ *     (naming the member, see `endMember` below) and revoking a single
+ *     location grant (naming both the member and the hub, see
+ *     `revokeLocation` below). Changing a role (`changeRole`) has no
+ *     confirmation step. (Corrected -- an earlier version of this comment
+ *     claimed "End membership" had none either, which the code here never
+ *     did; MDF-952/#808 relies on this `window.confirm` pattern being real,
+ *     reusing it rather than adding a second one for account deletion.)
  *
  * Every refusal renders the server's own message verbatim. None is
  * pre-empted by disabling a control -- the owner's explicit rule is that
