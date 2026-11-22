@@ -61,12 +61,20 @@ export const UAT_PASSENGER_PROVIDER_EMAIL = 'uat-passenger-provider@bzemarketpla
  * same way admin's does; /dashboard is a separate Next dev route nothing
  * warms ahead of it. Three cold-start samples on this host: 8158ms, 10105ms
  * (already past the old 10s ceiling), 7698ms click-to-/dashboard; the same
- * login once the route is compiled: ~300-360ms every time. Widened to
- * 30_000ms -- comfortably above the worst observed sample with real margin
- * for a busier machine. This is an environment-readiness wait, not a
- * product-behaviour assertion: the check itself (must land on /dashboard)
- * is unchanged, and a genuine failure (wrong password, unseeded fixtures)
- * still correctly returns false, just after waiting out the new ceiling.
+ * login once the route is compiled: ~300-360ms every time.
+ *
+ * MDF-906: a prior widening to 30_000ms left zero margin against this
+ * file's own global `timeout` (apps/web/playwright.config.ts) -- also
+ * 30_000ms. When no backend is reachable at all, `waitForURL` runs out its
+ * full budget before the catch fires, so Playwright's outer timeout fires
+ * first and the spec is reported FAILED instead of this function's own
+ * `false` turning it into a clean `test.skip`. Set to 15_000ms instead: ~50%
+ * above the worst documented cold-start sample above (10105ms), with 15s of
+ * margin inside the 30s outer timeout for the catch+skip path to actually
+ * run. This is an environment-readiness wait, not a product-behaviour
+ * assertion: the check itself (must land on /dashboard) is unchanged, and a
+ * genuine failure (wrong password, unseeded fixtures) still correctly
+ * returns false, just after waiting out this ceiling.
  */
 export async function tryLogin(page: Page, email: string, password: string): Promise<boolean> {
   try {
@@ -74,7 +82,7 @@ export async function tryLogin(page: Page, email: string, password: string): Pro
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
+    await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
     return true;
   } catch {
     return false;
