@@ -209,6 +209,9 @@ function JobCard({ job, busy, error, onClaim }: { job: ClaimableJob; busy: boole
       <Button className="mt-3 w-full sm:w-auto" disabled={busy} onClick={onClaim}>
         {busy ? <Spinner className="h-4 w-4" /> : 'Claim this job'}
       </Button>
+      <p className="mt-2 text-xs text-[color:var(--bmpl-text-faint)]">
+        Claiming reserves this job for you. You still confirm it on the next screen before the delivery starts.
+      </p>
     </Card>
   );
 }
