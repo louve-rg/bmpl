@@ -204,8 +204,14 @@ export class SessionService {
    * other device the account has signed into" in one call — a BULK
    * security action, not the one-device shape `logout` and `revokeOwn`
    * each have, which is why those stay unaudited and this does not.
-   * Fires even when `revokedCount` is 0: "I asked and there was nothing to
-   * revoke" is itself evidence someone checked, not noise to skip.
+   * Fires even when `revokedCount` is 0 — and that is NOT the same shape as
+   * the MDF-954 defect (a reveal audit row written on a path where nothing
+   * was revealed). This row is honest on a no-op BECAUSE the count travels
+   * with it: `{ revokedCount: 0 }` asserts "the caller asked, and zero
+   * sessions ended", which is true and is exactly the fact an investigator
+   * wants. A row with no count would instead assert that a revoke happened
+   * at all, which on this path it did not. Keep the count in `newValue` if
+   * this ever gets "simplified" — the count is what makes writing it legal.
    */
   async revokeOthersForUser(
     userId: string,
