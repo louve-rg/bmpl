@@ -105,13 +105,26 @@ async function authedPage(browser: Browser, width: number, height = 900): Promis
  */
 async function measureMasterDetailGrid(page: Page) {
   return page.evaluate(() => {
-    const grid = document.querySelector('.grid.gap-5');
+    const grid = document.querySelector<HTMLElement>('.grid.gap-5');
     if (!grid) return null;
-    return {
-      gridTemplateColumns: getComputedStyle(grid).gridTemplateColumns,
-      scrollWidth: grid.scrollWidth,
-      clientWidth: grid.clientWidth,
-    };
+    // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+    // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why a CSS
+    // sizing-keyword probe is wrong for break-words content and bisecting
+    // real pixel widths is correct instead. One synchronous call.
+    const gridTemplateColumns = getComputedStyle(grid).gridTemplateColumns;
+    const scrollWidth = grid.scrollWidth;
+    const clientWidth = grid.clientWidth;
+    const prevWidth = grid.style.width;
+    let lo = 0;
+    let hi = clientWidth;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      grid.style.width = `${mid}px`;
+      if (grid.scrollWidth <= mid + 1) hi = mid;
+      else lo = mid;
+    }
+    grid.style.width = prevWidth;
+    return { gridTemplateColumns, scrollWidth, clientWidth, headroom: clientWidth - hi };
   });
 }
 
@@ -152,7 +165,9 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] list+detail admin gr
       await close();
 
       expect(measured, `no .grid.gap-5 found on ${route}${tabText ? ` (${tabText} tab)` : ''}`).not.toBeNull();
-      console.log(`grid scrollWidth ${measured!.scrollWidth}px vs its own clientWidth ${measured!.clientWidth}px (columns: ${measured!.gridTemplateColumns})`);
+      console.log(
+        `grid scrollWidth ${measured!.scrollWidth}px vs its own clientWidth ${measured!.clientWidth}px (columns: ${measured!.gridTemplateColumns}) (headroom ${measured!.headroom}px)`,
+      );
       expect(
         measured!.scrollWidth,
         `grid scrollWidth ${measured!.scrollWidth}px vs its own clientWidth ${measured!.clientWidth}px (columns: ${measured!.gridTemplateColumns})`,

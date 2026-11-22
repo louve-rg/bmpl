@@ -76,12 +76,30 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] Al
       test.skip(!ready, 'Needs a local responder for the dashboard-shell /me SSR call -- see file header.');
 
       const measured = await page.evaluate(() => {
-        const alert = document.querySelector('[role="alert"]');
-        return alert ? { scrollWidth: alert.scrollWidth, clientWidth: alert.clientWidth } : null;
+        const alert = document.querySelector<HTMLElement>('[role="alert"]');
+        if (!alert) return null;
+        // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+        // driver-job-detail-free-text-overflow.spec.ts (apps/web) for why a
+        // CSS sizing-keyword probe is wrong for a break-words box and
+        // bisecting real pixel widths is correct instead. One synchronous
+        // call.
+        const scrollWidth = alert.scrollWidth;
+        const clientWidth = alert.clientWidth;
+        const prevWidth = alert.style.width;
+        let lo = 0;
+        let hi = clientWidth;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          alert.style.width = `${mid}px`;
+          if (alert.scrollWidth <= mid + 1) hi = mid;
+          else lo = mid;
+        }
+        alert.style.width = prevWidth;
+        return { scrollWidth, clientWidth, headroom: clientWidth - hi };
       });
 
       expect(measured, 'alert element not found').not.toBeNull();
-      console.log(`alert scrollWidth ${measured!.scrollWidth} vs its own clientWidth ${measured!.clientWidth} at ${width}px`);
+      console.log(`alert scrollWidth ${measured!.scrollWidth} vs its own clientWidth ${measured!.clientWidth} at ${width}px (headroom ${measured!.headroom}px)`);
       expect(
         measured!.scrollWidth,
         `alert scrollWidth ${measured!.scrollWidth} vs its own clientWidth ${measured!.clientWidth} at ${width}px`,

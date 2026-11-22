@@ -102,9 +102,29 @@ test.describe('[LOCAL ONLY, skips without a /me responder -- see file header] sh
       const parcelRow = await openReviewPanel(page);
       test.skip(parcelRow === null, 'Needs a local responder for the dashboard-shell /me SSR call -- see file header.');
 
-      const measured = await parcelRow!.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      const measured = await parcelRow!.evaluate((el) => {
+        // CI-OVERFLOW-SPECS-PRINT-REAL-HEADROOM: see
+        // driver-job-detail-free-text-overflow.spec.ts for why a CSS
+        // sizing-keyword probe is wrong for a break-words box and bisecting
+        // real pixel widths is correct instead. One synchronous call.
+        const scrollWidth = el.scrollWidth;
+        const clientWidth = el.clientWidth;
+        const prevWidth = el.style.width;
+        let lo = 0;
+        let hi = clientWidth;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          el.style.width = `${mid}px`;
+          if (el.scrollWidth <= mid + 1) hi = mid;
+          else lo = mid;
+        }
+        el.style.width = prevWidth;
+        return { scrollWidth, clientWidth, headroom: clientWidth - hi };
+      });
 
-      console.log(`Parcel row scrollWidth ${measured.scrollWidth} vs its own clientWidth ${measured.clientWidth} at ${width}px -- the row should never overflow itself`);
+      console.log(
+        `Parcel row scrollWidth ${measured.scrollWidth} vs its own clientWidth ${measured.clientWidth} at ${width}px -- the row should never overflow itself (headroom ${measured.headroom}px)`,
+      );
       expect(
         measured.scrollWidth,
         `Parcel row scrollWidth ${measured.scrollWidth} vs its own clientWidth ${measured.clientWidth} at ${width}px -- the row should never overflow itself`,
