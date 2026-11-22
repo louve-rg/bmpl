@@ -370,9 +370,9 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
 
       {status === 'REVOKED' && (
         <Alert tone="error" className="mt-3">
-          This carrier's ability to operate ends here -- a reinstate-style undo does not exist for revocation. The
+          This carrier&apos;s ability to operate ends here -- a reinstate-style undo does not exist for revocation. The
           only way back is reapply below, which sends it to the back of the queue for full re-approval and restores
-          no privileges on its own. In the meantime, see "In-flight shipments" to reassign anything still assigned to
+          no privileges on its own. In the meantime, see &quot;In-flight shipments&quot; to reassign anything still assigned to
           it.
         </Alert>
       )}
@@ -385,7 +385,7 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
       )}
       {status === 'REJECTED' && (
         <Alert tone="warning" className="mt-3">
-          This carrier's application was rejected.{provider.canResubmit ? ' The carrier may also resubmit it themselves.' : ''}
+          This carrier&apos;s application was rejected.{provider.canResubmit ? ' The carrier may also resubmit it themselves.' : ''}
         </Alert>
       )}
 
@@ -642,7 +642,7 @@ function InFlightShipmentsCard({ provider, canOperate }: { provider: Provider; c
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">In-flight shipments</h3>
         <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">
-          This environment cannot yet say which shipments this carrier is operating -- not the same as "none". Open a
+          This environment cannot yet say which shipments this carrier is operating -- not the same as &quot;none&quot;. Open a
           shipment directly from the operations board to reassign its carrier in the meantime.
         </p>
       </Card>

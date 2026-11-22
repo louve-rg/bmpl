@@ -414,7 +414,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
         <Button disabled={busy} size="lg">
           {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create draft'}
         </Button>
-        {!isEdit && <p className="mt-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">You'll add screening questions and submit for review next.</p>}
+        {!isEdit && <p className="mt-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">You&apos;ll add screening questions and submit for review next.</p>}
       </div>
     </form>
   );

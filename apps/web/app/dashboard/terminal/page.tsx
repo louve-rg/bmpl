@@ -1548,9 +1548,9 @@ function HistoryPanel({
           inventing a new status value or asking the API for one. */}
       <p className="text-xs text-[color:var(--bmpl-text-muted)]">
         History lists every shipment that has ever touched your locations, including setup and test records -- in progress or finished, newest
-        first. Overview, Incoming, On Hand and the queue tabs only ever count what's still in progress, so a smaller number there is correct, not
-        missing data. The status shown here describes the whole shipment's journey, not the one step a working tab may be handling right now --
-        trust the tab you're actually working in for what to do next.
+        first. Overview, Incoming, On Hand and the queue tabs only ever count what&apos;s still in progress, so a smaller number there is correct, not
+        missing data. The status shown here describes the whole shipment&apos;s journey, not the one step a working tab may be handling right now --
+        trust the tab you&apos;re actually working in for what to do next.
       </p>
       {rows.map((row) => {
         const hubs = row.touchedHubs.map(hubLabel).filter(Boolean);

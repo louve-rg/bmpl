@@ -348,7 +348,7 @@ export function ExceptionResolution({
         <div className="mt-3 space-y-3">
           {priced ? (
             <p className="text-sm text-[color:var(--bmpl-text-muted)]">
-              This is a new transport service at BML's normal configured pricing:{' '}
+              This is a new transport service at BML&apos;s normal configured pricing:{' '}
               <span className="font-semibold tabular-nums">${((preview.totalMinor ?? 0) / 100).toFixed(2)}</span>.
               {action === 'REROUTE' &&
                 (preview.legCostsMoreThanOriginal

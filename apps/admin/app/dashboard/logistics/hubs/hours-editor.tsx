@@ -234,7 +234,7 @@ export function HubHoursEditor({ hubId, canManage }: { hubId: string; canManage:
 
       <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Date-specific exceptions</h3>
       <p className="mt-1 text-xs text-slate-500">
-        A known closure, a one-off change to the counter's hours for a single date — overrides the weekly pattern for
+        A known closure, a one-off change to the counter&apos;s hours for a single date — overrides the weekly pattern for
         that date only.
       </p>
       {exceptions.length === 0 ? (

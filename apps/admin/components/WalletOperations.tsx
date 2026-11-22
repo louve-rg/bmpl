@@ -635,7 +635,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
         </span>
       </div>
       <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
-        Removes a wallet's permission to originate new movement -- spend, top-up, test credit. Money already authorized
+        Removes a wallet&apos;s permission to originate new movement -- spend, top-up, test credit. Money already authorized
         keeps moving on its existing rails. The customer is not notified, so a lock should only follow a real fraud or
         security review.
       </p>

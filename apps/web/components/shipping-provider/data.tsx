@@ -95,7 +95,7 @@ export function CarrierShell({
 export function ApprovalRequired() {
   return (
     <Alert tone="info" title="Approval required">
-      This page works once your Shipping Provider role is approved and your organization's own status is approved.
+      This page works once your Shipping Provider role is approved and your organization&apos;s own status is approved.
       Check the role in{' '}
       <Link className="font-semibold underline" href="/dashboard/roles">
         My Roles
