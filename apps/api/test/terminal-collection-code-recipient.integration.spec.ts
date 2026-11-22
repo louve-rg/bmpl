@@ -387,9 +387,14 @@ describe('MDF-926 piece 5: a locked-out recipient gets neither code through eith
 
     const res = await get(recipient.cookies, `shipping/incoming/${booked.reference}/collection-code`);
     expect(res.status).toBe(200);
+    // Exact key set, not just "the two fields I expect are absent" -- a
+    // test that enumerates what must be PRESENT fails on ANY future field
+    // added to this response, named or not, instead of relying on the
+    // author having imagined every leak shape in advance.
+    expect(Object.keys(res.body).sort()).toEqual(['collectionCode', 'collectionHoldMessage', 'reference']);
     expect(res.body.collectionCode).toBeNull();
     expect(res.body.collectionHoldMessage).toMatch(/staff|administrator|support/i);
-    expect(res.body.collectionHoldMessage).not.toContain(real);
+    expect(JSON.stringify(res.body)).not.toContain(real);
   });
 
   it('the unlinked reveal path answers the same way once locked, even for a token requested before the lockout', async () => {
@@ -412,15 +417,15 @@ describe('MDF-926 piece 5: a locked-out recipient gets neither code through eith
 
     const revealRes = await postPublic(`shipping/track/${booked.recipientTrackingToken}/collection-code/reveal`, { revealToken });
     expect(revealRes.status).toBe(201);
+    // Exact key set -- the same closed assertion as the linked-recipient
+    // test above. A reveal token holder is the least-authenticated of the
+    // three readers, so this is the one response that must never acquire
+    // an attempt count, a remaining-tries hint, or the raw verification
+    // status, under ANY future field name, not just the two named here.
+    expect(Object.keys(revealRes.body).sort()).toEqual(['collectionCode', 'collectionHoldMessage', 'reference']);
     expect(revealRes.body.collectionCode).toBeNull();
     expect(revealRes.body.collectionHoldMessage).toMatch(/staff|administrator|support/i);
-    expect(revealRes.body.collectionHoldMessage).not.toContain(real);
-    // No count, no remaining-tries hint, no raw status -- the same
-    // anti-oracle discipline as every other reader of this value. A reveal
-    // token holder is the least-authenticated of the three readers, so
-    // this is the one response that must never acquire either.
-    expect(revealRes.body.collectionPinAttemptsRemaining).toBeUndefined();
-    expect(revealRes.body.collectionVerificationStatus).toBeUndefined();
+    expect(JSON.stringify(revealRes.body)).not.toContain(real);
   });
 });
 
