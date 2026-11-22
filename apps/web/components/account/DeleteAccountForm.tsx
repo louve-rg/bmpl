@@ -141,8 +141,8 @@ export function DeleteAccountForm() {
       <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">
         This anonymizes your profile -- your name, contact details and saved addresses are removed and your login is
         disabled. It does <strong>not</strong> erase your history: completed orders and shipments keep their stored
-        recipient name and address, by policy, and will show &ldquo;Deleted User&rdquo; in place of your account
-        going forward. This cannot be undone.
+        recipient name and address, and your wallet keeps its past transaction history, by policy, and will show
+        &ldquo;Deleted User&rdquo; in place of your account going forward. This cannot be undone.
       </p>
       {/*
        * Required (acceptance round 1): every sentence here is sourced to a
@@ -163,6 +163,19 @@ export function DeleteAccountForm() {
        *     states Message.body/MessageAttachment are deliberately left
        *     alone -- a two-sided conversation is not solely this account's
        *     record to rewrite.
+       *   - WEB-DELETE-COPY-NAMES-WHAT-STAYS: the paragraph above named every
+       *     table this action REMOVES data from in detail, but the only
+       *     thing it said about what is KEPT was orders/shipments -- leaving
+       *     a reader to assume a zero-balance wallet has nothing left to
+       *     retain. deleteAccount's own doc comment lists WalletAccount
+       *     explicitly alongside orders/shipments/the audit log as a table
+       *     whose real foreign keys "must keep pointing at a real row";
+       *     neither deleteAccount nor anonymizePersonalData touches
+       *     WalletAccount or WalletTransaction at all (liveResponsibilities
+       *     only refuses on a NONZERO balance/open hold, never on past
+       *     history), so a fully anonymized account's complete wallet
+       *     ledger survives unredacted. Named here rather than left for the
+       *     reader to assume from the orders/shipments sentence alone.
        */}
       <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         A few other things happen immediately, without asking again: a live storefront is suspended; a driver or
