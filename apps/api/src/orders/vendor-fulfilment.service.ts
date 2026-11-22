@@ -5,6 +5,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OwnershipService } from '../products/ownership.service';
 import { PickupService } from './pickup.service';
 import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
+import { assertReservationsNotReleased } from './order-release-guard';
 
 /**
  * Vendor fulfilment (M26.3 · Part 6).
@@ -46,6 +47,10 @@ export class VendorFulfilmentService {
     const vo = await this.ownedByVendor(userId, vendorOrderId);
     // Idempotent: a double-tap on a slow connection must not 409.
     if (vo.status === 'PREPARING') return this.view(vendorOrderId);
+    // ORD-RELEASED-GUARD: an admin already returned this order's payment —
+    // nothing may move it forward from here, checked before the ordinary
+    // status allow-list so the refusal names the real reason.
+    assertReservationsNotReleased(vo.order.reservationsReleasedAt);
     if (vo.status !== 'PENDING') {
       throw new ConflictException(`This order is already ${label(vo.status)}.`);
     }
@@ -96,6 +101,9 @@ export class VendorFulfilmentService {
     }
 
     if (vo.status === 'READY_FOR_PICKUP') return this.view(vendorOrderId); // idempotent
+    // ORD-RELEASED-GUARD: this is the step that starts automatic dispatch —
+    // stop it here and no delivery is ever created for a released order.
+    assertReservationsNotReleased(vo.order.reservationsReleasedAt);
     if (vo.status !== 'PENDING' && vo.status !== 'PREPARING') {
       throw new ConflictException(`Cannot ready a ${label(vo.status)} order.`);
     }
@@ -168,7 +176,7 @@ export class VendorFulfilmentService {
     const vo = await this.prisma.vendorOrder.findUnique({
       where: { id: vendorOrderId },
       include: {
-        order: { select: { userId: true, orderNumber: true } },
+        order: { select: { userId: true, orderNumber: true, reservationsReleasedAt: true } },
         vendorProfile: { select: { userId: true, businessName: true } },
       },
     });
