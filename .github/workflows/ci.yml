@@ -815,6 +815,18 @@ jobs:
       - name: Account OpenAPI route drift (CI-OPENAPI-DRIFT-MEASURE-AND-ADOPT)
         run: node scripts/detect-account-openapi-route-drift.mjs
 
+      # Adopted at zero drift on purpose, same reasoning as account.yaml's
+      # check just above (DOCS-SHIPPING-SPEC-24-UNDOCUMENTED, 2026-11-22):
+      # shipping.yaml was found missing 24 of its 113 real routes (21%, the
+      # worst gap in the repo) and walked to zero drift by hand across three
+      # PRs (#830/#832/#835). Scoped to the shipping/admin-logistics/
+      # driver-shipping-jobs families ONLY, never the other hand-maintained
+      # specs under docs/openapi/ that still have real, measured drift
+      # (scripts/measure-openapi-route-drift-all-specs.mjs) and would redden
+      # main immediately if checked this way.
+      - name: Shipping OpenAPI route drift (DOCS-SHIPPING-SPEC-24-UNDOCUMENTED)
+        run: node scripts/detect-shipping-openapi-route-drift.mjs
+
       # scripts/detect-tracked-deletions.mjs is DELIBERATELY NOT WIRED HERE,
       # and must not be added later without re-reading this comment first
       # (BMPL-310/BMPL-312): it checks `git status` across every checkout
