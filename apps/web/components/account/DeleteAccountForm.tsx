@@ -82,8 +82,7 @@ export function DeleteAccountForm() {
 
   return (
     <Card className="border-red-200 p-6">
-      <h2 className="text-sm font-semibold text-red-700">Delete account</h2>
-      <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
+      <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">
         This anonymizes your profile -- your name, contact details and saved addresses are removed and your login is
         disabled. It does <strong>not</strong> erase your history: completed orders and shipments keep their stored
         recipient name and address, by policy, and will show &ldquo;Deleted User&rdquo; in place of your account
