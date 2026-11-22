@@ -100,7 +100,7 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
 
     expect(container!.textContent).toContain('a live storefront is suspended');
     expect(container!.textContent).toContain('a driver or passenger-driver profile goes offline');
-    expect(container!.textContent).toContain('any identity documents or CVs you uploaded are deleted');
+    expect(container!.textContent).toContain('any identity documents or CVs you uploaded are removed from your account');
     expect(container!.textContent).toContain('messages you’ve already sent stay visible to the people you sent them to');
   });
 
@@ -135,9 +135,9 @@ describe('DeleteAccountForm (MDF-925/MDF-924)', () => {
 
     expect(router.push).toHaveBeenCalledWith('/login?reason=account-anonymized');
     expect(router.refresh).toHaveBeenCalled();
-    // The forbidden phrase specifically, not the bare word -- "identity
-    // documents ... are deleted" (acceptance round 1) is an accurate,
-    // sourced side effect, not a claim about the account itself.
+    // The forbidden phrase specifically, not the bare word -- the wallet
+    // refusal copy and other sourced side-effect sentences may legitimately
+    // use "delete"/"deleted" without that being a claim about the account.
     expect(container!.textContent).not.toContain('account deleted');
     expect(container!.textContent).not.toContain('Account deleted');
   });

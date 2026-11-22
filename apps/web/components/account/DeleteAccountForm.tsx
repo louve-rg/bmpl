@@ -110,8 +110,8 @@ export function DeleteAccountForm() {
        */}
       <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         A few other things happen immediately, without asking again: a live storefront is suspended; a driver or
-        passenger-driver profile goes offline; any identity documents or CVs you uploaded are deleted; and messages
-        you&rsquo;ve already sent stay visible to the people you sent them to, exactly as sent.
+        passenger-driver profile goes offline; any identity documents or CVs you uploaded are removed from your
+        account; and messages you&rsquo;ve already sent stay visible to the people you sent them to, exactly as sent.
       </p>
       <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         You will be signed out of every device immediately, including this one.
