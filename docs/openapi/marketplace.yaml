@@ -1063,18 +1063,24 @@ paths:
   /driver/jobs/queue:
     get: { tags: [Dispatch], summary: "The actionable queue plus a recommended running order", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
     put: { tags: [Dispatch], summary: "Set the driver's own display order for the queue", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "body { deliveryIds }; writes display sequence only — cannot reassign, re-status or skip a step" }
+  /driver/jobs/claimable:
+    get: { tags: [Dispatch], summary: "Deliveries automatic dispatch has already given up on, narrowed to this driver's own eligibility (MDF-18)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Declared before {id} in the controller so it is never swallowed as a delivery id. The same per-driver concurrent-job cap the dispatch engine's own ranker enforces (DispatchSettings.maxConcurrentPerDriver) is re-checked here — empty once that cap is reached, not an error." }
   /driver/jobs/{id}:
     get: { tags: [Dispatch], summary: "Own job detail (404 for another driver's job)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /driver/jobs/{id}/accept:
     post: { tags: [Dispatch], summary: "Accept the assignment", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Accepted }, "400": { description: "Illegal transition" } } }
   /driver/jobs/{id}/decline:
     post: { tags: [Dispatch], summary: "Decline (reason required); returns the job to the pool", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Declined }, "400": { description: "Missing reason / illegal transition" } } }
+  /driver/jobs/{id}/claim:
+    post: { tags: [Dispatch], summary: "Claim a delivery automatic dispatch has already given up on (MDF-18)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Claimed }, "400": { description: "No longer claimable / illegal transition" } }, description: "Same eligibility + concurrent-job-cap check as GET .../claimable, re-verified at claim time rather than trusted from the earlier read." }
   /driver/jobs/{id}/confirm-pickup:
     post: { tags: [Dispatch], summary: "Confirm pickup with the vendor-held PIN (rate-limited; finalizes inventory once)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "Picked up" }, "400": { description: "Wrong/locked PIN or illegal transition" } }, description: "body { pin }" }
   /driver/jobs/{id}/in-transit:
     post: { tags: [Dispatch], summary: "Mark on the way", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "In transit" }, "400": { description: "Illegal transition" } } }
   /driver/jobs/{id}/arriving:
     post: { tags: [Dispatch], summary: "Mark arriving", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Arriving }, "400": { description: "Illegal transition" } } }
+  /driver/jobs/{id}/report-exception:
+    post: { tags: [Dispatch], summary: "Driver reports a job already in hand (PICKUP_CONFIRMED / IN_TRANSIT / ARRIVING) could not be completed (MDF-927)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "EXCEPTION — returns the job detail" }, "400": { description: "Illegal transition" }, "409": { description: "The delivery changed state before the report landed — reload and retry" } }, description: "body { reason }, mandatory — the driver's own account of what went wrong, not a staff-entered one. Best-effort admin alert on success; a failed alert never rolls back the report." }
   /driver/jobs/{id}/confirm-delivery:
     post: { tags: [Dispatch], summary: "Complete delivery with the recipient PIN + recipient name (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Delivered }, "400": { description: "Wrong/locked PIN or illegal transition" } }, description: "body { pin, recipientName, notes?, podPhotoKeys? }" }
   /driver/jobs/{id}/pod/presign:
