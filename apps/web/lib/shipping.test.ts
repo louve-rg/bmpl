@@ -5,6 +5,7 @@ import {
   headlineFor,
   legEtaNote,
   legPhase,
+  legStatusLabel,
   shippingMoney,
   showsEta,
   type ShipmentEtaSummary,
@@ -120,6 +121,21 @@ describe('legPhase', () => {
 
   it('treats a completed leg as done even if it is still flagged current', () => {
     expect(legPhase(leg({ status: 'COMPLETED', isCurrent: true }))).toBe('done');
+  });
+});
+
+describe('legStatusLabel', () => {
+  it('maps every LegStatus value to a human label, never the raw enum', () => {
+    expect(legStatusLabel('PENDING')).toBe('Pending');
+    expect(legStatusLabel('READY')).toBe('Ready');
+    expect(legStatusLabel('IN_PROGRESS')).toBe('In progress');
+    expect(legStatusLabel('COMPLETED')).toBe('Completed');
+    expect(legStatusLabel('CANCELLED')).toBe('Cancelled');
+    expect(legStatusLabel('EXCEPTION')).toBe('Exception');
+  });
+
+  it('falls back to a legible, space-joined word for anything unrecognized rather than throwing', () => {
+    expect(legStatusLabel('SOME_FUTURE_STATUS')).toBe('SOME FUTURE STATUS');
   });
 });
 

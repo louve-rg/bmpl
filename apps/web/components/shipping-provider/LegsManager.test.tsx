@@ -125,6 +125,32 @@ async function click(el: HTMLElement) {
   });
 }
 
+/**
+ * SHIP-CROSS-ROLE-S6: a leg's raw `status` enum has no server-computed
+ * label the way a shipment's `statusLabel` does, so this badge used to
+ * read the enum verbatim (`IN_PROGRESS`, `READY`) instead of a human label
+ * — the same structural gap #800 fixed one level up. `legStatusLabel`
+ * (lib/shipping.ts), shared with the terminal lookup tab, is what this
+ * badge renders now.
+ */
+describe('LegsManager — leg status badge reads a human label, not the raw enum (SHIP-CROSS-ROLE-S6)', () => {
+  it('shows "In progress", never "IN_PROGRESS", for an IN_PROGRESS leg', async () => {
+    apiGet.mockResolvedValueOnce([ARRIVED]);
+    await mount();
+
+    expect(container!.textContent).toContain('In progress');
+    expect(container!.textContent).not.toContain('IN_PROGRESS');
+  });
+
+  it('shows "Ready", never the all-caps raw enum, for a READY leg', async () => {
+    apiGet.mockResolvedValueOnce([PROPOSAL]);
+    await mount();
+
+    expect(container!.textContent).toContain('Ready');
+    expect(container!.textContent).not.toContain('READY');
+  });
+});
+
 describe('LegsManager — a pending proposal', () => {
   it('offers Accept and Reject, never the depart/arrive/schedule controls', async () => {
     apiGet.mockResolvedValue([PROPOSAL]);

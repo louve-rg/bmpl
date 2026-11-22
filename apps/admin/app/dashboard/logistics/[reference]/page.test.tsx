@@ -176,6 +176,47 @@ describe('ShipmentOpsPage — write affordances gated on logistics.operate (BMPL
 });
 
 /**
+ * SHIP-CROSS-ROLE-S4: completeLeg (the handoff action) refuses a LINE_HAUL
+ * leg until arrivedAt is set ("has not arrived at its destination terminal
+ * yet", shipment.service.ts) -- controlsFor used to offer "Confirm
+ * handover" on IN_PROGRESS alone, so an operator could be shown a control
+ * the server was guaranteed to refuse. The fix gates handoff on arrivedAt
+ * too, the same fact the Hand-off queue already requires.
+ */
+describe('ShipmentOpsPage — handoff control only appears once the leg has arrived (SHIP-CROSS-ROLE-S4)', () => {
+  function stubShipment(legOverrides: { status: string; departedAt: string | null; arrivedAt: string | null }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, { ...SHIPMENT, legs: [{ ...SHIPMENT.legs[0], ...legOverrides }] });
+        }
+        if (url.includes('/api/admin/logistics/providers')) return jsonResponse(200, []);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+  }
+
+  it('hides "Confirm handover" for an IN_PROGRESS leg that has departed but not arrived', async () => {
+    stubShipment({ status: 'IN_PROGRESS', departedAt: '2026-11-20T10:00:00Z', arrivedAt: null });
+    await mount();
+
+    expect(buttonTexts()).not.toContain('Confirm handover');
+    expect(document.body.textContent).not.toMatch(/Handover code/);
+  });
+
+  it('shows "Confirm handover" for the same IN_PROGRESS leg once it has arrived', async () => {
+    stubShipment({ status: 'IN_PROGRESS', departedAt: '2026-11-20T10:00:00Z', arrivedAt: '2026-11-20T14:00:00Z' });
+    await mount();
+
+    expect(buttonTexts()).toContain('Confirm handover');
+    expect(document.body.textContent).toMatch(/Handover code/);
+  });
+});
+
+/**
  * TERM-ROUTE-BLANK-CARRIER-STRANDS-A-READY-LEG part 2: departLeg accepts
  * carrierName/carrierBookingRef, mirroring the carrier-provider portal's own
  * depart form, but this screen used to post an empty body regardless of what

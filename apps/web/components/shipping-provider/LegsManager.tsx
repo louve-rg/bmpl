@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { canRevealHandoffCode, isPendingProposal, type ShippingProviderLeg, type ShippingProviderLegCode } from '../../lib/shipping-provider';
+import { legStatusLabel } from '../../lib/shipping';
 import { ApprovalRequired } from './data';
 
 /**
@@ -203,7 +204,7 @@ function LegCard({ leg: l, onChanged }: { leg: ShippingProviderLeg; onChanged: (
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <b className="text-sm text-belize-navy">{l.reference}</b>
-            <Badge tone="neutral">{l.status.replace(/_/g, ' ')}</Badge>
+            <Badge tone="neutral">{legStatusLabel(l.status)}</Badge>
             <Badge tone="neutral">{l.modeLabel}</Badge>
             {l.isTest && <Badge tone="neutral">Simulation</Badge>}
           </div>

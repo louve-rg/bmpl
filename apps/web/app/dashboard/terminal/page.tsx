@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select, StatusBadge } from '../../../components/ui';
 import type { MeView } from '../../../lib/types';
+import { legStatusLabel } from '../../../lib/shipping';
 
 /**
  * TERM-11: the terminal operator workspace. Contract read from Pam's own
@@ -2336,7 +2337,7 @@ function LookupPanel({
                   {leg.destinationHub?.name ?? 'No terminal'}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <StatusBadge status={leg.status} />
+                  <StatusBadge status={leg.status} label={legStatusLabel(leg.status)} />
                   <span className="text-xs text-[color:var(--bmpl-text-muted)]">
                     {leg.completedAt ? `Completed ${when(leg.completedAt)}` : leg.arrivedAt ? `Arrived ${when(leg.arrivedAt)}` : leg.departedAt ? `Departed ${when(leg.departedAt)}` : 'Not yet departed'}
                   </span>
