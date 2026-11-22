@@ -7,6 +7,7 @@ import { CurrentUser, Public } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import { clearAuthCookies } from '../auth/cookies';
+import { SessionService } from '../auth/session.service';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
 import { UsersService } from './users.service';
@@ -15,6 +16,7 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(
     private readonly users: UsersService,
+    private readonly sessions: SessionService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -48,6 +50,73 @@ export class UsersController {
   @Delete('avatar')
   removeAvatar(@CurrentUser() user: AuthContext) {
     return this.users.removeAvatar(user.userId);
+  }
+
+  /**
+   * ACCT-SESSIONS: list the caller's own LIVE sessions (never revoked, not
+   * expired — see {@link SessionService.listForUser}). Never returns
+   * `refreshTokenHash` or anything derived from it. `current: true` on
+   * exactly one row — the session THIS request itself authenticated with —
+   * so a screen full of otherwise-identical rows doesn't invite someone to
+   * sign themselves out by accident.
+   */
+  @Get('sessions')
+  async listSessions(@CurrentUser() user: AuthContext) {
+    const sessions = await this.sessions.listForUser(user.userId);
+    return {
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        userAgent: s.userAgent,
+        ipAddress: s.ipAddress,
+        client: s.client,
+        createdAt: s.createdAt,
+        lastUsedAt: s.lastUsedAt,
+        expiresAt: s.expiresAt,
+        current: s.id === user.sessionId,
+      })),
+    };
+  }
+
+  /**
+   * ACCT-SESSIONS: revoke exactly one of the caller's own sessions.
+   * Ownership is enforced inside {@link SessionService.revokeOwn}'s own
+   * query, not by the guard chain above this route — see that method's doc
+   * comment for why, and for the hazard this closes (a bare
+   * `revoke(sessionId)` with no ownership check would let any authenticated
+   * user revoke any OTHER user's session by guessing or harvesting an id,
+   * the moment it sat behind a route taking one as a parameter).
+   *
+   * Revoking the CALLER'S OWN CURRENT session must behave as an honest
+   * logout, not a silent desync between "the server thinks I'm out" and
+   * "the browser is still offering a dead cookie" — so this clears cookies
+   * exactly where that id matches `user.sessionId`, the same call
+   * `changePassword`/`deleteAccount` already make for the same reason.
+   */
+  @StrictThrottle()
+  @Delete('sessions/:id')
+  async revokeSession(
+    @CurrentUser() user: AuthContext,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.sessions.revokeOwn(user.userId, id);
+    if (id === user.sessionId) {
+      clearAuthCookies(res, this.env);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * ACCT-SESSIONS: "sign out everywhere else" — revoke every OTHER live
+   * session, deliberately leaving the one making this very call untouched.
+   * No cookie-clearing: the point of this action is that the caller stays
+   * signed in on this device.
+   */
+  @StrictThrottle()
+  @Post('sessions/revoke-others')
+  async revokeOtherSessions(@CurrentUser() user: AuthContext) {
+    const { revokedCount } = await this.sessions.revokeOthersForUser(user.userId, user.sessionId);
+    return { ok: true, revokedCount };
   }
 
   /**
