@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Button, Card, Field, Input } from '../ui';
+
+const TRIGGER_ID = 'deleteAccountTrigger';
 
 /**
  * MDF-925/MDF-924: DELETE /me. Reauthentication (currentPassword) is
@@ -40,26 +42,79 @@ import { Alert, Button, Card, Field, Input } from '../ui';
  * its own copy rather than whatever raw text the throttler guard returns,
  * per the owner's instruction not to show "a generic failure" here.
  *
- * ACKNOWLEDGEMENT, NOT JUST DISCLOSURE (acceptance round 1): the owner
- * directive asks for "explicit consequence confirmation," which is a
- * different requirement from showing the consequences honestly -- a
- * browser-autofilled password turns this into a single keypress otherwise.
- * `window.confirm` is the same control the product already uses for its
- * other recoverable-but-not-trivial account action, "End membership"
- * (apps/web/app/dashboard/terminal/page.tsx's `endMember`) -- reused here
- * rather than inventing a second confirmation pattern (a checkbox) for the
- * same kind of decision.
+ * THE RULE THIS SCREEN'S CONFIRMATION FOLLOWS (acceptance round 2):
+ * irreversible actions get an in-page confirmation step; reversible ones
+ * keep `window.confirm`. This is the only IRREVERSIBLE action in the
+ * product's confirm-gated set today -- "End membership"
+ * (dashboard/terminal/page.tsx's `endMember`) is undone by reactivation,
+ * and revoking a session (`SessionsList`) is undone by signing back in.
+ * Both stay on `window.confirm` on purpose, under this same rule, not
+ * because nobody noticed window.confirm's one real gap (next paragraph) --
+ * a reversible action can afford it.
+ *
+ * WHY NOT window.confirm HERE: a browser where the person has ticked
+ * "prevent this page from creating more dialogs" makes every later
+ * `window.confirm` call return `false` immediately and silently -- the
+ * exact same value a declined confirmation returns -- which would turn
+ * this button into a nonfunctional one with no explanation (root
+ * CLAUDE.md §8: no fake success messages or nonfunctional buttons). There
+ * is no reliable way to tell a suppressed dialog apart from a declined
+ * one from inside the page (both resolve synchronously to `false`, with
+ * nothing else to inspect), so detecting the suppression and falling back
+ * to this panel only then isn't a real fix -- doing the confirmation
+ * in-page removes the need for any detection at all.
  */
 export function DeleteAccountForm() {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState('');
+  const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[] | null>(null);
+  const panelHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mountedRef = useRef(false);
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  // Focus moves TO the panel when it opens and back to the trigger when it
+  // closes (cancel, Escape, or a failed attempt resetting back to the
+  // trigger) -- a native <dialog>/confirm() does both for free; a plain div
+  // does neither unless told to. Skipping this would leave a keyboard user
+  // with no indication anything changed, and the destructive button
+  // reachable with no announcement -- strictly worse than window.confirm,
+  // not just different. Keyed on `confirming` rather than called inline
+  // from the click handlers: the trigger/panel don't exist in the DOM yet
+  // at the moment state changes, only after React re-renders. Skips the
+  // very first run so mounting this component never steals focus.
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    if (confirming) {
+      panelHeadingRef.current?.focus();
+    } else {
+      document.getElementById(TRIGGER_ID)?.focus();
+    }
+  }, [confirming]);
+
+  function openConfirmation(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!window.confirm('Delete your account? This anonymizes your profile and cannot be undone.')) return;
+    setConfirming(true);
+  }
+
+  function cancelConfirmation() {
+    // Nothing else resets: the password field keeps its value, and no
+    // request has been made -- cancelling loses nothing.
+    setConfirming(false);
+  }
+
+  function onPanelKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelConfirmation();
+    }
+  }
+
+  async function confirmDelete() {
     setError(null);
     setReasons(null);
     setSubmitting(true);
@@ -77,6 +132,7 @@ export function DeleteAccountForm() {
         setError(apiErr.message || 'Unable to delete your account.');
       }
       setSubmitting(false);
+      setConfirming(false);
     }
   }
 
@@ -117,7 +173,7 @@ export function DeleteAccountForm() {
         You will be signed out of every device immediately, including this one.
       </p>
 
-      <form onSubmit={onSubmit} className="mt-4 space-y-4">
+      <form onSubmit={openConfirmation} className="mt-4 space-y-4">
         {error && <Alert tone="warning">{error}</Alert>}
         {reasons && (
           <Alert tone="warning" title="Your account cannot be deleted yet.">
@@ -139,11 +195,43 @@ export function DeleteAccountForm() {
             onChange={(e) => setCurrentPassword(e.target.value)}
           />
         </Field>
-        <div className="pt-2">
-          <Button type="submit" variant="destructive" disabled={submitting || !currentPassword}>
-            {submitting ? 'Deleting…' : 'Delete account'}
-          </Button>
-        </div>
+
+        {!confirming ? (
+          <div className="pt-2">
+            <Button id={TRIGGER_ID} type="submit" variant="destructive" disabled={submitting || !currentPassword}>
+              Delete account
+            </Button>
+          </div>
+        ) : (
+          // The ONE button that actually calls DELETE /me ("Yes, delete my
+          // account") does not exist in the DOM until this panel is open --
+          // not merely hidden or disabled, genuinely absent -- so it is
+          // unreachable by any means until the step has happened.
+          <div
+            role="group"
+            aria-label="Confirm account deletion"
+            onKeyDown={onPanelKeyDown}
+            className="rounded-lg border border-red-300 bg-red-50 p-4"
+          >
+            <h3 ref={panelHeadingRef} tabIndex={-1} className="text-sm font-semibold text-red-800 focus:outline-none">
+              Anonymize your profile and sign out of every device?
+            </h3>
+            {/* Acceptance round 2's exact concern, carried into this panel's
+                own text rather than only the page copy above: the one fact
+                that makes this not a full erasure. */}
+            <p className="mt-1 text-sm text-red-700">
+              Past orders and shipments keep their recipient name and address. This cannot be undone.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <Button type="button" variant="destructive" size="sm" disabled={submitting} onClick={() => void confirmDelete()}>
+                {submitting ? 'Deleting…' : 'Yes, delete my account'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" disabled={submitting} onClick={cancelConfirmation}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </form>
     </Card>
   );
