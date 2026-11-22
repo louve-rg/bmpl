@@ -163,4 +163,44 @@ describe('WalletTransactionDetailPage (MDF-935)', () => {
     expect(walletTransaction).toHaveBeenCalledWith('');
     expect(text()).toContain('Transaction not found.');
   });
+
+  // WALLET-DETAIL-TWO-BRANCHES-UNPINNED: BASE above is isTest:false,
+  // balanced:true, so every test up to here exercises only the "nothing
+  // unusual" side of both `if` branches the page actually renders. Pinned
+  // on both sides, not just the true case, so a regression that always
+  // shows (or always hides) either one would fail here.
+  it('flags simulation money with the badge and the explanatory alert, isTest:true', async () => {
+    walletTransaction.mockReturnValue(Promise.resolve({ ...BASE, isTest: true }));
+    mount();
+    await flush();
+
+    expect(text()).toContain('Simulation');
+    expect(text()).toContain('This is simulated money. It has no cash value and was never a real Belize dollar.');
+  });
+
+  it('shows neither the simulation badge nor its alert for a real transaction, isTest:false', async () => {
+    walletTransaction.mockReturnValue(Promise.resolve({ ...BASE, isTest: false }));
+    mount();
+    await flush();
+
+    expect(text()).not.toContain('Simulation');
+    expect(text()).not.toContain('simulated money');
+  });
+
+  it('reports an unbalanced transaction\'s entries, for transparency rather than hiding it', async () => {
+    walletTransaction.mockReturnValue(Promise.resolve({ ...BASE, balanced: false }));
+    mount();
+    await flush();
+
+    expect(text()).toContain("This transaction's entries do not balance");
+    expect(text()).toContain('not something you can act on');
+  });
+
+  it('says nothing about balance at all for an ordinary, balanced transaction', async () => {
+    walletTransaction.mockReturnValue(Promise.resolve({ ...BASE, balanced: true }));
+    mount();
+    await flush();
+
+    expect(text()).not.toContain('do not balance');
+  });
 });
