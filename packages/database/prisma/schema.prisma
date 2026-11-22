@@ -487,6 +487,13 @@ enum AuditAction {
   TERMINAL_COMPANY_MEMBER_LOCATION_REVOKED
   // ---- Terminal Operations, manager-run staff management (TERM-STAFF-API) ----
   TERMINAL_COMPANY_MEMBER_ROLE_CHANGED
+  // ---- Account security (MDF-923) ----
+  // The authenticated change-password route — distinct from PASSWORD_RESET
+  // (unauthenticated, token-based, forgot-password flow) because the actor
+  // and the evidence of consent are different: here the caller already holds
+  // a live session and proved the CURRENT password, there a mailed token
+  // stands in for both.
+  PASSWORD_CHANGED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

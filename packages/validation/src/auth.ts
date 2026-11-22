@@ -40,6 +40,19 @@ export const resetPasswordSchema = z.object({
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+/**
+ * The authenticated change-password route. Reuses the SAME passwordSchema
+ * register/reset-password already enforce — a rule stated twice is a rule
+ * that will eventually disagree with itself (root CLAUDE.md §2).
+ * `currentPassword` only needs to be non-empty here: its correctness is
+ * checked against the stored hash in AuthService, not by shape.
+ */
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required.'),
+  newPassword: passwordSchema,
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
 export const refreshSchema = z.object({
   /** Optional — web sends via cookie; mobile sends in body. */
   refreshToken: z.string().min(10).optional(),

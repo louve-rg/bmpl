@@ -351,3 +351,115 @@ describe('password reset', () => {
     expect(after.status).toBe(401);
   });
 });
+
+describe('change password', () => {
+  /** Register a fresh user and return their login cookies. */
+  async function registerAndLogin(email: string, password: string) {
+    const reg = await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email, password, firstName: 'C', lastName: 'P', acceptedTerms: true });
+    return cookiesOf(reg);
+  }
+
+  it('changes the password when the current password is correct', async () => {
+    const email = 'change-ok@example.bz';
+    const oldPassword = 'OldPass12345';
+    const newPassword = 'NewPass67890';
+    const cookies = await registerAndLogin(email, oldPassword);
+
+    const res = await request(ctx.server)
+      .post('/api/auth/change-password')
+      .set('Cookie', cookies)
+      .send({ currentPassword: oldPassword, newPassword });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ ok: true });
+
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password: oldPassword })).status).toBe(401);
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password: newPassword })).status).toBe(201);
+
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+    const log = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'PASSWORD_CHANGED', targetUserId: user.id },
+    });
+    expect(log).toBeTruthy();
+    expect(log?.actorId).toBe(user.id);
+  });
+
+  it('rejects a wrong current password with a distinct, accurate failure — and changes nothing', async () => {
+    const email = 'change-wrong-current@example.bz';
+    const password = 'RealPass12345';
+    const cookies = await registerAndLogin(email, password);
+
+    const res = await request(ctx.server)
+      .post('/api/auth/change-password')
+      .set('Cookie', cookies)
+      .send({ currentPassword: 'TotallyWrong999', newPassword: 'WouldBeNew12345' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Current password is incorrect.');
+
+    // Shape differs from the weak-new-password rejection below (own test) —
+    // this one is a plain message, not the Zod { message, errors[] } shape.
+    expect(res.body.errors).toBeUndefined();
+
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password })).status).toBe(201);
+  });
+
+  it('rejects a weak new password before ever checking the current one', async () => {
+    const email = 'change-weak-new@example.bz';
+    const password = 'RealPass12345';
+    const cookies = await registerAndLogin(email, password);
+
+    const res = await request(ctx.server)
+      .post('/api/auth/change-password')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password, newPassword: 'short' });
+    expect(res.status).toBe(400);
+    // The Zod validation-pipe shape, distinct from the wrong-current-password
+    // message above — proves this failed on the NEW password's own rules.
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: { path: string }) => e.path === 'newPassword')).toBe(true);
+
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password })).status).toBe(201);
+  });
+
+  it('requires authentication', async () => {
+    const res = await request(ctx.server)
+      .post('/api/auth/change-password')
+      .send({ currentPassword: 'whatever12345', newPassword: 'AnotherOne12345' });
+    expect(res.status).toBe(401);
+  });
+
+  it('signs out everywhere, including the session that made the change itself', async () => {
+    const email = 'change-sessions@example.bz';
+    const oldPassword = 'OldPass12345';
+    const newPassword = 'NewPass67890';
+    const cookies = await registerAndLogin(email, oldPassword);
+    const access = cookieValue(cookies, 'access_token')!;
+
+    // A SECOND, independent session for the same user — logging in again.
+    const secondLogin = await request(ctx.server).post('/api/auth/login').send({ email, password: oldPassword });
+    const secondAccess = cookieValue(cookiesOf(secondLogin), 'access_token')!;
+    expect((await request(ctx.server).get('/api/me').set('Cookie', [`access_token=${secondAccess}`])).status).toBe(200);
+
+    const change = await request(ctx.server)
+      .post('/api/auth/change-password')
+      .set('Cookie', cookies)
+      .send({ currentPassword: oldPassword, newPassword });
+    expect(change.status).toBe(201);
+
+    // The cookies the change-password response itself sent back clear the
+    // now-dead access token (web client stops offering it on the next call).
+    // A CLEARED cookie has an empty value, which cookieValue's `[^;]+` never
+    // matches — so "undefined" here is itself the assertion, not a skipped one.
+    const cleared = cookiesOf(change);
+    expect(cleared.some((c) => c.startsWith('access_token='))).toBe(true);
+    expect(cookieValue(cleared, 'access_token')).toBeUndefined();
+
+    // The session that MADE the change is dead too, not just other sessions.
+    const afterSelf = await request(ctx.server).get('/api/me').set('Cookie', [`access_token=${access}`]);
+    expect(afterSelf.status).toBe(401);
+    // The unrelated second session is dead as well.
+    const afterOther = await request(ctx.server).get('/api/me').set('Cookie', [`access_token=${secondAccess}`]);
+    expect(afterOther.status).toBe(401);
+  });
+});

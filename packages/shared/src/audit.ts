@@ -337,6 +337,10 @@ export const AUDIT_ACTIONS = [
   // one-action-per-lifecycle shape as SHIPPING_PROVIDER_MEMBER_CHANGED/
   // PASSENGER_AFFILIATION_CHANGED; the verb travels in newValue.
   'TERMINAL_COMPANY_MEMBER_ROLE_CHANGED',
+  // MDF-923: the authenticated change-password route. Distinct from
+  // PASSWORD_RESET — that one is the unauthenticated, mailed-token flow;
+  // this one requires an already-live session AND the current password.
+  'PASSWORD_CHANGED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

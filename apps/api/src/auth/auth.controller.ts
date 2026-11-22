@@ -10,18 +10,21 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import {
+  changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
   resendVerificationSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  type ChangePasswordInput,
   type LoginInput,
   type RegisterInput,
   type ResetPasswordInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
-import { Public } from '../common/decorators';
+import { CurrentUser, Public } from '../common/decorators';
+import type { AuthContext } from '../common/auth-context';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
@@ -158,6 +161,27 @@ export class AuthController {
     @Req() req: Request,
   ) {
     await this.auth.resetPassword(body, requestMeta(req));
+    return { ok: true };
+  }
+
+  /**
+   * Authenticated password change. Requires the caller's CURRENT password
+   * (not just a live session) and invalidates every session on success — a
+   * stolen cookie/refresh token must not survive its own password change.
+   * Rate-limited the same as the other sensitive auth routes.
+   */
+  @StrictThrottle()
+  @Post('change-password')
+  async changePassword(
+    @CurrentUser() user: AuthContext,
+    @Body(ZodBody(changePasswordSchema)) body: ChangePasswordInput,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.auth.changePassword(user.userId, body, requestMeta(req));
+    // The session this very request authenticated with was just revoked too
+    // — clear the cookies so the browser doesn't keep offering a dead one.
+    clearAuthCookies(res, this.env);
     return { ok: true };
   }
 
