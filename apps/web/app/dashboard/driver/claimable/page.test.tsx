@@ -129,10 +129,10 @@ describe('ClaimableJobsPage — lost-race handling (MDF-18 409/404)', () => {
       await Promise.resolve();
     });
     // The order number legitimately appears inside the explanatory notice
-    // itself ("Order #ORD-1001 was just claimed…") — what must be gone is
+    // itself ("Order #ORD-1001 is no longer available…") — what must be gone is
     // the CARD (its claim button), not every mention of the order number.
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Claim this job')).toBe(false);
-    expect(container.textContent).toMatch(/claimed by another driver/);
+    expect(container.textContent).toMatch(/no longer available — it was claimed or reassigned/);
     expect(container.querySelector('[role="alert"]')?.textContent).not.toMatch(/reload and try again/);
     expect(router.push).not.toHaveBeenCalled();
   });
