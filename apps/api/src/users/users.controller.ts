@@ -110,12 +110,14 @@ export class UsersController {
    * ACCT-SESSIONS: "sign out everywhere else" — revoke every OTHER live
    * session, deliberately leaving the one making this very call untouched.
    * No cookie-clearing: the point of this action is that the caller stays
-   * signed in on this device.
+   * signed in on this device. MDF-951: audited (a bulk security action,
+   * unlike `logout`/`revokeSession` above) — see
+   * `SessionService.revokeOthersForUser`'s doc comment for why.
    */
   @StrictThrottle()
   @Post('sessions/revoke-others')
-  async revokeOtherSessions(@CurrentUser() user: AuthContext) {
-    const { revokedCount } = await this.sessions.revokeOthersForUser(user.userId, user.sessionId);
+  async revokeOtherSessions(@CurrentUser() user: AuthContext, @Req() req: Request) {
+    const { revokedCount } = await this.sessions.revokeOthersForUser(user.userId, user.sessionId, { ipAddress: req.ip });
     return { ok: true, revokedCount };
   }
 

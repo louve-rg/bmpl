@@ -347,6 +347,11 @@ export const AUDIT_ACTIONS = [
   // the row, permanent. Kept separate from USER_SUSPENDED/USER_RESTORED,
   // which are admin-initiated and reversible.
   'USER_ACCOUNT_DELETED',
+  // MDF-951: "sign out everywhere else" (SessionService.
+  // revokeOthersForUser) is a BULK security action — every OTHER live
+  // session ends in one call — unlike LOGOUT (one device, unaudited) or
+  // revoking a single named session (one device, by id).
+  'SESSIONS_REVOKED_OTHERS',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
