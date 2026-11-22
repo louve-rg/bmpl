@@ -10,14 +10,28 @@
 -- short of pickup, by comment design in packages/shared/src/dispatch.ts).
 --
 -- This migration adds ONLY the new terminal-ish status and the two columns
--- the driver's own report needs. It is the schema half of that fix; the
--- action itself (RAISE_EXCEPTION) and its one legal way out (CANCEL,
--- admin-only) are packages/shared/src/dispatch.ts, not this file.
+-- the driver's own report needs; it contains no DDL that reads or writes
+-- the enum value itself (the ADD VALUE statements below are the only
+-- references to it in this file). The action's write path
+-- (driver-jobs.service.ts, filtered on in driver-job-feed.service.ts) ships
+-- in THIS SAME COMMIT, not a later one — correcting an earlier draft of
+-- this comment that claimed otherwise.
 --
--- ADD ONLY: nothing below references the new enum value in the same
--- transaction that adds it — Postgres refuses that combination (see
--- packages/database/CLAUDE.md §2). The service code that writes it is a
--- separate, later change.
+-- Why that is still safe: Postgres's actual restriction is narrower than
+-- "don't ship the writer in the same change" — it forbids using a new enum
+-- value inside the SAME TRANSACTION that adds it (packages/database/CLAUDE.md
+-- §2), and a schema migration and a runtime API write are never the same
+-- transaction, regardless of which commit either one ships in. Separately,
+-- on THIS repo's deploy pipeline (railway.json preDeployCommand; measured
+-- and documented in docs/phase-2/DEPLOYMENT-GUIDE.md and
+-- docs/PROJECT_STATUS.md), `prisma migrate deploy` runs inside the freshly
+-- built image, after build and before that SAME deployment's container
+-- receives traffic — the old version keeps serving until it does, and a
+-- failed migration halts the deploy rather than letting the new binary
+-- start. Since this migration and its writer are the same commit, they are
+-- necessarily the same build and the same deployment, so the enum value is
+-- guaranteed to exist in the database before the container that can write
+-- it ever takes a request.
 --
 -- NOT the same fact as ShipmentLeg.exceptionAt/exceptionReason: those are
 -- staff/system-driven, live on ShipmentLeg.status (apps/api/src/shipping,
