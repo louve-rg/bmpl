@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { hashPassword, verifyPassword } from '@bmpl/authentication';
 import type {
   DeliveryStatus,
@@ -129,6 +129,8 @@ const PENDING_MESSAGE =
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -484,6 +486,15 @@ export class UsersService {
     // failure — an anonymized "Deleted User" account whose storefront is
     // still APPROVED and orderable, with nobody left to run it — which is
     // the worse of the two states to be caught in.
+    //
+    // The one real consequence of this ordering (acceptance round 4): in
+    // that failure case, moderate() has ALREADY sent the owner a
+    // notification saying their storefront was suspended because they
+    // deleted their account — while the account is, in fact, still ACTIVE
+    // and they are still logged in. Low probability, and the ordering
+    // above is still the right call; a reader of this comment should not
+    // have to rediscover that the notification has already left the
+    // building.
     const vendor = await this.prisma.vendorProfile.findUnique({
       where: { userId },
       select: { id: true, approvalStatus: true },
@@ -625,6 +636,31 @@ export class UsersService {
    *   `contactEmail`, `contactPhone`, `addressLine1`,
    *   `operatingLicenceNumber`. `businessName`/`district`/`city` are left:
    *   business identity and coarse location, not the person.
+   *
+   * Acceptance round 4 — a fifth table family, missed by all three prior
+   * rounds (spot-checked: `PropertyDocument` was mentioned nowhere in this
+   * file):
+   *
+   * - `PropertyDocument` — identity/ownership paperwork (`TITLE_DEED`,
+   *   `PROOF_OF_OWNERSHIP`, `OWNER_AUTHORIZATION`, `AGENT_MANDATE`, etc.) in
+   *   the PRIVATE bucket, hanging off `PropertyListing`, not off the user
+   *   directly — reached only through `PropertyOwnerProfile.listings`
+   *   (`PropertyListing.ownerProfileId`), the same per-row-placeholder
+   *   treatment as `RoleApplicationDocument` above, because these are this
+   *   OWNER's own identity/ownership documents and this is the owner
+   *   leaving.
+   *
+   *   Deliberately NOT reached through `RealEstateAgentProfile.listings`
+   *   (`PropertyListing.agentProfileId`): a listing an agent merely
+   *   represents is still owned by someone else who has not deleted their
+   *   account, and that owner's title deed is the OWNER's document, not
+   *   the departing agent's — scrubbing it on the agent's own deletion
+   *   would destroy a still-active owner's legal paperwork, which is a
+   *   bug, not privacy. `AGENT_MANDATE`/`OWNER_AUTHORIZATION` on such a
+   *   listing get the same bilateral-record treatment as `Message`/
+   *   `MessageAttachment` below: an agreement between two parties, one of
+   *   whom is still active, is not solely this departing account's record
+   *   to rewrite.
    *
    * Deliberately left alone, stated rather than silently skipped:
    *
@@ -826,6 +862,24 @@ export class UsersService {
       for (const resume of resumes) {
         orphanedKeys.push(resume.storageKey);
         await tx.jobSeekerResume.update({ where: { id: resume.id }, data: { storageKey: `deleted-${resume.id}`, label: 'Removed' } });
+      }
+    }
+
+    // PropertyDocument: only via listings this user OWNS (propertyOwnerProfile),
+    // never via listings they merely agent — see the doc comment above for why.
+    if (propertyOwner) {
+      const ownedListingIds = (
+        await tx.propertyListing.findMany({ where: { ownerProfileId: propertyOwner.id }, select: { id: true } })
+      ).map((l) => l.id);
+      if (ownedListingIds.length > 0) {
+        const propertyDocs = await tx.propertyDocument.findMany({
+          where: { listingId: { in: ownedListingIds } },
+          select: { id: true, storageKey: true },
+        });
+        for (const doc of propertyDocs) {
+          orphanedKeys.push(doc.storageKey);
+          await tx.propertyDocument.update({ where: { id: doc.id }, data: { storageKey: `deleted-${doc.id}`, label: null } });
+        }
       }
     }
 
@@ -1247,13 +1301,24 @@ export class UsersService {
     }
   }
 
-  /** Best-effort cleanup of a superseded object; failure must not fail the request. */
+  /**
+   * Best-effort cleanup of a superseded object; failure must not fail the
+   * request. Harmless for an avatar — a stray file nobody can find is just
+   * wasted storage. NOT harmless for an identity document orphaned by
+   * {@link anonymizePersonalData} (acceptance round 4): the database row
+   * pointing at it has already been overwritten inside the committed
+   * transaction by the time this runs, so a failed delete here leaves a
+   * licence photo or a title deed sitting in the private bucket with
+   * nothing left to find it by and no way to retry. Log the key so an
+   * operator can still purge it by hand — a storage key is not personal
+   * data, there is nothing in it to protect by staying silent.
+   */
   private async deleteQuietly(key: string | null | undefined): Promise<void> {
     if (!key) return;
     try {
       await this.storage.deleteObject(key);
-    } catch {
-      /* orphaned object — harmless, and never worth failing an upload over */
+    } catch (err) {
+      this.logger.warn(`Failed to delete orphaned storage object, key=${key}: ${err instanceof Error ? err.message : err}`);
     }
   }
 }

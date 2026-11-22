@@ -619,6 +619,49 @@ describe('account deletion — refusals', () => {
       data: { profileId: jobSeeker.id, label: 'My real CV', storageKey: 'real-resume-key', mimeType: 'application/pdf', fileSizeBytes: 2048 },
     });
 
+    // Acceptance round 4 — the fifth PII family: PropertyDocument. Owned
+    // listing: this deleting user is the OWNER, so its documents are this
+    // account's own identity/ownership paperwork and must be anonymized.
+    const ownedListing = await ctx.prisma.propertyListing.create({
+      data: {
+        ownerProfileId: propertyOwner.id,
+        purpose: 'FOR_SALE',
+        propertyType: 'HOUSE',
+        title: 'Owned Listing',
+        slug: 'full-sweep-owned-listing',
+        reference: 'FS-OWNED-1',
+        description: 'A real listing this account owns.',
+        priceMinor: 50_000_00n,
+      },
+    });
+    const ownedListingDocument = await ctx.prisma.propertyDocument.create({
+      data: { listingId: ownedListing.id, kind: 'TITLE_DEED', label: 'Real title deed', storageKey: 'real-title-deed-key', mimeType: 'application/pdf', fileSizeBytes: 4096 },
+    });
+
+    // A SEPARATE, still-active owner's listing, where this deleting user is
+    // only the AGENT representing it. Its documents must be LEFT ALONE —
+    // they are the other owner's legal paperwork, not this account's.
+    const otherOwnerUser = await ctx.prisma.user.create({ data: { email: 'other-owner@example.bz', passwordHash: 'x', firstName: 'Other', lastName: 'Owner' } });
+    const otherOwner = await ctx.prisma.propertyOwnerProfile.create({
+      data: { userId: otherOwnerUser.id, legalName: 'Other Real Owner', phone: '6650099', email: 'other-owner@example.bz' },
+    });
+    const agentedListing = await ctx.prisma.propertyListing.create({
+      data: {
+        ownerProfileId: otherOwner.id,
+        agentProfileId: agent.id,
+        purpose: 'FOR_RENT',
+        propertyType: 'APARTMENT',
+        title: 'Agented Listing',
+        slug: 'full-sweep-agented-listing',
+        reference: 'FS-AGENTED-1',
+        description: 'A real listing this account only agents for someone else.',
+        priceMinor: 1_200_00n,
+      },
+    });
+    const agentedListingDocument = await ctx.prisma.propertyDocument.create({
+      data: { listingId: agentedListing.id, kind: 'OWNER_AUTHORIZATION', label: "Other owner's authorization", storageKey: 'real-other-owner-authorization-key', mimeType: 'application/pdf', fileSizeBytes: 4096 },
+    });
+
     const res = await request(ctx.server)
       .delete('/api/me')
       .set('Cookie', cookies)
@@ -705,6 +748,20 @@ describe('account deletion — refusals', () => {
     expect(agentAfter.displayName).toBe('Deleted Agent');
     expect(agentAfter.phone).toBeNull();
     expect(agentAfter.isActive).toBe(false);
+
+    // Acceptance round 4: PropertyDocument on a listing this account OWNS
+    // is anonymized, the same treatment as RoleApplicationDocument.
+    const ownedListingDocumentAfter = await ctx.prisma.propertyDocument.findUniqueOrThrow({ where: { id: ownedListingDocument.id } });
+    expect(ownedListingDocumentAfter.storageKey).toBe(`deleted-${ownedListingDocument.id}`);
+    expect(ownedListingDocumentAfter.label).toBeNull();
+
+    // PropertyDocument on a listing this account only AGENTS for a
+    // different, still-active owner is left completely alone — that
+    // owner's title deed is not this departing account's record to
+    // rewrite. See anonymizePersonalData's doc comment for why.
+    const agentedListingDocumentAfter = await ctx.prisma.propertyDocument.findUniqueOrThrow({ where: { id: agentedListingDocument.id } });
+    expect(agentedListingDocumentAfter.storageKey).toBe('real-other-owner-authorization-key');
+    expect(agentedListingDocumentAfter.label).toBe("Other owner's authorization");
 
     const agencyAfter = await ctx.prisma.agencyProfile.findUniqueOrThrow({ where: { id: agency.id } });
     expect(agencyAfter.contactEmail).toBe(`deleted-agency-${agency.id}@deleted.bmpl.internal`);
