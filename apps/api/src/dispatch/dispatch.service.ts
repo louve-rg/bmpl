@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DELIVERY_STATUS_LABELS, deliveryStage, type DeliveryStatus } from '@bmpl/shared';
+import { canPerform, DELIVERY_STATUS_LABELS, deliveryStage, type DeliveryStatus } from '@bmpl/shared';
 import type { AssignDeliveryInput, CancelDeliveryInput, ReassignDeliveryInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -349,43 +349,124 @@ export class DispatchService {
   async cancel(actor: Actor, deliveryId: string, dto: CancelDeliveryInput) {
     const current = await this.core.loadOrThrow(deliveryId);
     this.core.assertAction('CANCEL', current.status);
-    const fromStatus = current.status;
-    // Conditional write, NOT an unconditional update by id. CANCEL's own
-    // legal `from` list includes DRIVER_ACCEPTED — the same status
-    // CONFIRM_PICKUP's only legal `from` is — so an admin cancelling and the
-    // assigned driver confirming pickup can both legally act on the same row
-    // at the same instant. An unconditional update here let whichever
-    // committed last silently win: a cancelled order resurrecting to
-    // PICKUP_CONFIRMED with inventory finalized after everyone was told it
-    // was cancelled, or inventory finalized on an order that then ends up
-    // CANCELLED underneath the driver who just picked it up. Re-asserting
-    // the status this call actually read, inside the write, closes it — same
-    // pattern as DriverJobService.accept()/confirmPickup and
-    // DispatchService.assignInternal.
-    const won = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.orderDelivery.updateMany({
-        where: { id: deliveryId, status: fromStatus },
-        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: dto.reason },
-      });
-      if (claimed.count === 0) return false;
-      await tx.deliveryAssignment.updateMany({
-        where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } },
-        data: { status: 'CANCELLED', endedAt: new Date(), endReason: dto.reason },
-      });
-      await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus: 'CANCELLED', event: 'CANCEL', actorRole: 'ADMIN', actorUserId: actor.userId, note: dto.reason });
-      await this.core.auditTransition('CANCEL', actor.userId, deliveryId, { reason: dto.reason }, tx);
-      await this.core.notify(
-        [current.assignedDriver ? current.vendorOrder.order.userId : null, current.vendorOrder.order.userId, current.vendorOrder.vendorProfile.userId, current.assignedDriverProfileId ? (await tx.driverProfile.findUnique({ where: { id: current.assignedDriverProfileId }, select: { userId: true } }))?.userId : null],
-        { event: 'DELIVERY_CANCELLED', title: 'Delivery cancelled', body: `The delivery for order ${current.vendorOrder.order.orderNumber} was cancelled.`, data: { deliveryId } },
-        tx,
-      );
-      return true;
-    });
+    const won = await this.prisma.$transaction((tx) => this.cancelInTx(tx, current, dto.reason, actor.userId, 'ADMIN'));
     if (!won) {
       throw new ConflictException('This delivery changed state before it could be cancelled — reload and try again.');
     }
     await this.messaging.onDeliveryEvent(deliveryId, 'This delivery was cancelled.', null);
     return this.get(deliveryId);
+  }
+
+  /**
+   * The write CANCEL actually performs, factored out so ORD-RELEASE-AFTER-READY's
+   * release-triggered cancellation (below) can compose it atomically inside the
+   * SAME transaction as the reservation release, instead of re-deriving the
+   * write — same shape as OrdersService.releaseReservationsInTx/releaseReservations.
+   *
+   * Conditional write, NOT an unconditional update by id. CANCEL's own legal
+   * `from` list includes DRIVER_ACCEPTED — the same status CONFIRM_PICKUP's
+   * only legal `from` is — so an admin cancelling and the assigned driver
+   * confirming pickup can both legally act on the same row at the same
+   * instant. An unconditional update here let whichever committed last
+   * silently win: a cancelled order resurrecting to PICKUP_CONFIRMED with
+   * inventory finalized after everyone was told it was cancelled, or
+   * inventory finalized on an order that then ends up CANCELLED underneath
+   * the driver who just picked it up. Re-asserting the status this call
+   * actually read, inside the write, closes it — same pattern as
+   * DriverJobService.accept()/confirmPickup and DispatchService.assignInternal.
+   */
+  private async cancelInTx(
+    tx: Prisma.TransactionClient,
+    current: { id: string; status: DeliveryStatus; assignedDriverProfileId: string | null; vendorOrder: { order: { userId: string; orderNumber: string }; vendorProfile: { userId: string } } },
+    reason: string | null,
+    actorId: string | null,
+    actorRole: 'ADMIN' | 'SYSTEM',
+  ): Promise<boolean> {
+    const fromStatus = current.status;
+    const claimed = await tx.orderDelivery.updateMany({
+      where: { id: current.id, status: fromStatus },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: reason },
+    });
+    if (claimed.count === 0) return false;
+    await tx.deliveryAssignment.updateMany({
+      where: { orderDeliveryId: current.id, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+      data: { status: 'CANCELLED', endedAt: new Date(), endReason: reason },
+    });
+    await this.core.appendTimeline(tx, current.id, { fromStatus, toStatus: 'CANCELLED', event: 'CANCEL', actorRole, actorUserId: actorId, note: reason });
+    await this.core.auditTransition('CANCEL', actorId, current.id, { reason }, tx);
+    // Same recipient list `cancel()` always computed (the first element is
+    // redundant with the second whenever a driver is assigned — pre-existing,
+    // left unchanged here; `notify()` fans out to each DISTINCT user).
+    await this.core.notify(
+      [current.assignedDriverProfileId ? current.vendorOrder.order.userId : null, current.vendorOrder.order.userId, current.vendorOrder.vendorProfile.userId, current.assignedDriverProfileId ? (await tx.driverProfile.findUnique({ where: { id: current.assignedDriverProfileId }, select: { userId: true } }))?.userId : null],
+      { event: 'DELIVERY_CANCELLED', title: 'Delivery cancelled', body: `The delivery for order ${current.vendorOrder.order.orderNumber} was cancelled.`, data: { deliveryId: current.id } },
+      tx,
+    );
+    return true;
+  }
+
+  /**
+   * ORD-RELEASE-AFTER-READY. `VendorFulfilmentService.markReady()` already
+   * refuses to create an OrderDelivery for a released order (#797), but the
+   * reverse direction had no guard at all: `OrdersService.releaseReservationsInTx`
+   * could release payment on an order the vendor had ALREADY readied, after
+   * which dispatch, driver accept/pickup/delivery all proceeded normally on a
+   * CANCELLED payment — settlement later refuses it, so the loss lands on
+   * whoever physically handed over the goods.
+   *
+   * This is the one place that decides whether a release may proceed, called
+   * BY releaseReservationsInTx inside its own transaction (same composable
+   * shape it already uses for everything else it touches), so a release and
+   * its consequence for an in-flight delivery commit or roll back together —
+   * never a window where the order reads "released" while a delivery is still
+   * live and nothing has reacted to it yet.
+   *
+   * Decision (stated, not guessed): the release itself is allowed to proceed
+   * — it is an admin financial decision (a refund) and must not be gated on
+   * logistics — and any delivery still live is CANCELLED as part of the same
+   * release, reusing the existing CANCEL edge and its existing notification,
+   * never a new mechanism. This moves state only: no refund, no escrow
+   * release, no settlement adjustment and no wallet entry beyond what
+   * releaseReservationsInTx already does on its own — CANCEL has never
+   * reversed money and does not start here.
+   *
+   * The one case this does NOT resolve, by design: CANCEL's own legal `from`
+   * list (packages/shared/dispatch.ts) deliberately excludes PICKUP_CONFIRMED,
+   * IN_TRANSIT and ARRIVING — once a driver already holds the parcel,
+   * cancelling is not a safe state transition (inventory is already
+   * finalized, and the goods are not at the vendor to "un-ready"). Widening
+   * CANCEL to reach those states would reopen that deliberate constraint for
+   * a case with no existing safe edge to express it, which is a product
+   * decision, not an engineering one. Rather than invent one, this REFUSES
+   * the whole release while any of this order's deliveries is in one of
+   * those three statuses (the admin sees why; the release can be retried once
+   * the delivery resolves itself) — flagged to Michael as the one slice of
+   * this gap that may need the owner's call, not decided silently here.
+   */
+  async cancelForReleasedOrder(tx: Prisma.TransactionClient, orderId: string, actorId: string | null): Promise<void> {
+    const deliveries = await tx.orderDelivery.findMany({
+      where: { vendorOrder: { orderId } },
+      include: { vendorOrder: { include: { order: { select: { userId: true, orderNumber: true } }, vendorProfile: { select: { userId: true } } } } },
+    });
+    const blocked = deliveries.find((d) => d.status === 'PICKUP_CONFIRMED' || d.status === 'IN_TRANSIT' || d.status === 'ARRIVING');
+    if (blocked) {
+      throw new ConflictException(
+        `Cannot release this order's reservations: delivery ${blocked.id} has already been picked up and cannot be safely cancelled from "${DELIVERY_STATUS_LABELS[blocked.status]}". Wait for it to resolve (delivered, or a reported problem cancelled), or escalate for a decision.`,
+      );
+    }
+    for (const d of deliveries) {
+      if (!canPerform('CANCEL', d.status)) continue; // already terminal (DELIVERED/CANCELLED) — nothing to do
+      const won = await this.cancelInTx(
+        tx,
+        d,
+        "This order's payment was returned to the customer; the delivery could not proceed.",
+        actorId,
+        'SYSTEM',
+      );
+      if (!won) {
+        throw new ConflictException('This delivery changed state before the release could be applied — reload and try again.');
+      }
+    }
   }
 
   // ---- PIN reveal (deliveries.verify) -----------------------------------

@@ -13,6 +13,7 @@ import { effectiveUnitPrice } from '../products/pricing.util';
 import { PaymentsService } from '../payments/payments.service';
 import { DeliveryPricingService } from '../delivery/delivery.pricing';
 import { StorageService } from '../storage/storage.service';
+import { DispatchService } from '../dispatch/dispatch.service';
 
 export interface ActorContext {
   userId: string;
@@ -118,6 +119,7 @@ export class OrdersService {
     private readonly payments: PaymentsService,
     private readonly deliveryPricing: DeliveryPricingService,
     private readonly storage: StorageService,
+    private readonly dispatch: DispatchService,
   ) {}
 
   // ===========================================================================
@@ -655,6 +657,15 @@ export class OrdersService {
    * is byte-identical to what the public method always did: stock back,
    * wallet holds released — including the balanced escrow→customer return for
    * an AUTHORIZED payment — payment CANCELLED, all audited.
+   *
+   * ORD-RELEASE-AFTER-READY: a vendor-order can already be readied (and have
+   * an OrderDelivery dispatched against it) by the time this runs — markReady()
+   * being refused for an already-released order (#797) says nothing about the
+   * reverse order of events. DispatchService.cancelForReleasedOrder is called
+   * FIRST, inside this same transaction, so the one question — may this order
+   * still be fulfilled — is decided before any stock/payment write below, and
+   * a refusal there (an in-flight delivery that already has the parcel) rolls
+   * back the whole release rather than leaving it half-applied.
    */
   private async releaseReservationsInTx(tx: Prisma.TransactionClient, orderId: string, actorId: string | null) {
     {
@@ -666,6 +677,7 @@ export class OrdersService {
       if (order.reservationsReleasedAt) {
         return { orderId, orderNumber: order.orderNumber, released: false, alreadyReleased: true, itemsReleased: 0 };
       }
+      await this.dispatch.cancelForReleasedOrder(tx, orderId, actorId);
       let itemsReleased = 0;
       for (const vo of order.vendorOrders) {
         for (const item of vo.items) {
