@@ -68,6 +68,22 @@ describe('RecipientCollectionCode', () => {
     expect(el.textContent).not.toMatch(/error|could not load|failed/i);
   });
 
+  // MDF-926: a locked-out recipient must see why, in the code's own slot --
+  // never the generic "nothing to show" line, which would read as if
+  // nothing were wrong.
+  it('shows the hold message in the code\'s own slot once the code has locked out, not the generic "nothing to show" line', async () => {
+    incomingCollectionCode.mockResolvedValue({
+      reference: 'BML-ABCD2345',
+      collectionCode: null,
+      collectionHoldMessage: 'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.',
+    });
+    const el = await mount();
+
+    expect(el.textContent).toContain('Our team needs to confirm it with you directly');
+    expect(el.textContent).not.toContain('No collection code to show for this parcel right now.');
+    expect(el.textContent).not.toMatch(/error|could not load|failed/i);
+  });
+
   it('shows an honest error only when the request itself fails', async () => {
     incomingCollectionCode.mockRejectedValue({ status: 500, message: 'boom' });
     const el = await mount();

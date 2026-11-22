@@ -13,16 +13,31 @@
  * owner by the time this renders, so showing the value directly is not a
  * new exposure; it is the one existing, authorized reader of this value
  * finally being shown it.
+ *
+ * MDF-926: `code` and `holdMessage` are the two faces of the same fact —
+ * `ShipmentView.collectionHoldMessage` is non-null in EXACTLY the case
+ * `collectionCode` just went null for (the PIN locked out after 5 wrong
+ * attempts), never any of the field's other null cases (not yet
+ * AWAITING_COLLECTION, already collected, grandfathered). Before this,
+ * a locked-out sender's code simply vanished from this slot with nothing
+ * in its place — the dead-end control the owner ruled out. Rendering the
+ * message here, in the code's own spot, is the fix.
  */
-export function SenderCollectionCode({ code }: { code: string | null }) {
-  if (!code) return null;
+export function SenderCollectionCode({ code, holdMessage }: { code: string | null; holdMessage?: string | null }) {
+  if (!code && !holdMessage) return null;
   return (
     <div data-theme="light" className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
       <h2 className="text-sm font-semibold text-slate-900">Collection code</h2>
-      <p className="mt-1 text-sm text-slate-600">
-        Whoever is collecting this parcel will need this code — pass it on to them.
-      </p>
-      <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{code}</p>
+      {code ? (
+        <>
+          <p className="mt-1 text-sm text-slate-600">
+            Whoever is collecting this parcel will need this code — pass it on to them.
+          </p>
+          <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{code}</p>
+        </>
+      ) : (
+        <p className="mt-1 text-sm text-slate-600">{holdMessage}</p>
+      )}
     </div>
   );
 }

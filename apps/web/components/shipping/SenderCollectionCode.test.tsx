@@ -16,12 +16,12 @@ afterEach(() => {
   container = null;
 });
 
-function mount(code: string | null) {
+function mount(code: string | null, holdMessage?: string | null) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root!.render(<SenderCollectionCode code={code} />);
+    root!.render(<SenderCollectionCode code={code} holdMessage={holdMessage} />);
   });
   return container;
 }
@@ -34,9 +34,18 @@ describe('SenderCollectionCode', () => {
     expect(el.textContent).toMatch(/pass it on/i);
   });
 
-  it('renders nothing when there is no code', () => {
+  it('renders nothing when there is no code and no hold message', () => {
     const el = mount(null);
     expect(el.textContent).toBe('');
     expect(el.childElementCount).toBe(0);
+  });
+
+  // MDF-926: before this, a locked-out code simply vanished from this slot
+  // with nothing in its place -- the dead-end control the owner ruled out.
+  it('renders the hold message in the code\'s own slot once the code has locked out, never the code and the message together', () => {
+    const el = mount(null, 'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.');
+    expect(el.textContent).toContain('Collection code');
+    expect(el.textContent).toContain('Our team needs to confirm it with you directly');
+    expect(el.textContent).not.toMatch(/pass it on/i);
   });
 });

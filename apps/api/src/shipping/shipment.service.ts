@@ -4449,19 +4449,31 @@ export class ShipmentService {
         collectedAt: true,
         collectionPin: true,
         collectionPinGrandfathered: true,
+        collectionVerificationStatus: true,
       },
     });
     if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
 
+    // MDF-926: this route is a different, narrower path than serialize()'s
+    // own CUSTOMER audience — it had never picked up that method's own
+    // FAILED-lockout gate, so a locked-out recipient asking HERE was still
+    // handed the real, no-longer-valid code. Same gate, same coarse
+    // sentence, same reasoning as COLLECTION_LOCKED_CUSTOMER_MESSAGE's own
+    // doc comment: never the attempt count or the raw status.
+    const locked = s.collectionVerificationStatus === 'FAILED';
     const collectionCode =
-      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered ? null : s.collectionPin;
+      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered || locked ? null : s.collectionPin;
+    const collectionHoldMessage =
+      s.status === 'AWAITING_COLLECTION' && !s.collectedAt && !s.collectionPinGrandfathered && locked
+        ? ShipmentService.COLLECTION_LOCKED_CUSTOMER_MESSAGE
+        : null;
 
     await this.audit.record({
       action: 'SHIPMENT_COLLECTION_CODE_REVEALED',
       actorId: userId,
       newValue: { shipmentId: s.id, reference, revealedTo: 'RECIPIENT' },
     });
-    return { reference, collectionCode };
+    return { reference, collectionCode, collectionHoldMessage };
   }
 
   /**
@@ -4677,10 +4689,18 @@ export class ShipmentService {
    * counter shape as `revealDeliveryCode` above, for the identical
    * reasoning (the token carries its own entropy; a lockout here would only
    * let a legitimate recipient lock themselves out). Re-checks the SAME
-   * status/collected/grandfathered gate `recipientCollectionCode` and
-   * `serialize()`'s own CUSTOMER audience use — a code requested while
+   * status/collected/grandfathered/FAILED-lockout gate `recipientCollectionCode`
+   * and `serialize()`'s own CUSTOMER audience use — a code requested while
    * AWAITING_COLLECTION but revealed after someone else already collected
-   * it (or staff cancelled it) must come back null, not the stale value.
+   * it (or staff cancelled it, or the lockout fired) must come back null,
+   * not the stale value.
+   *
+   * MDF-926: of the three readers of this value, a reveal-token holder is
+   * the LEAST authenticated — no account, no session, just possession of a
+   * link plus a mailed token. So the same coarse, count-free sentence
+   * matters most here: telling this caller the code is on hold is fine;
+   * telling them how many guesses are left anywhere in this system is a
+   * brute-force oracle, which is exactly what the lockout exists to deny.
    */
   async revealCollectionCode(token: string, revealToken: string) {
     const s = await this.prisma.shipment.findUnique({
@@ -4692,6 +4712,7 @@ export class ShipmentService {
         collectedAt: true,
         collectionPin: true,
         collectionPinGrandfathered: true,
+        collectionVerificationStatus: true,
         collectionCodeRevealToken: true,
         collectionCodeRevealTokenExpiresAt: true,
       },
@@ -4709,15 +4730,20 @@ export class ShipmentService {
       data: { collectionCodeRevealToken: null, collectionCodeRevealTokenExpiresAt: null },
     });
 
+    const locked = s.collectionVerificationStatus === 'FAILED';
     const collectionCode =
-      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered ? null : s.collectionPin;
+      s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered || locked ? null : s.collectionPin;
+    const collectionHoldMessage =
+      s.status === 'AWAITING_COLLECTION' && !s.collectedAt && !s.collectionPinGrandfathered && locked
+        ? ShipmentService.COLLECTION_LOCKED_CUSTOMER_MESSAGE
+        : null;
 
     await this.audit.record({
       action: 'SHIPMENT_COLLECTION_CODE_REVEALED',
       actorId: null,
       newValue: { shipmentId: s.id, reference: s.reference, revealedTo: 'RECIPIENT_UNLINKED' },
     });
-    return { reference: s.reference, collectionCode };
+    return { reference: s.reference, collectionCode, collectionHoldMessage };
   }
 
   /* ------------------------------------------------------------- reading */

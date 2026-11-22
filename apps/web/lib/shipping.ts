@@ -216,6 +216,16 @@ export interface ShipmentView {
    * (`UnlinkedCollectionCode`) need a channel BML doesn't have in that case.
    */
   collectionCode: string | null;
+  /**
+   * MDF-926: the one coarse, human sentence that replaces `collectionCode`
+   * in the slot the code used to occupy once the PIN has locked out
+   * (5 wrong attempts) — present only in that exact case, null otherwise.
+   * Never carries an attempt count or the raw verification status; those
+   * stay staff-only. Optional for the same reason `availabilityWindows`
+   * below is: web and api deploy independently, and this is a newly added
+   * field, so older fixtures/responses legitimately lack it.
+   */
+  collectionHoldMessage?: string | null;
   /** Optional: web and api deploy independently (BMPL-349/350) — a real
    *  window on every merge where this field hasn't started arriving yet.
    *  Absence degrades the same as an empty array: no window set. */
@@ -358,6 +368,7 @@ export interface DeliveryCodeView {
 export interface CollectionCodeView {
   reference: string;
   collectionCode: string | null;
+  collectionHoldMessage: string | null;
 }
 
 export interface QuoteLeg {

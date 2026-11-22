@@ -21,10 +21,16 @@ import { Alert, LoadingRow } from '../ui';
  * reasoning as `RecipientDeliveryCode`'s own null handling: the API
  * returns null once the shipment is no longer AWAITING_COLLECTION
  * (collected, cancelled, or grandfathered). This component cannot tell
- * those apart client-side and does not try to.
+ * those apart client-side and does not try to -- EXCEPT for one case the
+ * API now tells it apart explicitly: `collectionHoldMessage` (MDF-926) is
+ * non-null in exactly the one null-collectionCode case that is not a quiet
+ * "nothing to show" -- the PIN locked out after 5 wrong attempts -- and
+ * must be shown in the code's own spot rather than the generic fallback
+ * line below, which would otherwise read as "nothing is wrong here."
  */
 export function RecipientCollectionCode({ reference }: { reference: string }) {
   const [code, setCode] = useState<string | null>(null);
+  const [holdMessage, setHoldMessage] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -35,6 +41,7 @@ export function RecipientCollectionCode({ reference }: { reference: string }) {
       .then((v) => {
         if (cancelled) return;
         setCode(v.collectionCode);
+        setHoldMessage(v.collectionHoldMessage);
       })
       .catch(() => {
         if (!cancelled) setErr('We could not load your collection code right now.');
@@ -66,6 +73,8 @@ export function RecipientCollectionCode({ reference }: { reference: string }) {
           </p>
           <p className="mt-3 text-center text-3xl font-bold tracking-[0.3em] text-belize-navy">{code}</p>
         </>
+      ) : holdMessage ? (
+        <p className="mt-1 text-sm text-slate-600">{holdMessage}</p>
       ) : (
         <p className="mt-1 text-sm text-slate-600">No collection code to show for this parcel right now.</p>
       )}
