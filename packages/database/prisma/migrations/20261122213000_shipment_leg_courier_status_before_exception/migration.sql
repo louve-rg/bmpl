@@ -1,0 +1,26 @@
+-- SHIP-S1: a driver was blind to an exception on their own leg.
+-- flagException wrote shipment_legs.status = 'EXCEPTION' but never touched
+-- courierStatus, which is the ONLY column the driver app's state machine
+-- (courierStatus reuses the DeliveryStatus vocabulary; see this column's own
+-- doc comment above) reads. Every forward courier transition was correctly
+-- refused via `status`, but the driver's own screen kept showing whatever
+-- courierStatus held before the flag (ASSIGNED, IN_TRANSIT, ...) with no
+-- indication anything was wrong.
+--
+-- The fix makes flagException set courierStatus = 'EXCEPTION' too (EXCEPTION
+-- already exists on the DeliveryStatus enum, added by MDF-927 for marketplace
+-- deliveries -- no enum change needed here), and resolveException's RESUME
+-- path restores the prior value. Restoring requires actually having the
+-- prior value on hand, not recomputed: recomputing a "plausible" status
+-- risks reviving a leg as ASSIGNED when the driver was really already
+-- IN_TRANSIT, a worse contradiction than the one being fixed. No existing
+-- column can hold this without losing its own, unrelated meaning the rest
+-- of the time it is read -- see the schema doc comment on this column.
+--
+-- Nullable and additive: a pure loosening, no backfill, no existing row
+-- affected. Null for every leg with no exception currently in progress,
+-- which is every row today (SHIP-S1 is the first thing that ever writes to
+-- it), and always null for a LINE_HAUL leg, which has no courierStatus to
+-- save in the first place.
+
+ALTER TABLE "shipment_legs" ADD COLUMN "courierStatusBeforeException" "DeliveryStatus";

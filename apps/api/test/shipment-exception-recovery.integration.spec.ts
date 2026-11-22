@@ -585,7 +585,11 @@ describe('an active exception blocks every forward courier transition', () => {
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
-    expect(leg.courierStatus).toBe('DRIVER_ACCEPTED');
+    // SHIP-S1: the driver had already committed (accepted) when flagged, so
+    // courierStatus is overwritten too — this is the actual fix, not a
+    // stale value left over from before the leg was flagged.
+    expect(leg.courierStatus).toBe('EXCEPTION');
+    expect(leg.courierStatusBeforeException).toBe('DRIVER_ACCEPTED');
     expect(leg.pickedUpAt).toBeNull();
     expect(leg.status).toBe('EXCEPTION'); // untouched by the refused ShipmentService.startLeg() call
   });
@@ -601,7 +605,9 @@ describe('an active exception blocks every forward courier transition', () => {
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
-    expect(leg.courierStatus).toBe('PICKUP_CONFIRMED');
+    // SHIP-S1 (see the CONFIRM_PICKUP case above for why).
+    expect(leg.courierStatus).toBe('EXCEPTION');
+    expect(leg.courierStatusBeforeException).toBe('PICKUP_CONFIRMED');
     expect(leg.inTransitAt).toBeNull();
   });
 
@@ -617,7 +623,9 @@ describe('an active exception blocks every forward courier transition', () => {
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
-    expect(leg.courierStatus).toBe('IN_TRANSIT');
+    // SHIP-S1 (see the CONFIRM_PICKUP case above for why).
+    expect(leg.courierStatus).toBe('EXCEPTION');
+    expect(leg.courierStatusBeforeException).toBe('IN_TRANSIT');
     expect(leg.arrivingAt).toBeNull();
   });
 
@@ -636,11 +644,13 @@ describe('an active exception blocks every forward courier transition', () => {
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
-    expect(leg.courierStatus).toBe('ARRIVING');
+    // SHIP-S1 (see the CONFIRM_PICKUP case above for why).
+    expect(leg.courierStatus).toBe('EXCEPTION');
+    expect(leg.courierStatusBeforeException).toBe('ARRIVING');
     expect(leg.status).toBe('EXCEPTION');
   });
 
-  it('the driver\'s own GET carries legStatus, so the frontend has a signal to act on at all', async () => {
+  it('the driver\'s own GET carries legStatus AND courierStatus, so the frontend has a signal to act on at all (SHIP-S1)', async () => {
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
@@ -648,13 +658,26 @@ describe('an active exception blocks every forward courier transition', () => {
     const before = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
     expect(before.status).toBe(200);
     expect(before.body.legStatus).toBe('READY');
+    expect(before.body.status).toBe('DRIVER_ACCEPTED');
 
     expect((await flag(legId, 'Flagged so the driver can see it.')).status).toBe(201);
     const after = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
     expect(after.status).toBe(200);
     expect(after.body.legStatus).toBe('EXCEPTION');
-    // `status` (courierStatus) is a different field and is untouched by flagging.
-    expect(after.body.status).toBe('DRIVER_ACCEPTED');
+    // SHIP-S1: before this fix, `status` (courierStatus) was a DIFFERENT
+    // field, untouched by flagging — the driver app reads ONLY this field
+    // for its own state machine, so a driver stuck mid-job saw their last
+    // real status (DRIVER_ACCEPTED here) with nothing explaining why every
+    // button now failed. courierStatus now carries the hold too.
+    expect(after.body.status).toBe('EXCEPTION');
+
+    // And resolving puts the driver back EXACTLY where they were — not a
+    // freshly-derived, merely-plausible status.
+    expect((await resolve(legId, { resolution: 'RESUME', note: 'Resolved.' })).status).toBe(201);
+    const resumed = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.legStatus).toBe('READY');
+    expect(resumed.body.status).toBe('DRIVER_ACCEPTED');
   });
 
   it('DECLINE is NOT blocked — giving the job back is not forward progression', async () => {
@@ -662,11 +685,67 @@ describe('an active exception blocks every forward courier transition', () => {
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await flag(legId, 'Flagged while still only offered.')).status).toBe(201);
 
+    // SHIP-S1: flagException deliberately leaves a still-offered ASSIGNED
+    // leg alone (see its own comment on why) — this is the proof that it
+    // actually did, not just that DECLINE happened to still be reachable.
+    const flagged = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(flagged.courierStatus).toBe('ASSIGNED');
+    expect(flagged.courierStatusBeforeException).toBeNull();
+
     const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/decline`, { reason: 'Cannot get there.' });
     expect(r.status).toBe(201);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
     expect(leg.courierStatus).toBe('DRIVER_DECLINED');
     expect(leg.status).toBe('EXCEPTION'); // the flag itself is untouched by a decline
+  });
+});
+
+/**
+ * SHIP-S1: the cross-role claim specifically — staff flag, driver reads
+ * EXCEPTION, staff resolve, driver reads back the SAME status they had
+ * before, not merely a non-exception one. Exercised at IN_TRANSIT rather
+ * than DRIVER_ACCEPTED (the other describe block's case) on purpose: a
+ * restore that silently fell back to a "plausible" earlier stage like
+ * ASSIGNED would be a worse contradiction than the one this card closes
+ * (the driver would be told to go collect a parcel they are already
+ * driving), and only a genuinely later stage can tell that wrong restore
+ * apart from a correct one.
+ */
+describe('a driver reads back the exact status they had before the exception, not a guessed one (SHIP-S1)', () => {
+  it('staff flag -> driver reads EXCEPTION -> staff resolve -> driver reads back IN_TRANSIT', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+
+    const beforeFlag = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(beforeFlag.body.status).toBe('IN_TRANSIT');
+
+    expect((await flag(legId, 'Checkpoint delay; driver held up.')).status).toBe(201);
+    const flaggedRow = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(flaggedRow.courierStatus).toBe('EXCEPTION');
+    expect(flaggedRow.courierStatusBeforeException).toBe('IN_TRANSIT');
+
+    const whileFlagged = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(whileFlagged.status).toBe(200);
+    expect(whileFlagged.body.status).toBe('EXCEPTION');
+    expect(whileFlagged.body.legStatus).toBe('EXCEPTION');
+
+    expect((await resolve(legId, { resolution: 'RESUME', note: 'Checkpoint cleared the driver.' })).status).toBe(201);
+    const resolvedRow = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    // The exact prior stage, not merely "a" non-exception stage — an ASSIGNED
+    // or DRIVER_ACCEPTED restore here would be WRONG, not just imprecise.
+    expect(resolvedRow.courierStatus).toBe('IN_TRANSIT');
+    expect(resolvedRow.courierStatusBeforeException).toBeNull();
+
+    const afterResolve = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(afterResolve.body.status).toBe('IN_TRANSIT');
+    expect(afterResolve.body.legStatus).toBe('IN_PROGRESS');
+
+    // And the driver's own next real step (arriving) is legal again, proving
+    // the restore is not just a label but a state the state machine accepts.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   });
 });
 
