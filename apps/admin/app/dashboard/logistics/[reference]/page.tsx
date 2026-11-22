@@ -154,7 +154,13 @@ function controlsFor(leg: Leg): { depart: boolean; arrive: boolean; handoff: boo
   return {
     depart: leg.departedAt == null,
     arrive: leg.departedAt != null && leg.arrivedAt == null,
-    handoff: leg.status === 'IN_PROGRESS',
+    // SHIP-CROSS-ROLE-S4: shipment.service.ts refuses completeLeg (the
+    // handoff action) with "has not arrived at its destination terminal
+    // yet" until arrivedAt is set — IN_PROGRESS alone (same gate the
+    // Hand-off queue already uses) covers a leg that has departed but not
+    // yet arrived, so offering the control then is a button that is
+    // guaranteed to be refused.
+    handoff: leg.status === 'IN_PROGRESS' && leg.arrivedAt != null,
   };
 }
 

@@ -1975,6 +1975,24 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).not.toContain('AWAITING PICKUP');
     });
 
+    // SHIP-CROSS-ROLE-S6: unlike the shipment-level status above, a leg has
+    // no server-computed label at all -- this used to render the raw
+    // LegStatus enum via a bare StatusBadge (IN_PROGRESS -> "IN PROGRESS").
+    // legStatusLabel (lib/shipping.ts) is what fills that gap now.
+    it('shows a human label for each leg\'s status, not the raw leg-status enum', async () => {
+      stubFetch({
+        queueRows: [],
+        lookupBody: { ...LOOKUP_RESULT, legs: [{ ...LOOKUP_RESULT.legs[0], status: 'IN_PROGRESS' }] },
+      });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('In progress');
+      expect(container!.textContent).not.toContain('IN PROGRESS');
+    });
+
     it('renders a Demo badge when the result is isTest, and no badge at all when it is not', async () => {
       stubFetch({ queueRows: [], lookupBody: { ...LOOKUP_RESULT, isTest: true } });
       await mount();

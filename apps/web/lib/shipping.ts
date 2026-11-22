@@ -629,6 +629,35 @@ export function legPhase(leg: ShipmentLegView): LegPhase {
 }
 
 /**
+ * SHIP-CROSS-ROLE-S6: a leg's own `LegStatus` (PENDING/READY/IN_PROGRESS/
+ * COMPLETED/CANCELLED/EXCEPTION) has no server-computed label the way a
+ * shipment's `statusLabel` does — unlike the shipment-level badge, there is
+ * no `shipmentStatusLabel()` equivalent on the API side for a leg. Define
+ * the mapping exactly once here rather than inline at each leg-status badge,
+ * so the terminal lookup tab and the carrier portal's own leg list read the
+ * same word for the same status instead of silently drifting (the same
+ * structural fix #800 made one level up, for shipment status).
+ */
+export function legStatusLabel(status: string): string {
+  switch (status) {
+    case 'PENDING':
+      return 'Pending';
+    case 'READY':
+      return 'Ready';
+    case 'IN_PROGRESS':
+      return 'In progress';
+    case 'COMPLETED':
+      return 'Completed';
+    case 'CANCELLED':
+      return 'Cancelled';
+    case 'EXCEPTION':
+      return 'Exception';
+    default:
+      return status.replace(/_/g, ' ');
+  }
+}
+
+/**
  * Once a parcel is delivered, cancelled, returned or rerouted there is
  * nothing left to estimate — the journey already ended, one way or
  * another. Shared by every surface that carries `eta` (sender, recipient,
