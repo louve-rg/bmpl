@@ -3,6 +3,7 @@
   "globalDependencies": [".env"],
   "globalEnv": [
     "NODE_ENV",
+    "CI",
     "DATABASE_URL",
     "DIRECT_URL",
     "REDIS_URL",
