@@ -1,15 +1,22 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { updateProfileSchema, type UpdateProfileInput } from '@bmpl/validation';
+import { deleteAccountSchema, updateProfileSchema, type DeleteAccountInput, type UpdateProfileInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Public } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
+import { StrictThrottle } from '../throttling/throttle.decorators';
+import { clearAuthCookies } from '../auth/cookies';
+import { ENV } from '../config/config.module';
+import type { Env } from '../config/env';
 import { UsersService } from './users.service';
 
 @Controller('me')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    @Inject(ENV) private readonly env: Env,
+  ) {}
 
   @Get()
   me(@CurrentUser() user: AuthContext) {
@@ -41,6 +48,38 @@ export class UsersController {
   @Delete('avatar')
   removeAvatar(@CurrentUser() user: AuthContext) {
     return this.users.removeAvatar(user.userId);
+  }
+
+  /**
+   * MDF-924: self-service account deletion. Requires the CURRENT password
+   * (reauthentication — a live session alone is not enough for a one-way
+   * destructive action). Refuses with a specific reason, rather than
+   * deleting, if the account currently holds a live responsibility (sole
+   * terminal company manager, an open vendor order, an in-progress
+   * delivery/shipment job) that needs a hand-off first. Rate-limited the
+   * same as the other sensitive auth/account routes.
+   *
+   * NOT a full erasure: profile and identity data are anonymized, but a
+   * COMPLETED order or shipment keeps its own stored recipient name and
+   * address, by owner ruling — see `UsersService.deleteAccount`'s own doc
+   * comment. Any web-facing confirmation copy for this action must say
+   * "profile anonymized, past order records retained," not "account
+   * deleted" — this controller's own `{ ok: true }` response makes no such
+   * claim either way, deliberately.
+   */
+  @StrictThrottle()
+  @Delete()
+  async deleteAccount(
+    @CurrentUser() user: AuthContext,
+    @Body(ZodBody(deleteAccountSchema)) body: DeleteAccountInput,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.users.deleteAccount(user.userId, body, { ipAddress: req.ip });
+    // Every session was just revoked, including the one that made this
+    // call — clear the cookies so the browser doesn't keep offering a dead one.
+    clearAuthCookies(res, this.env);
+    return { ok: true };
   }
 }
 

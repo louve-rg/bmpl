@@ -17,6 +17,16 @@ export const updateProfileSchema = z.object({
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
+/**
+ * MDF-924: account deletion requires reauthentication, same shape as
+ * change-password — the caller's session alone is not enough proof for a
+ * destructive, one-way action.
+ */
+export const deleteAccountSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required.'),
+});
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
+
 const fileNameSchema = z.string().trim().min(1).max(200);
 
 /** Presign request for a private application/KYC document upload. */

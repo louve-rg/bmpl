@@ -494,6 +494,14 @@ enum AuditAction {
   // a live session and proved the CURRENT password, there a mailed token
   // stands in for both.
   PASSWORD_CHANGED
+  // ---- Account deletion (MDF-924) ----
+  // Self-service account deletion. Deliberately a NEW action, not
+  // USER_SUSPENDED/USER_RESTORED — those are admin-initiated and reversible;
+  // this one is self-initiated, anonymizes the row and is permanent. Fires
+  // once, at the point the write actually happens; a refusal (manager
+  // floor, open order, in-progress delivery) never reaches this action at
+  // all, by design — a refusal is not an attempt that gets logged as one.
+  USER_ACCOUNT_DELETED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -630,6 +638,15 @@ model User {
   suspendedReason String?
   lastLoginAt     DateTime?
   acceptedTermsAt DateTime?
+  // MDF-924: set together with `status: DEACTIVATED` by a REAL account
+  // deletion, and ONLY by that path. Deactivation is not deletion (the
+  // owner's own distinction) — `status` alone cannot tell the two apart,
+  // so this is the structural marker that one specific DEACTIVATED row was
+  // reached through self-service deletion (PII anonymized, every session
+  // revoked) rather than some other closing of the account. The row itself
+  // is NEVER deleted — every other table's foreign key into `users` stays
+  // valid, which is the whole point.
+  deletedAt DateTime?
 
   // The user's currently active role in the switcher (must be an APPROVED UserRole).
   activeRoleCode RoleCode? @default(CUSTOMER)
