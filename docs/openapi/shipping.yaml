@@ -1745,7 +1745,263 @@ paths:
                 items: { $ref: "#/components/schemas/ProviderProfile" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  # ---- Carrier operational status lifecycle (MDF-COURIER D1/D5) ----
+  # PENDING -> APPROVED -> SUSPENDED -> REVOKED, with REJECTED as a side
+  # branch off PENDING. Every edge below is logistics.manage: deciding
+  # whether an ORG may take work at all is network configuration, not
+  # running a leg by hand (that is logistics.operate, above). The owner's
+  # governing principle (D5): no status may be reachable that only a
+  # developer can leave — every status has at least one legal way out, and
+  # RESUBMIT (POST /shipping/provider/profile/resubmit, carrier-initiated,
+  # REJECTED -> PENDING only) is the ONLY one of these nine edges a carrier
+  # may trigger themselves; the other eight, including the two that also
+  # land on PENDING (reopen, reapply), are admin-only by design.
+  /admin/logistics/providers/{id}/approve:
+    post:
+      tags: [AdminLogistics]
+      summary: PENDING -> APPROVED (logistics.manage; audited)
+      description: >-
+        An optional internal note may be given but is never shown to the
+        carrier (only `reject`/`suspend`/`revoke`/`reinstate`'s reasons are
+        carrier-visible, as `statusReason` on the profile) — it is recorded
+        in the audit log only. 400 if the carrier's current status is not
+        PENDING.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/reject:
+    post:
+      tags: [AdminLogistics]
+      summary: PENDING -> REJECTED (logistics.manage; audited)
+      description: >-
+        `reason` is required, non-empty, and carrier-visible: D5's rule is
+        that this is the ONLY place the carrier ever sees why. The carrier
+        may self-service back to PENDING with `resubmit`
+        (POST /shipping/provider/profile/resubmit), or an admin may do the
+        same without waiting on them via `reopen`, below. 400 if the
+        carrier's current status is not PENDING.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/suspend:
+    post:
+      tags: [AdminLogistics]
+      summary: APPROVED -> SUSPENDED (logistics.manage; audited)
+      description: >-
+        `reason` is required, non-empty, and carrier-visible. An ordinary
+        administrative hold, not a security cutoff: existing in-progress leg
+        work the organization already holds may continue
+        (`mayContinueExistingProviderWork`) — a shipment is never stranded
+        by a routine suspension the way it would be by a revoke, below. 400
+        if the carrier's current status is not APPROVED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/reinstate:
+    post:
+      tags: [AdminLogistics]
+      summary: SUSPENDED -> APPROVED (logistics.manage; audited)
+      description: >-
+        Owner's ruling (2026-11-04, MDF-500/MDF-524): lifting an ordinary
+        suspension needs the same audit treatment as imposing one, never a
+        silent flag flip — so `reason` is required here even though the
+        target status (APPROVED) is not otherwise a reason-carrying one.
+        Because of that, the reason is recorded in the audit log but is NOT
+        written to the carrier-visible `statusReason` field — that field is
+        cleared (set to null) on this transition like every other
+        non-reject/suspend/revoke edge. 400 if the carrier's current status
+        is not SUSPENDED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/revoke:
+    post:
+      tags: [AdminLogistics]
+      summary: APPROVED or SUSPENDED -> REVOKED (logistics.manage; audited)
+      description: >-
+        `reason` is required, non-empty, and carrier-visible. A
+        security/safety cutoff, not an ordinary hold: unlike `suspend`,
+        existing in-progress leg work does NOT continue
+        (`mayContinueExistingProviderWork` returns false for REVOKED) — the
+        shipment instead becomes an administrative recovery/reassignment
+        case. Terminal in practice: the only way out is admin-triggered
+        `reapply`, below — a carrier can never self-service out of REVOKED.
+        400 if the carrier's current status is neither APPROVED nor
+        SUSPENDED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/reopen:
+    post:
+      tags: [AdminLogistics]
+      summary: REJECTED -> PENDING, admin-initiated (logistics.manage; audited)
+      description: >-
+        Re-opens a REJECTED application without waiting for the carrier to
+        resubmit it themselves — distinct from the carrier's own
+        self-service `resubmit` (POST /shipping/provider/profile/resubmit),
+        which reaches the same PENDING status from the carrier's side. An
+        optional internal note is never carrier-visible, same as `approve`.
+        400 if the carrier's current status is not REJECTED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/reapply:
+    post:
+      tags: [AdminLogistics]
+      summary: REVOKED -> PENDING, admin-only (logistics.manage; audited)
+      description: >-
+        D5's security line: the only way a REVOKED organization moves
+        again, and it reaches PENDING only — never APPROVED directly, so a
+        reapplication is reviewed from scratch like a new one. Deliberately
+        never reachable from the carrier's own self-service surface; there
+        is no carrier-triggered edge out of REVOKED anywhere in this API.
+        An optional internal note is never carrier-visible, same as
+        `approve`/`reopen`. 400 if the carrier's current status is not
+        REVOKED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string, maxLength: 500 } }
+      responses:
+        "201":
+          description: The updated carrier profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/providers/{id}/members:
+    get:
+      tags: [AdminLogistics]
+      summary: This carrier's current (ACTIVE) roster, by name (logistics.manage)
+      description: >-
+        MDF-500: the read half of add/end member, by id — not just the
+        caller's own (see /shipping/provider/members for that). Same
+        logistics.manage permission as the writes it mirrors, not the
+        coarser logistics.read `providers` listing uses: reading who
+        currently acts for an org is the same sensitivity as changing it.
+        Richer than the self-service roster on purpose — an admin needs a
+        name to confirm against before ending a membership, not a bare id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Active members only, owner first then staff, oldest first within each
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderMember" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     post:
       tags: [AdminLogistics]
       summary: Add or reactivate a carrier-organization member (logistics.manage)
@@ -1817,6 +2073,43 @@ paths:
                   legId: { type: string }
                   operatedByProviderId: { type: [string, "null"] }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/eligible-operators:
+    get:
+      tags: [AdminLogistics]
+      summary: Every carrier org on this leg's side of the simulation boundary, with its own failed-gate reasons (logistics.operate)
+      description: >-
+        D4 — the read-only "why is this carrier ineligible" preview, the
+        carrier-organization mirror of GET legs/:id/eligible-drivers. Same
+        logistics.operate gate as the write it previews (setOperator,
+        above). LINE_HAUL legs only — a courier leg has no carrier operator
+        and answers 400. Never a flat boolean and never silently drops an
+        ineligible org: `reasons` is empty when `eligible` is true, and
+        otherwise lists every failing gate (an org can fail more than one
+        at once), each a free-text sentence such as "carrier status is
+        suspended, not approved to operate", "shipping provider role
+        revoked", "carrier deactivated", or "simulation work can only be
+        operated by a designated test carrier" — read verbatim from
+        provider-eligibility.ts, not an exhaustive enum and not for a
+        client to parse.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: Every ACTIVE provider org on the leg's own isTest side
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    providerProfileId: { type: string }
+                    businessName: { type: string }
+                    eligible: { type: boolean }
+                    reasons: { type: array, items: { type: string } }
+        "400": { description: "The leg is not LINE_HAUL — only a transport leg has a carrier operator" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3125,7 +3418,13 @@ components:
         operatingLicenceExpiry: { type: string, format: date-time }
     ProviderProfile:
       type: object
-      description: The carrier organization. `activeMembers` appears on the admin directory only.
+      description: >-
+        The carrier organization. `activeMembers` appears on the admin
+        directory only. `status`/`statusReason`/`statusChangedAt`/
+        `canResubmit` were missing from this schema until the operational
+        status lifecycle (MDF-COURIER D1/D5) was documented — they are
+        present on every real response that returns this shape, including
+        the carrier's own profile reads, not only the lifecycle writes.
       properties:
         id: { type: string }
         businessName: { type: string }
@@ -3140,6 +3439,30 @@ components:
         isActive: { type: boolean }
         isTest: { type: boolean }
         activeMembers: { type: integer }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, SUSPENDED, REVOKED] }
+        statusReason:
+          type: [string, "null"]
+          description: >-
+            Carrier-visible by design — the only place a carrier is ever
+            told why. Set only by reject/suspend/revoke; every other
+            transition (including reinstate) clears it to null, even when
+            that transition itself required a reason internally.
+        statusChangedAt: { type: [string, "null"], format: date-time }
+        canResubmit:
+          type: boolean
+          description: "True exactly when status is REJECTED — the one status the carrier may move out of themselves (POST /shipping/provider/profile/resubmit)."
+    ProviderMember:
+      type: object
+      description: A carrier organization's own membership row, admin or self-service view.
+      properties:
+        userId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        memberRole: { type: string, enum: [OWNER, STAFF] }
+        status: { type: string, enum: [ACTIVE, ENDED] }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, "null"], format: date-time }
     ProviderLeg:
       type: object
       description: >-
