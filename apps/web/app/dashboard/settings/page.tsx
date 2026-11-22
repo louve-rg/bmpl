@@ -6,6 +6,7 @@ import type { MeView } from '../../../lib/types';
 import { ChangePasswordForm } from '../../../components/account/ChangePasswordForm';
 import { ContactInfoForm } from '../../../components/account/ContactInfoForm';
 import { DeleteAccountForm } from '../../../components/account/DeleteAccountForm';
+import { SessionsList } from '../../../components/account/SessionsList';
 import { Alert, PageHeader, Spinner } from '../../../components/ui';
 
 /**
@@ -16,21 +17,17 @@ import { Alert, PageHeader, Spinner } from '../../../components/ui';
  *
  * Live: profile/contact (PATCH /me/profile, via the shared `ContactInfoForm`,
  * same route Profile's own page uses), password security (Pam's MDF-923
- * contract, POST /auth/change-password, via `ChangePasswordForm`), and
- * account deletion (DELETE /me, MDF-924, via `DeleteAccountForm` -- landed
- * once #795 merged the route it needed).
+ * contract, POST /auth/change-password, via `ChangePasswordForm`), session
+ * management (GET/DELETE /me/sessions + POST /me/sessions/revoke-others,
+ * ACCT-SESSIONS #811, via `SessionsList`), and account deletion (DELETE /me,
+ * MDF-924/#808, via `DeleteAccountForm`). All four routes are merged, so
+ * this page has no "coming soon" section left.
  *
  * There is deliberately no externally-authenticated-account branch here --
  * Pam confirmed that account type does not exist in this product yet
  * (User.passwordHash is non-nullable, no provider/ssoId column, no OAuth/SSO
  * login route anywhere). Verified not applicable, not guessed from the email
  * domain and not quietly dropped.
- *
- * Session management is still NOT rendered -- the owner's rule for this card
- * is that no control ships without a server route behind it, and there is no
- * session-list/revoke endpoint yet (a Session model exists at
- * schema.prisma:726, nothing exposes it). A section with nothing real behind
- * it is left out entirely, not rendered disabled or decorative.
  */
 export default function SettingsPage() {
   const [me, setMe] = useState<MeView | null>(null);
@@ -68,18 +65,11 @@ export default function SettingsPage() {
       <h2 className="mb-2 mt-6 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Password &amp; security</h2>
       <ChangePasswordForm />
 
+      <h2 className="mb-2 mt-6 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Active sessions</h2>
+      <SessionsList />
+
       <h2 className="mb-2 mt-6 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Delete account</h2>
       <DeleteAccountForm />
-
-      {/* No heading, no card, no disabled control here -- a session-list/
-          revoke endpoint does not exist yet (schema.prisma:726 has the
-          Session model, nothing exposes it), and the owner's rule for this
-          card is that no control ships without a real server route behind
-          it. This line says honestly that it's coming, rather than the
-          section being silently absent with no explanation at all. */}
-      <p className="mt-6 text-xs text-[color:var(--bmpl-text-muted)]">
-        Active session management is coming to this page soon.
-      </p>
     </div>
   );
 }
