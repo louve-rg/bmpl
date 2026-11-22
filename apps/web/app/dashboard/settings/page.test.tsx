@@ -8,6 +8,10 @@ import type { MeView } from '../../../lib/types';
 // Same convention as addresses/page.test.tsx -- no @testing-library/react in this repo.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+
 const ME: MeView = {
   id: 'user_1',
   email: 'rae@example.com',
@@ -69,13 +73,15 @@ function mount() {
 }
 
 /**
- * MDF-925: the new account settings surface. Pam's password/session/
- * deletion routes are not merged yet, so this card's own rule applies --
- * no control ships without a server route behind it -- and those three
- * sections must be genuinely absent from the DOM, not present and
- * disabled. Only the profile/contact section, wired to the existing
- * PATCH /me/profile route (via the shared `ContactInfoForm`, whose own
- * field-level behavior is covered by its own test file), renders.
+ * MDF-925: the new account settings surface. Profile/contact (PATCH
+ * /me/profile) and password security (Pam's MDF-923 contract, POST
+ * /auth/change-password) are both live now -- the field-level behavior of
+ * each lives in its own component's test file (`ContactInfoForm.test.tsx`,
+ * `ChangePasswordForm.test.tsx`); this file only has to prove both sections
+ * are actually mounted on this page. Session management and account
+ * deletion still have no server route, so this card's own rule applies --
+ * no control ships without one -- and those two sections must be genuinely
+ * absent from the DOM, not present and disabled.
  */
 describe('SettingsPage (MDF-925)', () => {
   it('loads the signed-in person from /me and shows the profile/contact section', async () => {
@@ -88,23 +94,40 @@ describe('SettingsPage (MDF-925)', () => {
     expect((container!.querySelector('[name="firstName"]') as HTMLInputElement).value).toBe('Rae');
   });
 
-  it('does not render password, session, or deletion controls -- their server routes are not merged yet', async () => {
+  it('shows the password & security section, wired to the real change-password route', async () => {
     mount();
     await flush();
 
-    expect(container!.textContent).not.toContain('Change password');
-    expect(container!.textContent).not.toContain('Active sessions');
-    expect(container!.textContent).not.toContain('Delete account');
-    expect(container!.querySelectorAll('button').length).toBe(1); // only ContactInfoForm's "Save changes"
+    expect(container!.textContent).toContain('Password & security');
+    expect(container!.textContent).toContain('signs you out of every device');
+    expect(container!.querySelector('[name="currentPassword"]')).not.toBeNull();
+    expect(container!.querySelector('[name="newPassword"]')).not.toBeNull();
   });
 
-  it('says honestly, in plain text, that the missing sections are coming -- not silently absent', async () => {
+  it('never renders an external-identity-provider branch -- Pam confirmed that account type does not exist yet', async () => {
     mount();
     await flush();
 
-    expect(container!.textContent).toContain(
-      'Password and sign-in security, active session management, and account deletion are coming to this page soon.',
-    );
+    expect(container!.textContent).not.toMatch(/sign in with (google|facebook|apple)/i);
+    expect(container!.textContent).not.toContain('single sign-on');
+    expect(container!.textContent).not.toContain('SSO');
+  });
+
+  it('does not render session or deletion controls -- their server routes are not merged yet', async () => {
+    mount();
+    await flush();
+
+    expect(container!.textContent).not.toContain('Active sessions');
+    expect(container!.textContent).not.toContain('Delete account');
+    // ContactInfoForm's "Save changes" + ChangePasswordForm's "Change password".
+    expect(container!.querySelectorAll('button[type="submit"]').length).toBe(2);
+  });
+
+  it('says honestly, in plain text, that the remaining sections are coming -- not silently absent', async () => {
+    mount();
+    await flush();
+
+    expect(container!.textContent).toContain('Active session management and account deletion are coming to this page soon.');
   });
 
   it('shows a plain error instead of a blank page when /me fails to load', async () => {

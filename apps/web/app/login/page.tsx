@@ -1,16 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../lib/api';
-import { AuthShell, Field, FormError } from '../../components/auth/AuthShell';
+import { AuthShell, Field, FormError, FormSuccess } from '../../components/auth/AuthShell';
 import { Button } from '../../components/ui';
+
+const REASON_MESSAGES: Record<string, string> = {
+  // MDF-925/MDF-923: change-password revokes every session server-side,
+  // including the one that made the call -- this is where that lands, so
+  // the confirmation shows up HERE rather than as a toast on a dashboard
+  // page whose session the server has already ended.
+  'password-changed': 'Your password was changed. Please sign in again.',
+};
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Read on mount, not during render: this component also renders on the
+  // server, where `window` does not exist, and SEC-LOGIN-PASSWORD-IN-URL
+  // already established the pattern of reading the query string only from
+  // browser-only code (window.location.search), never from render output.
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get('reason');
+    setNotice((reason && REASON_MESSAGES[reason]) || null);
+  }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -56,6 +74,7 @@ export default function LoginPage() {
           browser history and every access/Referer log on the path. */}
       <form onSubmit={onSubmit} method="post" className="space-y-4">
         <FormError message={error} />
+        {!error && <FormSuccess message={notice} />}
         <Field label="Email" name="email" type="email" autoComplete="email" required />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />
         <div className="flex justify-end">
