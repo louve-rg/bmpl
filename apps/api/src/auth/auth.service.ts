@@ -170,7 +170,8 @@ export class AuthService {
     // it is anti-enumeration by construction (the caller cannot tell which
     // of the three is true), and it is also correct on its own: no mail
     // should ever go out, and no token should ever be mintable, for an
-    // account whose owner asked to be erased.
+    // account whose owner asked to be erased. Same rule, same shape, in
+    // forgotPassword below.
     if (!user || user.emailVerifiedAt || user.deletedAt) return;
     const token = generateToken();
     await this.prisma.emailVerificationToken.create({
@@ -188,10 +189,18 @@ export class AuthService {
     );
   }
 
-  /** Always returns success to prevent account enumeration. */
+  /**
+   * Always returns success to prevent account enumeration.
+   *
+   * ACCT-DELETED-ACCOUNT-RESURRECTION: folded into the same silent no-op as
+   * "no such email", for the same reason and the same rule as the twin
+   * check in {@link resendVerification} just above — no mail should ever go
+   * out, and no token should ever be mintable, for an account whose owner
+   * asked to be erased. Read as one decision made twice, not two.
+   */
   async forgotPassword(email: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) return;
+    if (!user || user.deletedAt) return;
     const token = generateToken();
     await this.prisma.passwordResetToken.create({
       data: {
