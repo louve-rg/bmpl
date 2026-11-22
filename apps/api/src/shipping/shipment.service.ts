@@ -3624,7 +3624,7 @@ export class ShipmentService {
         collectedAt: true,
         returnShipment: { select: { id: true } },
         rerouteShipment: { select: { id: true } },
-        legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+        legs: { select: { sequence: true, kind: true, mode: true, status: true, arrivedAt: true } },
       },
     });
     let status = this.statusFrom(s.legs, !needsLastMile(s.service));
@@ -3636,7 +3636,7 @@ export class ShipmentService {
     return status;
   }
 
-  private statusFrom(legs: Array<{ sequence: number; kind: string; mode: string; status: string }>, endsAtHub: boolean): ShipmentStatus {
+  private statusFrom(legs: Array<{ sequence: number; kind: string; mode: string; status: string; arrivedAt?: Date | null }>, endsAtHub: boolean): ShipmentStatus {
     return deriveShipmentStatus(legs as LegView[], endsAtHub) as ShipmentStatus;
   }
 
@@ -4782,6 +4782,21 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-926: the one sentence a customer reads once their own collection
+   * code has locked out (`verifyCollectionPinOrThrow`'s own 403, five wrong
+   * attempts). Nulling `collectionCode` below on its own recreates the same
+   * complaint in a new shape — the code silently disappears and the
+   * customer still does not know why, so they still travel to the counter
+   * and are still refused. This says why, in one coarse, human sentence,
+   * without naming the attempt count or the raw `collectionVerificationStatus`
+   * — those stay staff-only exactly as the test at
+   * apps/api/test/shipping.integration.spec.ts:976-988 already pins; this
+   * constant must never grow to include either.
+   */
+  private static readonly COLLECTION_LOCKED_CUSTOMER_MESSAGE =
+    'Too many incorrect codes were entered for this collection. Our team needs to confirm it with you directly before it can be completed — contact support.';
+
+  /**
    * One journey, told once.
    *
    * The handoff PIN is the only field that differs by audience, and it never
@@ -4961,9 +4976,26 @@ export class ShipmentService {
       // null once collected, cancelled, or for a grandfathered shipment that
       // predates this column and has no code at all.
       collectionCode:
-        opts.audience === 'STAFF' || s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered
+        opts.audience === 'STAFF' ||
+        s.status !== 'AWAITING_COLLECTION' ||
+        s.collectedAt ||
+        s.collectionPinGrandfathered ||
+        // MDF-926: a locked code is no longer a valid one to hand anyone —
+        // see COLLECTION_LOCKED_CUSTOMER_MESSAGE just below for what the
+        // customer is told instead.
+        s.collectionVerificationStatus === 'FAILED'
           ? null
           : s.collectionPin,
+      // MDF-926: the plain-language counterpart to the null above — present
+      // for exactly the cases collectionCode just went null FOR THIS REASON,
+      // never for any of the gate's other reasons (not yet AWAITING_COLLECTION,
+      // already collected, grandfathered, or a STAFF caller, who already has
+      // the real fields two lines below). Never the attempt count or the raw
+      // status — this must not become a second door back to either.
+      collectionHoldMessage:
+        s.status === 'AWAITING_COLLECTION' && !s.collectedAt && !s.collectionPinGrandfathered && s.collectionVerificationStatus === 'FAILED'
+          ? ShipmentService.COLLECTION_LOCKED_CUSTOMER_MESSAGE
+          : null,
       // TERM-12 follow-up: the lockout itself, STAFF-only — the whole reason
       // `unlockCollection` existed as a defect before it existed as a fix is
       // that nothing let staff SEE a shipment was locked without attempting
