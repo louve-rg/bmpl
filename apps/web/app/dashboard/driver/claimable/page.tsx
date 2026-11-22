@@ -125,7 +125,7 @@ export default function ClaimableJobsPage() {
         setJobs((js) => (js ?? []).filter((j) => j.id !== job.id));
         showNotice(
           status === 409
-            ? `Order #${job.orderNumber} was just claimed by another driver — removed it from your list.`
+            ? `Order #${job.orderNumber} is no longer available — it was claimed or reassigned. Removed it from your list.`
             : `Order #${job.orderNumber} is no longer available.`,
         );
       } else {
