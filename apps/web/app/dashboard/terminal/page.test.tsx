@@ -1721,6 +1721,21 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       );
     });
 
+    // P2-PARITY-API (#800): same statusLabel fix as the Lookup tab -- this
+    // endpoint (`terminalHistory`) had the identical gap, fixed the same way.
+    it('shows the API\'s own statusLabel on a history row, not the raw status enum', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        historyItems: [{ ...HISTORY_ROW, status: 'AWAITING_PICKUP', statusLabel: 'Awaiting drop-off at the departure terminal' }],
+      });
+      await mount();
+      await clickTab('History');
+
+      expect(container!.textContent).toContain('Awaiting drop-off at the departure terminal');
+      expect(container!.textContent).not.toContain('AWAITING PICKUP');
+    });
+
     it('shows an honest empty state when there is no history yet', async () => {
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], historyItems: [] });
       await mount();
@@ -1944,6 +1959,20 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(container!.textContent).toContain('Maria Lopez');
       expect(container!.textContent).toContain('Belize City Hub');
       expect(container!.textContent).toContain('San Pedro Hub');
+    });
+
+    // P2-PARITY-API (#800): status alone can mean two different things for
+    // the same raw value depending on this shipment's service -- the API
+    // now sends the already-correct, server-computed statusLabel.
+    it('shows the API\'s own statusLabel, not the raw status enum', async () => {
+      stubFetch({ queueRows: [], lookupBody: { ...LOOKUP_RESULT, status: 'AWAITING_PICKUP', statusLabel: 'Awaiting drop-off at the departure terminal' } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('Awaiting drop-off at the departure terminal');
+      expect(container!.textContent).not.toContain('AWAITING PICKUP');
     });
 
     it('renders a Demo badge when the result is isTest, and no badge at all when it is not', async () => {

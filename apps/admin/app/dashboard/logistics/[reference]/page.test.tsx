@@ -86,6 +86,11 @@ const SHIPMENT = {
       exceptionReason: null,
       originHub: { name: 'Belize City Airstrip' },
       destinationHub: { name: 'San Pedro Airstrip' },
+      // P2-PARITY-API (#800): default null, same cross-deploy-optional shape
+      // as every other field this fixture already carries.
+      needsDriverReason: null as 'EXHAUSTED' | 'UNAVAILABLE' | null,
+      dispatchExhaustedAt: null as string | null,
+      dispatchUnavailableAt: null as string | null,
     },
   ],
   custody: [],
@@ -1250,5 +1255,97 @@ describe('ShipmentOpsPage — recordCollection sends the code the backend requir
 
     expect(posted).toHaveLength(0);
     promptSpy.mockRestore();
+  });
+});
+
+/**
+ * P2-SHIPMENT-PARITY/P2-PARITY-API (#800): the leg badge now reads through
+ * the SAME legState() the ops board uses, rather than title-casing the raw
+ * `status` enum -- this is the behavior change Finding 3 asked for, not an
+ * accident: the vocabulary for an ordinary leg changes too (e.g. "ready" ->
+ * "Ready"), because that IS parity with the board for the same leg.
+ */
+describe('ShipmentOpsPage — leg badge reads through legState() (P2-SHIPMENT-PARITY wire-up)', () => {
+  function legOf(overrides: Partial<Record<keyof (typeof SHIPMENT)['legs'][number], unknown>> = {}) {
+    return { ...SHIPMENT.legs[0], ...overrides };
+  }
+
+  it('renders an ordinary leg through legState(), not the raw status enum', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          // kind FIRST_MILE, not the fixture's own LINE_HAUL -- legNeedsCarrier
+          // only fires for an unassigned LINE_HAUL leg, which this is deliberately
+          // NOT, so the ordinary READY -> "Ready" path is what's under test here.
+          return jsonResponse(200, { ...SHIPMENT, legs: [legOf({ kind: 'FIRST_MILE', status: 'READY' })] });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('Ready');
+  });
+
+  it('shows "No driver found" once needsDriverReason is EXHAUSTED, the same label the ops board shows for the identical leg', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, {
+            ...SHIPMENT,
+            legs: [legOf({ kind: 'FIRST_MILE', status: 'READY', needsDriverReason: 'EXHAUSTED', dispatchExhaustedAt: '2026-11-22T10:00:00.000Z' })],
+          });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('No driver found');
+  });
+
+  it('shows "No driver online" once needsDriverReason is UNAVAILABLE -- a different claim from EXHAUSTED, own label', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, {
+            ...SHIPMENT,
+            legs: [legOf({ kind: 'FIRST_MILE', status: 'READY', needsDriverReason: 'UNAVAILABLE', dispatchUnavailableAt: '2026-11-22T10:00:00.000Z' })],
+          });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('No driver online');
+    expect(document.body.textContent).not.toContain('No driver found');
+  });
+
+  it('a customer-redacted leg (needsDriverReason absent/null) renders the ordinary label, never a dispatch-problem badge', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, { ...SHIPMENT, legs: [legOf({ kind: 'FIRST_MILE', status: 'IN_PROGRESS', needsDriverReason: null })] });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('Moving');
+    expect(document.body.textContent).not.toMatch(/no driver/i);
   });
 });
