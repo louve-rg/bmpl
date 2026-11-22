@@ -174,7 +174,7 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Weekly pattern</h3>
       <p className="mt-1 text-xs text-slate-500">A day with no exception below follows this pattern. Absent entirely, a route is treated as operating.</p>
       <Alert tone="warning" className="mt-2">
-        Marking a day "Not operating" takes this route out of customer quotes on that day of the week — you would be turning off your
+        Marking a day &quot;Not operating&quot; takes this route out of customer quotes on that day of the week — you would be turning off your
         own availability, not just labeling a calendar.
       </Alert>
       <div className="mt-2 grid gap-2 sm:grid-cols-7">
@@ -218,7 +218,7 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
       <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Date-specific exceptions</h3>
       <p className="mt-1 text-xs text-slate-500">A known future closure, a holiday you observe, a one-off reduced run — overrides the weekly pattern for that date only.</p>
       <Alert tone="warning" className="mt-2">
-        Adding a "Not operating" exception takes this route out of customer quotes on that date.
+        Adding a &quot;Not operating&quot; exception takes this route out of customer quotes on that date.
       </Alert>
       {exceptions.length === 0 ? (
         <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">No exceptions configured.</p>

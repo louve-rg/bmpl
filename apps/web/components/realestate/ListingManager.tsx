@@ -272,7 +272,7 @@ function AssignAgent({
         </p>
       </div>
       {error && <Alert tone="error">{error}</Alert>}
-      {ok && <Alert tone="success">Invitation sent — awaiting the agent's acceptance.</Alert>}
+      {ok && <Alert tone="success">Invitation sent — awaiting the agent&apos;s acceptance.</Alert>}
       {listing.agent ? (
         <p className="text-sm text-slate-600">
           Currently managed by <span className="font-medium text-belize-navy">{listing.agent.displayName}</span>.

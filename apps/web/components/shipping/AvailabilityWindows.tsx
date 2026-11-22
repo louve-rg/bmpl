@@ -44,7 +44,7 @@ function RoleEditor({ label, rows, onChange }: { label: string; rows: Row[]; onC
   return (
     <div>
       <p className="text-sm font-medium text-slate-900">{label}</p>
-      {rows.length === 0 && <p className="mt-1 text-sm text-slate-500">No window set — we'll attempt this at any time.</p>}
+      {rows.length === 0 && <p className="mt-1 text-sm text-slate-500">No window set — we&apos;ll attempt this at any time.</p>}
       <div className="mt-2 space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
@@ -145,7 +145,7 @@ export function AvailabilityWindows({ shipment, onUpdated }: { shipment: Shipmen
     <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
       <h2 className="text-sm font-semibold text-slate-900">Availability</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Set the hours someone will be there for pickup or delivery. Leave this blank and we'll attempt it at any time — that's
+        Set the hours someone will be there for pickup or delivery. Leave this blank and we&apos;ll attempt it at any time — that&apos;s
         how every shipment works unless you set a window here.
       </p>
 
@@ -155,7 +155,7 @@ export function AvailabilityWindows({ shipment, onUpdated }: { shipment: Shipmen
             <RoleEditor label="When you'll be there for pickup" rows={senderRows} onChange={setSenderRows} />
           ) : (
             <div>
-              <p className="text-sm font-medium text-slate-900">When you'll be there for pickup</p>
+              <p className="text-sm font-medium text-slate-900">When you&apos;ll be there for pickup</p>
               {storedSender.length > 0 ? (
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                   <span>{storedSender.map(formatWindow).join(', ')}</span>

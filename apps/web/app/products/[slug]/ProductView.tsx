@@ -360,7 +360,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
           {state === 'ADD' && maxQty != null && maxQty <= 10 && (
             <p className="mt-2 text-xs font-medium text-amber-800">
-              Only {maxQty} left in stock — the quantity is capped at what's available.
+              Only {maxQty} left in stock — the quantity is capped at what&apos;s available.
             </p>
           )}
 

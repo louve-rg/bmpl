@@ -125,7 +125,7 @@ export default function WalletTransactionDetailPage() {
               </ul>
               {!t.balanced && (
                 <p className="border-t border-slate-100 px-4 py-2 text-xs text-amber-700">
-                  This transaction's entries do not balance — reported for transparency, not something you can act on.
+                  This transaction&apos;s entries do not balance — reported for transparency, not something you can act on.
                 </p>
               )}
             </Card>
