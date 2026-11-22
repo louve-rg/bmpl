@@ -189,7 +189,21 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    // lg:flex-row, not sm:flex-row (WEB-768-PINCH-POINT): the title column
+    // has min-w-0 but no flex-1/basis-0, and actions has shrink-0 -- in a
+    // horizontal flex row actions always wins its full content width first,
+    // so from 640px (where this used to go horizontal) to just under the
+    // sidebar's 768px breakpoint, the title column is squeezed to whatever
+    // actions leaves behind. On the driver job detail page (MessageButton +
+    // a long server-computed status label) that measured 103px clientWidth
+    // against a 125px content minimum on CI -- a real overflow the 2026-11
+    // padding fix (this file's layout.tsx) only closed to a 2px margin,
+    // because it added width to the whole row, not to the column actions
+    // was starving. Stacking actions below the title up to lg removes the
+    // starvation itself: the column gets the row's full width whenever
+    // they're stacked, and only shares it with actions once the viewport is
+    // wide enough (1024px+) that shrink-0 actions no longer cost much.
+    <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
         {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
         <h1 className="bmpl-page-title mt-1 flex flex-wrap items-center gap-2 break-words">{title}</h1>
