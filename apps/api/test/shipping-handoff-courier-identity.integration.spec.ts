@@ -219,7 +219,7 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect(after.handoffPinAttempts).toBe(1);
   });
 
-  it('2 · right code + wrong courier — an ops account who happens to be a DIFFERENT driver cannot stand in', async () => {
+  it('2 · right code + a WRONG, EXPLICIT courier claim — an ops account who happens to be a DIFFERENT driver cannot stand in, and the shared counter still spends (BMPL-174 intact)', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
@@ -230,8 +230,18 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const impostorDriverProfileId = await attachDriverProfile(impostor.userId);
     expect(impostorDriverProfileId).not.toBe(courier.driverProfileId);
 
+    // SHIP-COLLECTION-FAILED-NONATTEMPT-BURNS-LOCKOUT (option d): an
+    // EXPLICIT claim, even a wrong one, is a genuine identity assertion —
+    // the new "say who presented the code" gate only refuses the case
+    // where NEITHER field is given at all, so it is deliberately bypassed
+    // here by naming the impostor explicitly. This is the control that
+    // proves (d) touches the rate limiter not at all: a real wrong-courier
+    // claim still reaches verifyLegPinOrThrow's isAssignedCourier check and
+    // still burns an attempt, exactly as before (d) existed.
     const pin = await pinOf(firstMile.id);
-    const r = await post(impostor.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Impostor' });
+    const r = await post(impostor.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin, receivedByName: 'Impostor', presentedCourierUserId: impostor.userId,
+    });
     expect(r.status).toBe(400);
 
     const after = await legRow(firstMile.id);
@@ -243,7 +253,7 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect(ok.status).toBe(201);
   });
 
-  it('3 · right code + no driver profile at all — an ops account with no courier identity cannot stand in either', async () => {
+  it('3 · right code + NO identity asserted at all — refused before the PIN is ever checked, spending nothing (SHIP-COLLECTION-FAILED-NONATTEMPT-BURNS-LOCKOUT)', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
@@ -252,12 +262,21 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
 
     const opsOnly = await makeOperator(['logistics.operate']);
     const pin = await pinOf(firstMile.id);
+    // Neither presentedCourierUserId nor presentedByAssignedCourier —
+    // before option (d), this fell back to actor.userId (the signed-in ops
+    // account), failed isAssignedCourier, and burned one of the shared
+    // counter's five tries even though the CODE here is the real one and
+    // nobody ever claimed to be the courier at all. (d) makes this the
+    // SAME refusal (400) but for a stronger reason: the request is rejected
+    // before verifyLegPinOrThrow is ever called, so the counter is
+    // untouched — tightening what this test proves, not reversing it.
     const r = await post(opsOnly.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Ops desk' });
     expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/say who presented/i);
 
     const after = await legRow(firstMile.id);
     expect(after.status).toBe('IN_PROGRESS');
-    expect(after.handoffPinAttempts).toBe(1);
+    expect(after.handoffPinAttempts).toBe(0);
   });
 
   it('4 · a consumed code cannot be replayed once the leg is done', async () => {
@@ -444,14 +463,24 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
 
     // (b) Courier A, now ALSO holding logistics.operate, tries the admin
     // route with their own (still-real, still-current) driver profile — the
-    // exact shape verifyHandoffPin's own check exists to refuse.
+    // exact shape verifyHandoffPin's own check exists to refuse. Names
+    // themselves EXPLICITLY (presentedCourierUserId) rather than relying on
+    // the implicit actor.userId fallback: SHIP-COLLECTION-FAILED-
+    // NONATTEMPT-BURNS-LOCKOUT's option (d) now refuses an UNCLAIMED
+    // submission before the PIN is ever checked, which would short-circuit
+    // this test before it ever reached the live-column comparison it exists
+    // to prove. An explicit claim is a genuine assertion, so (d) does not
+    // apply, and the real target — isAssignedCourier reading the LIVE
+    // assignedDriverProfileId column — is exercised exactly as before.
     await ctx.prisma.userRole.upsert({
       where: { userId_roleCode: { userId: courierA.userId, roleCode: 'ADMIN' } },
       create: { userId: courierA.userId, roleCode: 'ADMIN', status: 'APPROVED', approvedAt: new Date() },
       update: { status: 'APPROVED', approvedAt: new Date() },
     });
     await ctx.prisma.adminPermissionGrant.create({ data: { userId: courierA.userId, permission: 'logistics.operate' } });
-    const opsRoute = await post(courierA.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Courier A' });
+    const opsRoute = await post(courierA.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin, receivedByName: 'Courier A', presentedCourierUserId: courierA.userId,
+    });
     expect(opsRoute.status).toBe(400);
 
     const after = await legRow(firstMile.id);

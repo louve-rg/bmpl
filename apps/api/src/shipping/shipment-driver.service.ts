@@ -516,7 +516,18 @@ export class ShipmentDriverService {
     // can change `courierStatus` out from under a second write anyway. A
     // write that can only ever re-assert values already true is not a safety
     // net, it is a second source of truth for the same fact.
-    const shipment = await this.shipments.completeLeg(legId, dto, { userId: actor.userId, label: dto.receivedByName });
+    // SHIP-COLLECTION-FAILED-NONATTEMPT-BURNS-LOCKOUT: made EXPLICIT rather
+    // than left for `completeLeg`/`verifyLegPinOrThrow` to infer — the
+    // courier IS the actor here, so this is a genuine identity assertion,
+    // never the "nobody asserted anything" shape a staff submission with
+    // neither `presentedCourierUserId` nor `presentedByAssignedCourier`
+    // produces. `completeLeg` now refuses THAT shape outright, before any
+    // code is checked; this call must never be mistaken for it.
+    const shipment = await this.shipments.completeLeg(
+      legId,
+      { ...dto, presentedCourierUserId: dto.presentedCourierUserId ?? actor.userId },
+      { userId: actor.userId, label: dto.receivedByName },
+    );
 
     // A completed first mile puts the parcel at the terminal; the next leg may
     // now become workable. Dispatching here rather than waiting for the sweeper
