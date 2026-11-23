@@ -669,6 +669,35 @@ describe('cancelling at a custody gap between two legs (SHIP-CANCEL-AT-ORIGIN-HU
     const cancelled = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
     expect(cancelled.status).toBe('CANCELLED');
   });
+
+  /**
+   * Same wrong-cause family #880 fixed, filed as its own LOW card: the
+   * cancel refusal for AWAITING_COLLECTION reused DELIVERED's "already been
+   * delivered" wording — false here. The parcel is sitting at a hub,
+   * custody with BML, waiting for the recipient to walk in; nobody has
+   * delivered anything. Text-only fix; the refusal itself (and the fact
+   * that both statuses are terminal/settled — `isDelivered`'s own job) is
+   * unchanged.
+   */
+  it('refuses a cancel at AWAITING_COLLECTION with text that matches what actually happened, not DELIVERED\'s wording', async () => {
+    const booked = await bookToOriginHubGap();
+    const lineHaul = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: booked.shipmentId, kind: 'LINE_HAUL' } });
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`, {})).status).toBe(201);
+    const { handoffPin } = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id }, select: { handoffPin: true } });
+    const handoff = await post(admin, `admin/logistics/legs/${lineHaul.id}/handoff`, { pin: handoffPin, receivedByName: 'Counter staff' });
+    expect(handoff.status).toBe(201);
+    expect(handoff.body.status).toBe('AWAITING_COLLECTION');
+
+    const cancel = await post(customer, `shipping/${booked.shipmentId}/cancel`, { reason: 'Trying to stop it.' });
+    expect(cancel.status).toBe(400);
+    expect(cancel.body.message).toMatch(/ready for the recipient to collect/i);
+    expect(cancel.body.message).not.toMatch(/already been delivered/i);
+
+    const unchanged = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.shipmentId } });
+    expect(unchanged.status).toBe('AWAITING_COLLECTION');
+    expect(unchanged.cancelledAt).toBeNull();
+  });
 });
 
 describe('test money stays test money', () => {

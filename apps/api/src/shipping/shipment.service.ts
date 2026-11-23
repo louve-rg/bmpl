@@ -4418,7 +4418,19 @@ export class ShipmentService {
       // it is always what the last `recompute()` wrote — this can never
       // disagree with the fact that decided whether settlement already ran.
       if (this.isDelivered(s.status)) {
-        throw new BadRequestException('This shipment has already been delivered and cannot be cancelled.');
+        // Same wrong-cause family #880 fixed: `isDelivered` bundles two real
+        // endings (DELIVERED and AWAITING_COLLECTION, see its own comment —
+        // both are settled, both already ran settlement) into one refusal,
+        // but they are not the same fact to the person reading the message.
+        // AWAITING_COLLECTION has not been delivered to anyone — the parcel
+        // is sitting at a hub, custody with BML, waiting for the recipient
+        // to walk in and collect it. Saying "already been delivered" there
+        // is false, not merely imprecise.
+        throw new BadRequestException(
+          s.status === 'AWAITING_COLLECTION'
+            ? 'This shipment is ready for the recipient to collect and cannot be cancelled.'
+            : 'This shipment has already been delivered and cannot be cancelled.',
+        );
       }
       // SHIP-CANCEL-AT-ORIGIN-HUB-INCONSISTENT: the up-front refusal used to
       // be computed from leg STATUS ("is any leg IN_PROGRESS, or EXCEPTION
