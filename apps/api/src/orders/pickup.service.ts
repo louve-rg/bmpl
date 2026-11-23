@@ -129,6 +129,31 @@ export class PickupService {
   /**
    * Transition to PICKED_UP + finalize inventory exactly once, atomically.
    *
+   * ORDER-PICKUP-DOUBLE-FINALIZE: the ONLY exactly-once guard used to be an
+   * unlocked read of `inventoryFinalizedAt`, checked BEFORE
+   * `finalizeReservation`/`finalizeLocationReservation` ever take their own
+   * `FOR UPDATE` lock — and that lock is on the INVENTORY row, never on this
+   * vendor-order. Two concurrent `confirmPickup` calls with the same valid
+   * PIN (the PIN is never consumed/invalidated by verifyPin) both read
+   * `inventoryFinalizedAt: null` before either committed, so both ran the
+   * finalization loop: measured on a qty=2 order, {quantity:10,reserved:2}
+   * went to {quantity:6,reserved:0} — four units gone, two FULFILLED
+   * `InventoryChange` rows, both calls returning 201.
+   *
+   * Fixed by claiming the STATUS transition FIRST, via the same
+   * conditional-claim pattern `DriverJobService.confirmPickup` already uses
+   * for the identical class of race on the DELIVERY path (and every
+   * SHIP-LEG-CONCURRENT-WRITES fix tonight): `updateMany` re-asserts the
+   * exact status this call's own callers (`confirmPickup`,
+   * `adminConfirmPickup`) already checked, non-atomically, before calling
+   * here. Only one concurrent caller's `updateMany` can ever match — the
+   * loser's `claimed.count` is 0 and it never reaches the inventory
+   * finalization code at all, so `inventoryFinalizedAt`'s own unlocked read
+   * is no longer load-bearing for concurrency; it stays as the exactly-once
+   * guard for a (not currently reachable) future caller of this same
+   * method, same role `OrderDelivery.inventoryFinalizedAt` plays after
+   * `DriverJobService.confirmPickup`'s own claim.
+   *
    * ORD-RELEASED-GUARD: `InventoryService.finalizeReservation`/
    * `finalizeLocationReservation` decrement real on-hand `quantity`
    * unconditionally — they do not throw or check `reserved` first, so
@@ -143,7 +168,15 @@ export class PickupService {
    */
   private async finalize(vendorOrderId: string, actorId: string, reason: string | null) {
     const vo = await this.load(vendorOrderId);
-    await this.prisma.$transaction(async (tx) => {
+    const won = await this.prisma.$transaction(async (tx) => {
+      // ORDER-PICKUP-DOUBLE-FINALIZE: the claim gates everything below it —
+      // a loser never reaches the inventory finalization loop.
+      const claimed = await tx.vendorOrder.updateMany({
+        where: { id: vendorOrderId, status: { in: ['READY_FOR_PICKUP', 'PENDING'] } },
+        data: { status: 'PICKED_UP', pickedUpAt: new Date() },
+      });
+      if (claimed.count === 0) return false;
+
       const fresh = await tx.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrderId }, select: { inventoryFinalizedAt: true } });
       if (!fresh.inventoryFinalizedAt) {
         for (const item of vo.items) {
@@ -159,12 +192,16 @@ export class PickupService {
             await this.inventory.finalizeReservation(inv.id, item.quantity, actorId, tx);
           }
         }
+        await tx.vendorOrder.update({ where: { id: vendorOrderId }, data: { inventoryFinalizedAt: new Date() } });
+        await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId, newValue: { vendorOrderId } }, tx);
       }
-      await tx.vendorOrder.update({ where: { id: vendorOrderId }, data: { status: 'PICKED_UP', pickedUpAt: new Date(), inventoryFinalizedAt: fresh.inventoryFinalizedAt ?? new Date() } });
       await this.audit.record({ action: 'VENDOR_ORDER_PICKED_UP', actorId, reason: reason ?? undefined, newValue: { vendorOrderId, orderNumber: vo.orderNumber, override: reason != null } }, tx);
-      if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId, newValue: { vendorOrderId } }, tx);
       await this.notifications.notifyUsers([vo.order.userId, vo.vendorProfile.userId], { type: 'MARKETPLACE', category: 'ORDER', event: 'ORDER_PLACED', title: 'Order collected', body: `Order ${vo.orderNumber} was collected.`, data: { vendorOrderId } }, tx);
+      return true;
     });
+    if (!won) {
+      throw new ConflictException('This order changed state before pickup could be confirmed — reload and try again.');
+    }
     // SHIP-PICKUP-NO-SETTLE: collection triggers internal settlement (M18),
     // mirroring DriverJobService.confirmDelivery's own trigger immediately
     // after its delivery transition commits — its own atomic, idempotent

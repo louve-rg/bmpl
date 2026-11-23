@@ -228,4 +228,50 @@ describe('pickup fulfilment', () => {
       expect(res.body.message).toBe('Cannot ready a CANCELLED order for pickup.');
     });
   });
+
+  /**
+   * ORDER-PICKUP-DOUBLE-FINALIZE. `finalize()`'s only exactly-once guard
+   * used to be an unlocked read of `inventoryFinalizedAt` — the PIN is
+   * never consumed by `verifyPin`, so N concurrent `confirm-pickup` calls
+   * with the SAME correct PIN could all pass the outer status check and
+   * all finalize inventory before any of them committed. Measured on
+   * unmodified code: a qty=2 order's inventory lost 2*N units instead of
+   * 2, with N FULFILLED InventoryChange rows instead of 1.
+   */
+  describe('finalize(): concurrent confirmPickup calls on one READY_FOR_PICKUP order (ORDER-PICKUP-DOUBLE-FINALIZE)', () => {
+    it('exactly one winner, inventory decremented by quantity exactly ONCE, one FULFILLED change row, losers refuse — never 429', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 2);
+      await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`).expect(201);
+      const pin = (await get(o.customerCookies, `orders/vendor-orders/${o.vendorOrderId}/pickup-pin`)).body.pickupPin;
+
+      const invBefore = await ctx.prisma.inventory.findUniqueOrThrow({ where: { id: vendor.inventoryId } });
+      const changeCountBefore = await ctx.prisma.inventoryChange.count({ where: { inventoryId: vendor.inventoryId, reason: 'FULFILLED' } });
+
+      const N = 5;
+      const responses = await Promise.all(
+        Array.from({ length: N }, () => post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/confirm-pickup`, { pin })),
+      );
+      const wins = responses.filter((r) => r.status === 201);
+      const losses = responses.filter((r) => r.status !== 201);
+      expect(wins).toHaveLength(1);
+      expect(losses).toHaveLength(N - 1);
+      for (const r of losses) {
+        // Trap: the route carries @StrictThrottle() — a test asserting only
+        // "the losers failed" without excluding 429 would pass against
+        // completely unguarded code too.
+        expect(r.status).not.toBe(429);
+        expect([400, 409]).toContain(r.status);
+      }
+
+      const invAfter = await ctx.prisma.inventory.findUniqueOrThrow({ where: { id: vendor.inventoryId } });
+      expect(invAfter.quantity).toBe(invBefore.quantity - 2); // NOT -2*N
+      expect(invAfter.reserved).toBe(0);
+      expect(await ctx.prisma.inventoryChange.count({ where: { inventoryId: vendor.inventoryId, reason: 'FULFILLED' } })).toBe(changeCountBefore + 1);
+
+      const voAfter = await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: o.vendorOrderId } });
+      expect(voAfter.status).toBe('PICKED_UP');
+      expect(voAfter.inventoryFinalizedAt).not.toBeNull();
+    });
+  });
 });
