@@ -105,6 +105,10 @@ afterEach(() => {
   apiPost.mockClear();
   createMock.mockReset();
   router.push.mockClear();
+  // The Case 3 fix mirrors the attempt key into real sessionStorage, which
+  // (unlike the module's other mocked state) survives across tests in the
+  // same jsdom instance unless cleared.
+  sessionStorage.clear();
 });
 
 async function flush() {
@@ -329,6 +333,124 @@ describe('NewShipmentPage idempotency key (WEB-BOOKING-NO-IDEMPOTENCY-KEY)', () 
     expect(firstKey).toBeTruthy();
     expect(secondKey).toBeTruthy();
     expect(secondKey).not.toBe(firstKey);
+  }, 10000);
+});
+
+/**
+ * WEB-BOOKING-NO-IDEMPOTENCY-KEY Case 3 (god, measured by Jim 2026-11-23): a
+ * page reload ~30ms after clicking book wiped the `attemptKey` useRef before
+ * the original request resolved server-side, so the next attempt minted a
+ * fresh key and booked (and charged) a second time -- two real wallet debits
+ * confirmed in the database. The fix mirrors the key into `sessionStorage`
+ * together with a fingerprint of the `request` it was minted for. A reload
+ * is simulated here the only way a unit test can: unmounting and remounting
+ * the component without ever resolving the first `create` call, which is
+ * exactly what a real navigation away does to in-flight React state while
+ * leaving `sessionStorage` untouched.
+ */
+describe('NewShipmentPage idempotency key survives a reload (WEB-BOOKING-NO-IDEMPOTENCY-KEY, Case 3)', () => {
+  function idempotencyKeyOf(call: unknown[]): string | undefined {
+    return (call[1] as Record<string, string> | undefined)?.['idempotency-key'];
+  }
+  const STORAGE_KEY = 'bmpl:shipment-booking-attempt';
+
+  function simulateReload() {
+    act(() => root!.unmount());
+    container!.remove();
+    root = null;
+    container = null;
+  }
+
+  it('restores the SAME idempotency key after a simulated reload, for the unchanged booking the stored key belongs to -- the case a bare useRef cannot survive', async () => {
+    let settleFirstCreate: (v: { reference: string }) => void = () => {};
+    createMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settleFirstCreate = resolve;
+        }),
+    );
+    const book = await fillAndQuote();
+
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const firstKey = idempotencyKeyOf(createMock.mock.calls[0]!);
+    expect(firstKey).toBeTruthy();
+
+    // The reload interrupts the page before the server's response ever
+    // arrives -- the real Case 3 shape. The never-resolved promise above is
+    // deliberately left pending.
+    simulateReload();
+
+    createMock.mockResolvedValueOnce({ reference: 'BML-TEST0012' });
+    // Same addresses, same service/mode/parcel/date defaults -- the identical
+    // request, which is what makes the stored fingerprint still match.
+    const rebook = await fillAndQuote();
+    await act(async () => {
+      rebook.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(2);
+    const secondKey = idempotencyKeyOf(createMock.mock.calls[1]!);
+    expect(secondKey).toBe(firstKey);
+    settleFirstCreate({ reference: 'unused' });
+  }, 10000);
+
+  it('ignores a stored key whose fingerprint does not match the current request -- a reload across a CHANGED booking must still get a fresh key', async () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ key: 'stale-key-from-a-different-booking', fingerprint: 'not-the-current-request' }),
+    );
+    createMock.mockResolvedValueOnce({ reference: 'BML-TEST0013' });
+    const book = await fillAndQuote();
+
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const key = idempotencyKeyOf(createMock.mock.calls[0]!);
+    expect(key).toBeTruthy();
+    expect(key).not.toBe('stale-key-from-a-different-booking');
+  }, 10000);
+
+  it('still books successfully, with a real key, when sessionStorage throws on every call (private browsing / blocked site data)', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+    const throwingStorage: Storage = {
+      getItem: () => {
+        throw new DOMException('blocked');
+      },
+      setItem: () => {
+        throw new DOMException('blocked');
+      },
+      removeItem: () => {
+        throw new DOMException('blocked');
+      },
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    };
+    Object.defineProperty(window, 'sessionStorage', { value: throwingStorage, configurable: true });
+
+    try {
+      createMock.mockResolvedValueOnce({ reference: 'BML-TEST0014' });
+      const book = await fillAndQuote();
+
+      await act(async () => {
+        book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+      expect(idempotencyKeyOf(createMock.mock.calls[0]!)).toBeTruthy();
+      expect(router.push).toHaveBeenCalledWith('/dashboard/shipments/BML-TEST0014');
+    } finally {
+      if (originalDescriptor) Object.defineProperty(window, 'sessionStorage', originalDescriptor);
+    }
   }, 10000);
 });
 
