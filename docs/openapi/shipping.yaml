@@ -2904,7 +2904,10 @@ paths:
         Refused with 400 when the leg is not in EXCEPTION, or when its
         shipment has not yet been returned or rerouted. Idempotent: a
         repeat call on an already-recovered leg returns the same success
-        and writes nothing a second time.
+        and writes nothing a second time. Unlike `resolve-exception` right
+        above, the 201 body below is NOT a `ShipmentView` — it is this flat
+        recovery result only; re-fetch the shipment separately if the
+        caller needs its updated state.
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       requestBody:
         required: true
