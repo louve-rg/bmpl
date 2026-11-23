@@ -4442,6 +4442,28 @@ export class ShipmentService {
         throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
       }
 
+      // SHIP-CONCURRENT-CANCEL-TRIPLE-AUDIT: claimed HERE, before any leg or
+      // offer write and before the refund decision — not as a late,
+      // unconditional `update` every concurrent transaction used to commit in
+      // turn. Three simultaneous cancels all read `cancelledAt` as null, all
+      // passed every guard above, and all committed their own unconditional
+      // shipment write and their own SHIPMENT_CANCELLED audit row for one real
+      // cancellation — money stayed correct only because
+      // `releaseForShipment` happens to guard itself independently; nothing
+      // here protected the shipment record or the audit trail from the same
+      // race class `shipmentLeg`'s own writes were already fixed for
+      // (SHIP-LEG-CONCURRENT-WRITES/MDF-223). A loser now fails fast, before
+      // touching a single leg, offer or wallet hold — the same "already
+      // cancelled" refusal the early read-based check above gives, just
+      // closing the race window that check alone cannot.
+      const claimed = await tx.shipment.updateMany({
+        where: { id, cancelledAt: null },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: input.reason },
+      });
+      if (claimed.count === 0) {
+        throw new BadRequestException('That shipment is already cancelled.');
+      }
+
       // Who is being released. Read BEFORE the rows are rewritten — afterwards
       // there is nobody left on the leg to notify. Covers a driver who merely
       // holds the offer (ASSIGNED) as well as one who accepted: both have the
@@ -4498,11 +4520,10 @@ export class ShipmentService {
       if (!custodyTransferred) {
         await this.payments.releaseForShipment(tx, id, actor.userId);
       }
-      const updated = await tx.shipment.update({
-        where: { id },
-        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: input.reason },
-        include: SHIPMENT_INCLUDE,
-      });
+      // The shipment row itself was already claimed above — re-read rather
+      // than write it a second time, so there is exactly one write to this
+      // row per real cancellation, not two.
+      const updated = await tx.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
       return {
         shipment: updated,
         releasedDriverProfileIds: [...new Set(released.map((l) => l.assignedDriverProfileId!))],
