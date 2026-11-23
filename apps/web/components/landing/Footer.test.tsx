@@ -61,7 +61,7 @@ describe('Footer links', () => {
 
   it('keeps Contact, pointed at the support address the product already publishes', () => {
     const links = render();
-    expect(links.get('Contact')).toBe('mailto:support@bzemarketplace.com');
+    expect(links.get('Contact')).toBe('mailto:info@bzemarketplace.com');
   });
 
   it('leaves Privacy and Terms as the only "#" links, both owner-gated', () => {

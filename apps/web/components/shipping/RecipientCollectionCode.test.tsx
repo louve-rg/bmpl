@@ -85,7 +85,7 @@ describe('RecipientCollectionCode', () => {
 
     // MDF-942: that sentence must give a way to act on it, not just name the problem.
     const link = el.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
+    expect(link?.getAttribute('href')).toBe('mailto:info@bzemarketplace.com?subject=Collection%20code%20locked');
 
     // MDF-942, deliberately NOT this component: the linked recipient has no
     // token to re-request either -- same reasoning as SenderCollectionCode.

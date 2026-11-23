@@ -15,6 +15,7 @@ import {
 import type { DeliveryEstimate } from '../lib/orders';
 import type { ApiError } from '../lib/api';
 import { deliveryStatusDisplay } from '../lib/delivery-stage';
+import { contactMailto } from '../lib/contact';
 import { Alert, Button, Spinner, StatusBadge } from './ui';
 import { Avatar } from './Avatar';
 
@@ -306,7 +307,7 @@ export function DeliveryTracker({ deliveryId }: { deliveryId: string }) {
 
           <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
             <a
-              href="mailto:support@bzemarketplace.com?subject=Delivery%20help"
+              href={contactMailto('Delivery help')}
               className="text-xs font-medium text-belize-blue hover:underline"
             >
               Contact support

@@ -177,7 +177,7 @@ describe('UnlinkedCollectionCode — reveal step', () => {
 
     // MDF-942: that sentence must give a way to act on it, not just name the problem.
     const link = el.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
+    expect(link?.getAttribute('href')).toBe('mailto:info@bzemarketplace.com?subject=Collection%20code%20locked');
 
     // MDF-942, this path only: the request endpoint never checks lock state,
     // so this holder -- unlike Sender/RecipientCollectionCode, which have no
