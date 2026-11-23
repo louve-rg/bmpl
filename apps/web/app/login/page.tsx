@@ -34,7 +34,16 @@ export default function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const reason = params.get('reason');
-    setNotice((reason && REASON_MESSAGES[reason]) || null);
+    // MDF-PWCONFIRM: only ever SET the notice here, never clear it back to
+    // null. React 18 Strict Mode double-invokes a mount effect in dev; the
+    // second pass reads window.location.search AFTER the first pass's own
+    // history.replaceState below has already stripped ?reason=, so an
+    // unconditional setNotice(reason ? ... : null) clobbers the first pass's
+    // correct value back to null. notice already starts at null via
+    // useState, so there is nothing to do when reason is absent.
+    if (reason && REASON_MESSAGES[reason]) {
+      setNotice(REASON_MESSAGES[reason]);
+    }
     // Strip ?reason= once read -- otherwise a reload (or a bookmark, or the
     // back button) re-shows "Your password was changed" to someone who did
     // not just change it. replaceState, not a router navigation: this must

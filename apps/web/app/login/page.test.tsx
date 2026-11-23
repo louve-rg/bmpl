@@ -105,6 +105,35 @@ describe('MDF-925/MDF-924 -- the account-anonymized notice', () => {
   });
 });
 
+describe('MDF-PWCONFIRM -- double-invocation safety, not just "the notice shows"', () => {
+  // This bans the SHAPE of the defect, not just today's symptom. A test that
+  // only checks "the message shows" would pass again the moment someone
+  // reintroduces a null-write on a later line and the effect happens to run
+  // only once -- React 18 Strict Mode's real mount/cleanup/remount cycle
+  // (effect, cleanup, effect again) is what actually invokes this effect
+  // twice in practice, and both invocations must land on the same correct
+  // value for either reason this page recognizes, or the test must fail.
+  it.each([
+    ['password-changed', 'Your password was changed. Please sign in again.'],
+    ['account-anonymized', 'Your profile has been anonymized and your past order records are retained.'],
+  ])('reason=%s survives the effect running twice under StrictMode', async (reason, message) => {
+    window.history.replaceState(null, '', `/login?reason=${reason}`);
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <React.StrictMode>
+          <LoginPage />
+        </React.StrictMode>,
+      );
+    });
+
+    expect(container.textContent).toContain(message);
+    expect(window.location.search).toBe('');
+  });
+});
+
 describe('SEC-LOGIN-PASSWORD-IN-URL', () => {
   it('the form defaults to POST, not GET, before React ever attaches a submit handler', async () => {
     // The defect: before hydration completes, a click on "Sign in" has no
