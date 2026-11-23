@@ -1868,7 +1868,20 @@ export class ShipmentService {
           throw new ForbiddenException('You are not the courier assigned to this leg.');
         }
       }
-      await tx.shipmentLeg.update({ where: { id: leg.id }, data: { status: 'IN_PROGRESS', startedAt: new Date() } });
+      // SHIP-LEG-CONCURRENT-WRITES: conditional write, NOT an unconditional
+      // update by id — same race, same fix as completeLeg/flagException
+      // (MDF-223): `leg.status` is a read taken moments earlier in this same
+      // transaction. Without re-asserting it inside the write, concurrent
+      // callers all reading READY all pass the guard above and all commit,
+      // each appending its own SENDER/HUB -> DRIVER custody row and its own
+      // SHIPMENT_LEG_STARTED audit row for one real collection.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
+        data: { status: 'IN_PROGRESS', startedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before it could be started — reload and try again.');
+      }
       await this.appendCustody(tx, shipment.id, leg.id, {
         fromHolder: leg.sequence === 1 ? 'SENDER' : 'HUB',
         // Never CARRIER: the LINE_HAUL guard above means only a driver leg
@@ -1935,8 +1948,13 @@ export class ShipmentService {
           throw new ForbiddenException('You are not the courier assigned to this leg.');
         }
       }
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // SHIP-LEG-CONCURRENT-WRITES: conditional write, same race and fix as
+      // startLeg above — reasserts BOTH fields this call's own guards above
+      // just read (`courierStatus`, `status`), since either one changing
+      // underneath a concurrent caller means it is no longer the same leg
+      // this call was cleared to act on.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, courierStatus: leg.courierStatus, status: leg.status },
         data: {
           courierStatus: 'PICKUP_CONFIRMED',
           pickedUpAt: new Date(),
@@ -1945,6 +1963,9 @@ export class ShipmentService {
           ...extraPickupData,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException(conflictMessage);
+      }
       await this.appendCustody(tx, shipment.id, leg.id, {
         fromHolder: leg.sequence === 1 ? 'SENDER' : 'HUB',
         // Never CARRIER: only a driver leg (FIRST_MILE/LAST_MILE/DIRECT)
@@ -2071,8 +2092,14 @@ export class ShipmentService {
         }
         carrierName = route.carrierName;
       }
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // SHIP-LEG-CONCURRENT-WRITES: conditional write, same race Stanley
+      // reproduced (3 simultaneous departs on one READY leg -> 3 custody
+      // rows, 3 audit rows, departedAt overwritten by the last writer).
+      // Reasserts both preconditions this call's own guards above just read
+      // and depend on remaining true (`departedAt`/`arrivedAt` still null) —
+      // same pattern as completeLeg/flagException (MDF-223).
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, departedAt: null, arrivedAt: null },
         data: {
           status: 'IN_PROGRESS',
           startedAt: leg.startedAt ?? new Date(),
@@ -2081,6 +2108,9 @@ export class ShipmentService {
           carrierBookingRef: input.carrierBookingRef ?? leg.carrierBookingRef,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the departure could be recorded — reload and try again.');
+      }
       await this.appendCustody(tx, shipment.id, leg.id, {
         fromHolder: 'HUB',
         toHolder: 'CARRIER',
@@ -2106,7 +2136,20 @@ export class ShipmentService {
       if (leg.arrivedAt) {
         throw new BadRequestException('This leg has already arrived.');
       }
-      await tx.shipmentLeg.update({ where: { id: leg.id }, data: { arrivedAt: new Date() } });
+      // SHIP-LEG-CONCURRENT-WRITES: conditional write, same race as
+      // departLeg above (and the one Stanley suspected without reproducing).
+      // No custody row is appended here — arrival is a hub-side event, not a
+      // custody transfer — so a duplicate write's only damage is a second
+      // SHIPMENT_LEG_ARRIVED audit row and arrivedAt overwritten by the last
+      // writer, but that is still real history corruption and still closed
+      // the same way: reassert both fields this call's guards just read.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, arrivedAt: null, status: leg.status },
+        data: { arrivedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the arrival could be recorded — reload and try again.');
+      }
       return { action: 'SHIPMENT_LEG_ARRIVED' as const, note: null };
     });
   }
