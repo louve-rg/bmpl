@@ -10,7 +10,10 @@ import { api, errorMessage, onSessionExpired, type ApiError } from './api';
  */
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 afterEach(() => {
@@ -25,7 +28,10 @@ describe('api error messages', () => {
         jsonResponse(400, {
           message: 'Validation failed',
           errors: [
-            { path: 'workArrangement', message: "Expected 'ONSITE' | 'HYBRID' | 'REMOTE', received null" },
+            {
+              path: 'workArrangement',
+              message: "Expected 'ONSITE' | 'HYBRID' | 'REMOTE', received null",
+            },
             { path: 'openings', message: 'Number must be greater than or equal to 1' },
           ],
         }),
@@ -41,7 +47,10 @@ describe('api error messages', () => {
   });
 
   it('leaves the message alone when there are no field errors', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { message: 'Create your company profile first.' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(404, { message: 'Create your company profile first.' })),
+    );
 
     await expect(api.get('/employer/profile')).rejects.toMatchObject({
       message: 'Create your company profile first.',
@@ -51,7 +60,12 @@ describe('api error messages', () => {
   it('still gives the friendly origin/CSRF message, not the field-error one, for that specific case', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(403, { message: 'Request origin is not allowed', errors: [{ path: 'x', message: 'irrelevant' }] })),
+      vi.fn(async () =>
+        jsonResponse(403, {
+          message: 'Request origin is not allowed',
+          errors: [{ path: 'x', message: 'irrelevant' }],
+        }),
+      ),
     );
 
     await expect(api.post('/anything', {})).rejects.toMatchObject({
@@ -80,12 +94,19 @@ describe('errorMessage', () => {
   });
 
   it('falls back to .message for a business refusal, which has no errors[] at all', () => {
-    const err: ApiError = { status: 400, message: 'This is your only address, so it has to stay your default.' };
-    expect(errorMessage(err, 'fallback')).toBe('This is your only address, so it has to stay your default.');
+    const err: ApiError = {
+      status: 400,
+      message: 'This is your only address, so it has to stay your default.',
+    };
+    expect(errorMessage(err, 'fallback')).toBe(
+      'This is your only address, so it has to stay your default.',
+    );
   });
 
   it('falls back to the caller-supplied fallback when nothing usable comes back at all', () => {
-    expect(errorMessage(null, 'Could not save this address just now.')).toBe('Could not save this address just now.');
+    expect(errorMessage(null, 'Could not save this address just now.')).toBe(
+      'Could not save this address just now.',
+    );
   });
 });
 
@@ -150,7 +171,9 @@ describe('web api session-expiry notification', () => {
     // The original call's own 401 still surfaces normally -- this is about
     // suppressing the FALSE "your session expired" notice, not swallowing
     // the error entirely.
-    await expect(api.get('/cart')).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+    await expect(api.get('/cart')).rejects.toMatchObject({
+      status: 401,
+    } satisfies Partial<ApiError>);
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -164,7 +187,9 @@ describe('web api session-expiry notification', () => {
         const url = String(input);
         calls += 1;
         if (url.endsWith('/auth/refresh')) return jsonResponse(200, {});
-        return calls === 1 ? jsonResponse(401, { message: 'Session is no longer valid.' }) : jsonResponse(200, { ok: true });
+        return calls === 1
+          ? jsonResponse(401, { message: 'Session is no longer valid.' })
+          : jsonResponse(200, { ok: true });
       }),
     );
 
@@ -185,7 +210,9 @@ describe('web api session-expiry notification', () => {
       }),
     );
 
-    await expect(api.post('/auth/login', { email: 'a@b.com', password: 'wrong' })).rejects.toMatchObject({
+    await expect(
+      api.post('/auth/login', { email: 'a@b.com', password: 'wrong' }),
+    ).rejects.toMatchObject({
       message: 'Invalid email or password.',
     } satisfies Partial<ApiError>);
     expect(listener).not.toHaveBeenCalled();
@@ -204,7 +231,9 @@ describe('web api session-expiry notification', () => {
       }),
     );
 
-    await expect(api.upload('/products/images', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({
+    await expect(
+      api.upload('/products/images', new Blob(['x'], { type: 'image/png' })),
+    ).rejects.toMatchObject({
       status: 401,
     } satisfies Partial<ApiError>);
     expect(listener).toHaveBeenCalledTimes(1);
@@ -223,7 +252,9 @@ describe('web api session-expiry notification', () => {
       }),
     );
 
-    await expect(api.upload('/products/images', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({
+    await expect(
+      api.upload('/products/images', new Blob(['x'], { type: 'image/png' })),
+    ).rejects.toMatchObject({
       status: 401,
     } satisfies Partial<ApiError>);
     expect(listener).not.toHaveBeenCalled();

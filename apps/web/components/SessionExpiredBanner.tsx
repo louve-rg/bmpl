@@ -33,7 +33,12 @@ export function SessionExpiredBanner() {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center p-4 sm:justify-end">
-      <div data-theme="light" className="w-full max-w-sm rounded-bmpl-xl bg-white p-4 shadow-bmpl-lg" role="alert" aria-live="assertive">
+      <div
+        data-theme="light"
+        className="w-full max-w-sm rounded-bmpl-xl bg-white p-4 shadow-bmpl-lg"
+        role="alert"
+        aria-live="assertive"
+      >
         <p className="text-sm font-semibold text-slate-900">Your session expired</p>
         <p className="mt-1 text-sm text-slate-600">
           Nothing on this page has been lost. Sign in again, then click your action again.

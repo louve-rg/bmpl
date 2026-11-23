@@ -10,7 +10,10 @@ import { api, onSessionExpired, type ApiError } from './api';
  */
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 afterEach(() => {
@@ -41,7 +44,10 @@ describe('admin api error messages', () => {
   });
 
   it('leaves the message alone when there are no field errors', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { message: 'Not found' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(404, { message: 'Not found' })),
+    );
 
     await expect(api.get('/jobs/categories/x')).rejects.toMatchObject({
       message: 'Not found',
@@ -60,13 +66,15 @@ describe('admin api session-expiry notification', () => {
     onSessionExpired(null);
   });
 
-  it('notifies once the silent refresh also fails, with the original 401 message still thrown', async () => {
+  it('notifies once the silent refresh also fails for a genuinely dead session, with the original 401 message still thrown', async () => {
     const listener = vi.fn();
     onSessionExpired(listener);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url.endsWith('/auth/refresh') ? jsonResponse(401, { message: 'No refresh token provided.' }) : jsonResponse(401, { message: 'Session is no longer valid.' }),
+        url.endsWith('/auth/refresh')
+          ? jsonResponse(401, { message: 'Session expired. Please sign in again.' })
+          : jsonResponse(401, { message: 'Session is no longer valid.' }),
       ),
     );
 
@@ -75,6 +83,24 @@ describe('admin api session-expiry notification', () => {
       message: 'Session is no longer valid.',
     } satisfies Partial<ApiError>);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT notify a visitor on a cold load, where refresh fails because there was never a session to begin with', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/auth/refresh')
+          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          : jsonResponse(401, { message: 'Unauthorized' }),
+      ),
+    );
+
+    await expect(api.get('/admin/wallet/accounts/u1')).rejects.toMatchObject({
+      status: 401,
+    } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it('does not notify when the silent refresh succeeds', async () => {
@@ -86,7 +112,9 @@ describe('admin api session-expiry notification', () => {
       vi.fn(async (url: string) => {
         calls += 1;
         if (url.endsWith('/auth/refresh')) return jsonResponse(200, {});
-        return calls === 1 ? jsonResponse(401, { message: 'Session is no longer valid.' }) : jsonResponse(200, { ok: true });
+        return calls === 1
+          ? jsonResponse(401, { message: 'Session is no longer valid.' })
+          : jsonResponse(200, { ok: true });
       }),
     );
 
@@ -94,17 +122,21 @@ describe('admin api session-expiry notification', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('never notifies for an /auth/* endpoint\'s own 401 (e.g. a wrong-password login)', async () => {
+  it("never notifies for an /auth/* endpoint's own 401 (e.g. a wrong-password login)", async () => {
     const listener = vi.fn();
     onSessionExpired(listener);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url.endsWith('/auth/refresh') ? jsonResponse(401, { message: 'No refresh token provided.' }) : jsonResponse(401, { message: 'Invalid email or password.' }),
+        url.endsWith('/auth/refresh')
+          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          : jsonResponse(401, { message: 'Invalid email or password.' }),
       ),
     );
 
-    await expect(api.post('/auth/login', { email: 'a@b.com', password: 'wrong' })).rejects.toMatchObject({
+    await expect(
+      api.post('/auth/login', { email: 'a@b.com', password: 'wrong' }),
+    ).rejects.toMatchObject({
       message: 'Invalid email or password.',
     } satisfies Partial<ApiError>);
     expect(listener).not.toHaveBeenCalled();
@@ -114,10 +146,14 @@ describe('admin api session-expiry notification', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url.endsWith('/auth/refresh') ? jsonResponse(401, {}) : jsonResponse(401, { message: 'Session is no longer valid.' }),
+        url.endsWith('/auth/refresh')
+          ? jsonResponse(401, {})
+          : jsonResponse(401, { message: 'Session is no longer valid.' }),
       ),
     );
 
-    await expect(api.get('/admin/wallet/accounts/u1')).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+    await expect(api.get('/admin/wallet/accounts/u1')).rejects.toMatchObject({
+      status: 401,
+    } satisfies Partial<ApiError>);
   });
 });
