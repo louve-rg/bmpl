@@ -211,12 +211,34 @@ jobs:
         continue-on-error: true
         run: pnpm --filter @bmpl/web test:e2e
 
-      - name: Upload Playwright report (only when it failed)
-        if: steps.e2e.outcome == 'failure'
+      # FIN-BROWSER-STEP: `steps.e2e.outcome == 'failure'` alone never fires
+      # for a FLAKY result — `retries: process.env.CI ? 1 : 0` means a test
+      # that fails then passes on retry makes the whole `pnpm test:e2e`
+      # command exit 0, so `outcome` reads 'success' even though Playwright's
+      # own `trace: 'retain-on-failure'` already kept that failed attempt's
+      # trace on disk (its own doc: "kept even when a later retry passes").
+      # That trace was real evidence this step discarded unseen the one time
+      # it mattered (d5c863c2's flaky run, diagnosed from log text alone,
+      # with no artifact to confirm it). `always()` + `if-no-files-found:
+      # ignore` uploads whenever there is something to upload (a failure OR
+      # a recovered flake) and costs nothing on a fully clean run, where
+      # test-results/playwright-report stay empty.
+      # continue-on-error here is scoped to this upload step alone, not the
+      # browser-test step above: `always()` now runs this on every GREEN run
+      # too, where it never ran before, so an upload-side fault (network,
+      # artifact quota) would newly be able to fail a clean build. An
+      # artifact upload must never be able to fail the gate it's meant to
+      # give evidence for.
+      - name: Upload Playwright report (web, always -- empty on a fully clean run)
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: apps/web/test-results
+          path: |
+            apps/web/test-results
+            apps/web/playwright-report
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Build admin
@@ -238,12 +260,22 @@ jobs:
         continue-on-error: true
         run: pnpm --filter @bmpl/admin test:e2e
 
-      - name: Upload Playwright report (admin, only when it failed)
-        if: steps.e2e-admin.outcome == 'failure'
+      # Same gap, same fix as web's own upload step above -- see that
+      # comment for why `always()` + ignore-missing replaces an
+      # outcome=='failure' condition a recovered flake would never trip.
+      # Same reasoning as web's own upload step above -- scoped to this
+      # upload step only, so a flake in the evidence collector can't become
+      # a flake in the gate.
+      - name: Upload Playwright report (admin, always -- empty on a fully clean run)
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-admin
-          path: apps/admin/test-results
+          path: |
+            apps/admin/test-results
+            apps/admin/playwright-report
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Typecheck mobile

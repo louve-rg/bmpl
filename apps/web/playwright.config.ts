@@ -36,7 +36,11 @@ export default defineConfig({
   // FAILED. A local run gets no retry: a developer needs the raw
   // first-failure signal, not a second attempt that quietly passes.
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list']],
+  // FIN-BROWSER-STEP: the `html` reporter is what ci.yml's "Upload Playwright
+  // report" step actually uploads now (it already names apps/web/playwright-
+  // report as a path). `open: 'never'` keeps CI from trying to launch a
+  // browser to show it.
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
