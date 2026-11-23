@@ -29,7 +29,9 @@ export default defineConfig({
   // run gets no retry: a developer needs the raw first-failure signal, not
   // a second attempt that quietly passes.
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list']],
+  // FIN-BROWSER-STEP: same reasoning as apps/web's own config -- the `html`
+  // reporter is what ci.yml's admin "Upload Playwright report" step uploads.
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
