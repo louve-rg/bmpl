@@ -498,6 +498,31 @@ describe('SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG — a departed leg is no long
     expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
     expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {})).status).toBe(201);
   });
+
+  /**
+   * This fix's own consequence: once accept is refused on an already-
+   * departed leg, operatorAcceptedAt can never be set on it, so the
+   * carrier's own arrive() (gated on that column) can never pass either —
+   * the carrier is now permanently locked out of recording custody on a
+   * leg it never accepted, which is correct (a non-consenting operator
+   * should not be the one closing the loop). That makes the staff door the
+   * ONLY remaining way out for this exact shape, and the worst possible
+   * failure here is MDF-1074's own shape: a parcel stuck forever with no
+   * door left to move it. Staff must still retain both depart AND arrive
+   * on a leg its operator never accepted and never will.
+   */
+  it('staff retains BOTH depart and arrive on a leg its operator never accepted — the only door this shape has left', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/arrive`, {})).status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(after.departedAt).not.toBeNull();
+    expect(after.arrivedAt).not.toBeNull();
+    expect(after.operatorAcceptedAt).toBeNull();
+  });
 });
 
 describe('self-service scope — own membership and route claim/release', () => {
