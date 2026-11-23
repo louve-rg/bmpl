@@ -15,11 +15,17 @@
  * `flagException` already used for the identical class of race (MDF-223):
  * `shipmentLeg.updateMany` keyed on exactly the fields the guard above just
  * read, refusing (409) when the row no longer matches by the time the write
- * runs. The acceptance shape this suite proves for all four fixed methods:
+ * runs. The acceptance shape this suite proves for all five fixed methods:
  * concurrent callers produce exactly ONE winner, ONE custody row (where the
  * method appends one at all), ONE audit row, one terminal timestamp — and
  * every loser gets a real refusal, not a silent no-op that still looks like
  * success.
+ *
+ * A fifth method, `recordCollection` (SHIP-RECORDCOLLECTION-CONCURRENT),
+ * carried the identical defect and was found after the other four already
+ * merged — it is the worst of the five because it is the LAST step of a
+ * parcel's life: 3 concurrent collects with the right code gave 3x 201,
+ * 3 HUB->RECIPIENT custody rows and 3 SHIPMENT_LEG_HANDOFF audit rows.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -137,6 +143,47 @@ async function pickupPinFor(legId: string) {
 const custodyCount = (legId: string) => ctx.prisma.custodyEvent.count({ where: { shipmentLegId: legId } });
 const auditCount = (action: string, legId: string) =>
   ctx.prisma.auditLog.count({ where: { action: action as never, newValue: { path: ['legId'], equals: legId } } });
+const custodyCountByShipment = (shipmentId: string) => ctx.prisma.custodyEvent.count({ where: { shipmentId } });
+const auditCountByShipment = (action: string, shipmentId: string) =>
+  ctx.prisma.auditLog.count({ where: { action: action as never, newValue: { path: ['shipmentId'], equals: shipmentId } } });
+
+/** DOOR_TO_HUB: ends AT the destination hub, no LAST_MILE — the journey
+ *  closes with recordCollection, never a door handoff. */
+async function bookDoorToHub() {
+  const r = await post(customer, 'shipping', {
+    service: 'DOOR_TO_HUB',
+    origin: { district: 'STANN_CREEK', city: 'Placencia', address: '1 Sidewalk', name: 'Sender', phone: '501-2223333' },
+    destination: { hubId: hub.MUN, name: 'Recipient', phone: '501-4445555' },
+    preferredMode: 'AIR',
+    description: 'One box',
+    payWithWallet: true,
+  });
+  expect(r.status).toBe(201);
+  return r.body;
+}
+
+async function handoffPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } })).handoffPin!;
+}
+
+/** Books a DOOR_TO_HUB shipment and admin-drives it all the way to
+ *  AWAITING_COLLECTION — admin start+handoff for FIRST_MILE (no driver
+ *  needed), admin depart+arrive+handoff for the one LINE_HAUL hop — same
+ *  shape as terminal-collection-code-recipient.integration.spec.ts's own
+ *  completeFirstMileAsAdmin/driveToAwaitingCollection. */
+async function bookedAwaitingCollection() {
+  const booked = await bookDoorToHub();
+  const first = (await legs(booked.id)).find((l) => l.kind === 'FIRST_MILE')!;
+  expect((await post(admin, `admin/logistics/legs/${first.id}/start`, {})).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: await handoffPinFor(first.id), receivedByName: 'Counter staff' })).status).toBe(201);
+  const lineHaul = (await legs(booked.id)).find((l) => l.kind === 'LINE_HAUL')!;
+  expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`, {})).status).toBe(201);
+  const done = await post(admin, `admin/logistics/legs/${lineHaul.id}/handoff`, { pin: await handoffPinFor(lineHaul.id), receivedByName: 'Counter staff' });
+  expect(done.status).toBe(201);
+  expect(done.body.status).toBe('AWAITING_COLLECTION');
+  return booked;
+}
 
 beforeAll(async () => {
   ctx = await bootApp();
@@ -310,5 +357,41 @@ describe('arriveLeg: concurrent arrivals on one IN_PROGRESS line-haul leg (the o
     expect(leg.arrivedAt).not.toBeNull();
     expect(await custodyCount(haul.id)).toBe(custodyBeforeArrive); // unchanged — arrive appends none
     expect(await auditCount('SHIPMENT_LEG_ARRIVED', haul.id)).toBe(1);
+  });
+});
+
+describe('recordCollection: concurrent collections on one AWAITING_COLLECTION shipment (SHIP-RECORDCOLLECTION-CONCURRENT)', () => {
+  it('exactly one winner, one HUB->RECIPIENT custody row, one SHIPMENT_LEG_HANDOFF audit row, losers refuse — never 429', async () => {
+    const booked = await bookedAwaitingCollection();
+    const code = (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id }, select: { collectionPin: true } })).collectionPin!;
+    const custodyBefore = await custodyCountByShipment(booked.id);
+    // The fixture's own two admin handoffs (FIRST_MILE + LINE_HAUL) already
+    // wrote their own SHIPMENT_LEG_HANDOFF rows via transition() before
+    // collect() is ever called — the action name is reused, so the count
+    // must be a delta against that baseline, not an absolute.
+    const handoffAuditBefore = await auditCountByShipment('SHIPMENT_LEG_HANDOFF', booked.id);
+
+    const responses = await Promise.all(
+      Array.from({ length: N }, () =>
+        post(admin, `admin/logistics/shipments/${booked.id}/collect`, { collectedByName: 'Recipient', code }),
+      ),
+    );
+    const wins = responses.filter((r) => r.status === 201);
+    const losses = responses.filter((r) => r.status !== 201);
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(N - 1);
+    // Trap Stanley caught: a 429 is the rate limiter, not the conditional
+    // claim — a test that only checked "the losers failed" would pass
+    // against completely unguarded code if it happened to hit the
+    // throttle instead. Assert the CODE, never 429.
+    for (const r of losses) {
+      expect(r.status).not.toBe(429);
+      expect([400, 409]).toContain(r.status);
+    }
+
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: booked.id } });
+    expect(shipment.collectedAt).not.toBeNull();
+    expect(await custodyCountByShipment(booked.id)).toBe(custodyBefore + 1);
+    expect(await auditCountByShipment('SHIPMENT_LEG_HANDOFF', booked.id)).toBe(handoffAuditBefore + 1);
   });
 });
