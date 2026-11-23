@@ -42,15 +42,32 @@ async function mount() {
   return container;
 }
 
-/** Stubs fetch so the original call AND the silent refresh both 401 --
- *  exactly the condition lib/api.ts's 401 handler notifies on. */
+/** Stubs fetch so the original call AND the silent refresh both 401, with a
+ *  real session-death message from refresh -- exactly the condition
+ *  lib/api.ts's 401 handler notifies on (WEB-FALSE-SESSION-EXPIRED: not just
+ *  "refresh also 401s", since an anonymous visitor's refresh 401s too, with
+ *  "No refresh token provided." -- see stubNeverHadASession below). */
 function stubExpiredSession() {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith('/auth/refresh')) return jsonResponse(401, { message: 'No refresh token provided.' });
+      if (url.endsWith('/auth/refresh')) return jsonResponse(401, { message: 'Session expired. Please sign in again.' });
       return jsonResponse(401, { message: 'Session is no longer valid.' });
+    }),
+  );
+}
+
+/** WEB-FALSE-SESSION-EXPIRED: an anonymous visitor who never signed in --
+ *  the original call 401s (correctly, no auth), and refresh 401s with the
+ *  API's own exact "no cookie at all" message, never a real-expiry one. */
+function stubNeverHadASession() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/auth/refresh')) return jsonResponse(401, { message: 'No refresh token provided.' });
+      return jsonResponse(401, { message: 'Unauthorized' });
     }),
   );
 }
@@ -87,5 +104,16 @@ describe('SessionExpiredBanner', () => {
     });
     expect(el.textContent).toContain('Your session expired');
     expect(window.location.pathname).toBe(before);
+  });
+
+  it('stays empty for an anonymous visitor whose cold-load call 401s with no session to have expired', async () => {
+    const el = await mount();
+    stubNeverHadASession();
+
+    await act(async () => {
+      await api.get('/cart').catch(() => {});
+    });
+
+    expect(el.textContent).toBe('');
   });
 });

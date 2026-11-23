@@ -94,13 +94,27 @@ describe('errorMessage', () => {
  * only once the one silent refresh this module already attempts has ALSO
  * failed -- never on the first 401, and never for an `/auth/*` call's own
  * 401 (login/register refusing bad credentials has no session to expire).
+ *
+ * WEB-FALSE-SESSION-EXPIRED (god, 2026-11-23): that rule was necessary but
+ * not sufficient. Several nav-level components (cart/saved/me/recommendations)
+ * call auth-gated endpoints unconditionally on every page load regardless of
+ * login state. For a completely anonymous visitor, the original 401 is real
+ * (correct -- they are not logged in), but the refresh attempt ALSO 401s with
+ * the API's own exact "No refresh token provided." (auth.controller.ts:117)
+ * -- the old code notified here anyway, telling someone who never signed in
+ * that their SESSION expired. A genuinely dead session fails refresh with a
+ * DIFFERENT message (session.service.ts:89/92, e.g. "Session expired. Please
+ * sign in again."), which is the one real distinguishing signal available.
+ * The test below that used to assert on "No refresh token provided." as if
+ * it were a real expiry has been corrected to use that real message instead
+ * -- it was encoding the bug as the spec.
  */
 describe('web api session-expiry notification', () => {
   afterEach(() => {
     onSessionExpired(null);
   });
 
-  it('notifies once the silent refresh also fails, with the original 401 message still thrown', async () => {
+  it('notifies once the silent refresh also fails for a genuinely dead session, with the original 401 message still thrown', async () => {
     const listener = vi.fn();
     onSessionExpired(listener);
     vi.stubGlobal(
@@ -108,7 +122,7 @@ describe('web api session-expiry notification', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         return url.endsWith('/auth/refresh')
-          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          ? jsonResponse(401, { message: 'Session expired. Please sign in again.' })
           : jsonResponse(401, { message: 'Session is no longer valid.' });
       }),
     );
@@ -118,6 +132,26 @@ describe('web api session-expiry notification', () => {
       message: 'Session is no longer valid.',
     } satisfies Partial<ApiError>);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT notify an anonymous visitor on a cold load, where refresh fails because there was never a session to begin with', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        return url.endsWith('/auth/refresh')
+          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          : jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    // The original call's own 401 still surfaces normally -- this is about
+    // suppressing the FALSE "your session expired" notice, not swallowing
+    // the error entirely.
+    await expect(api.get('/cart')).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it('does not notify when the silent refresh succeeds', async () => {
@@ -157,7 +191,7 @@ describe('web api session-expiry notification', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('also notifies on an upload (uploadBinary has its own 401/refresh handling)', async () => {
+  it('also notifies on an upload for a genuinely dead session (uploadBinary has its own 401/refresh handling)', async () => {
     const listener = vi.fn();
     onSessionExpired(listener);
     vi.stubGlobal(
@@ -165,7 +199,7 @@ describe('web api session-expiry notification', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         return url.endsWith('/auth/refresh')
-          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          ? jsonResponse(401, { message: 'Session expired. Please sign in again.' })
           : jsonResponse(401, { message: 'Session is no longer valid.' });
       }),
     );
@@ -174,5 +208,24 @@ describe('web api session-expiry notification', () => {
       status: 401,
     } satisfies Partial<ApiError>);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT notify an upload attempt that never had a session either', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        return url.endsWith('/auth/refresh')
+          ? jsonResponse(401, { message: 'No refresh token provided.' })
+          : jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    await expect(api.upload('/products/images', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({
+      status: 401,
+    } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
   });
 });
