@@ -544,7 +544,10 @@ describe('account deletion — refusals', () => {
       },
     });
     const vehicle = await ctx.prisma.driverVehicle.create({
-      data: { driverProfileId: driver.id, type: 'CAR', make: 'Toyota', model: 'Hilux', licencePlate: 'REAL-PLATE-1' },
+      data: {
+        driverProfileId: driver.id, type: 'CAR', make: 'Toyota', model: 'Hilux', licencePlate: 'REAL-PLATE-1',
+        registrationNumber: 'REAL-REG-1', insuranceProvider: 'Real Insurer', insurancePolicyNumber: 'REAL-POLICY-1',
+      },
     });
     const paxDriver = await ctx.prisma.passengerDriverProfile.create({
       data: {
@@ -560,7 +563,10 @@ describe('account deletion — refusals', () => {
     // MDF-949: this account's OWN passenger vehicle — the passenger-transport
     // equivalent of the DriverVehicle below. Must be anonymized the same way.
     const paxVehicle = await ctx.prisma.passengerVehicle.create({
-      data: { ownerDriverProfileId: paxDriver.id, type: 'CAR', make: 'Honda', model: 'Civic', licencePlate: 'REAL-PAX-PLATE-1', seatCapacity: 3 },
+      data: {
+        ownerDriverProfileId: paxDriver.id, type: 'CAR', make: 'Honda', model: 'Civic', licencePlate: 'REAL-PAX-PLATE-1', seatCapacity: 3,
+        registrationNumber: 'REAL-PAX-REG-1', insuranceProvider: 'Real Pax Insurer', insurancePolicyNumber: 'REAL-PAX-POLICY-1',
+      },
     });
 
     // Defect 1 (acceptance): a COMPLETED delivery this driver already
@@ -586,7 +592,7 @@ describe('account deletion — refusals', () => {
       data: { userId, preferredName: 'Real Seeker', legalName: 'Real Seeker Legal', contactEmail: 'seeker@example.bz', contactPhone: '6650014' },
     });
     const vendor = await ctx.prisma.vendorProfile.create({
-      data: { userId, businessName: 'Full Sweep Store', slug: 'full-sweep-store', contactEmail: 'fullsweep@example.bz', approvalStatus: 'APPROVED' },
+      data: { userId, businessName: 'Full Sweep Store', slug: 'full-sweep-store', contactEmail: 'fullsweep@example.bz', contactPhone: '6650021', approvalStatus: 'APPROVED' },
     });
     const location = await ctx.prisma.vendorLocation.create({
       data: { vendorProfileId: vendor.id, label: 'Main', addressLine1: '456 Real Ave', city: 'Belize City', district: 'BELIZE' },
@@ -703,7 +709,9 @@ describe('account deletion — refusals', () => {
     expect(driverAfter.phone).toBe('REMOVED');
     expect(driverAfter.homeAddress).toBeNull();
     expect(driverAfter.latitude).toBeNull();
+    expect(driverAfter.longitude).toBeNull();
     expect(driverAfter.emergencyContactName).toBeNull();
+    expect(driverAfter.emergencyContactPhone).toBeNull();
     expect(driverAfter.licenceNumber).toBe(`DELETED-${driver.id}`);
     expect(driverAfter.profilePhotoKey).toBeNull();
     expect(driverAfter.isActive).toBe(false);
@@ -711,10 +719,14 @@ describe('account deletion — refusals', () => {
 
     const vehicleAfter = await ctx.prisma.driverVehicle.findUniqueOrThrow({ where: { id: vehicle.id } });
     expect(vehicleAfter.licencePlate).toBe(`DELETED-${vehicle.id}`);
+    expect(vehicleAfter.registrationNumber).toBeNull();
+    expect(vehicleAfter.insuranceProvider).toBeNull();
+    expect(vehicleAfter.insurancePolicyNumber).toBeNull();
 
     const paxDriverAfter = await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { id: paxDriver.id } });
     expect(paxDriverAfter.legalName).toBe('Deleted Driver');
     expect(paxDriverAfter.displayName).toBe('Deleted Driver');
+    expect(paxDriverAfter.phone).toBe('REMOVED');
     expect(paxDriverAfter.licenceNumber).toBe(`DELETED-${paxDriver.id}`);
     expect(paxDriverAfter.isActive).toBe(false);
 
@@ -722,6 +734,9 @@ describe('account deletion — refusals', () => {
     // treatment as DriverVehicle.
     const paxVehicleAfter = await ctx.prisma.passengerVehicle.findUniqueOrThrow({ where: { id: paxVehicle.id } });
     expect(paxVehicleAfter.licencePlate).toBe(`DELETED-${paxVehicle.id}`);
+    expect(paxVehicleAfter.registrationNumber).toBeNull();
+    expect(paxVehicleAfter.insuranceProvider).toBeNull();
+    expect(paxVehicleAfter.insurancePolicyNumber).toBeNull();
 
     // MDF-949: a fleet vehicle this account's business owns, but which a
     // SEPARATE still-active driver is assigned to, is left completely
