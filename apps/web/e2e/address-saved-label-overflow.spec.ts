@@ -73,20 +73,29 @@ async function openSavedAddressConfirmation(page: Page) {
 }
 
 /**
- * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): this spec failed once
- * in CI -- `Error: locator.click: Test timeout of 30000ms exceeded`, waiting
- * on the Delivery radio label at 375px -- and the 30000ms in that message is
- * the TEST's own global timeout (playwright.config.ts), not an action wait,
- * so raising only the click's own timeout would not have helped: the test
- * dies at 30s regardless of what any inner wait is still doing. Every call
- * this page makes (/api/cart, /api/wallet, /api/addresses) is already
- * page.route()-mocked above -- there is no real backend in the critical
- * path, so this is not backend latency. In the SAME run, this exact spec
- * passed clean at the other four widths, and on the very next CI run it
- * passed clean at all five -- this is single-worker CI runner variance
- * (whatever else is on the box as this suite's ~151st-test-in-a-row render
- * happens to land), not a slow product or a missing mock. Raising the TEST
- * timeout to 60s gives that variance room without touching any assertion.
+ * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): observed twice in CI,
+ * both times at exactly 375px, never the other four widths -- `locator.click:
+ * Test timeout exceeded` waiting on the Delivery radio label. The 60s
+ * test.setTimeout() below did NOT prevent the second occurrence: it ran the
+ * full 60 seconds before giving up, which is itself evidence against "give it
+ * more time" as the fix. The trace artifact from that second run showed why:
+ * across the whole 60 seconds every asset the page requested (document,
+ * Next's client-bootstrap JS/CSS chunks, stylesheet, logo) came back HTTP
+ * 200, there was no /api/cart request at all -- not pending, not failed,
+ * never sent -- and a second, unrelated component (Header's own /me effect)
+ * also never fired in the same frame. Zero console messages, zero page
+ * errors; the screencast kept producing frames, so the renderer was alive,
+ * but the DOM never changed between the first frame and the one Playwright
+ * gave up on. Client-side JS execution did not get a turn for that tab for
+ * most of a minute, in two unrelated components at once -- environmental,
+ * not a defect in anything this page does, but the low-level cause (runner
+ * CPU quota, a long renderer pause, something else tab-specific) is not
+ * pinned from what the trace captured. The next three tests in the SAME
+ * worker ran at roughly a second each, immediately after. `retries:
+ * process.env.CI ? 1 : 0` in playwright.config.ts is the actual mitigation --
+ * a stall that clears in three seconds and cannot be reproduced is exactly
+ * what a single retry is for; the 60s raise stays because reverting it costs
+ * a PR for nothing, not because it fixed this.
  */
 test.describe('AddressField saved-address confirmation never widens the page on a long label', () => {
   for (const width of WIDTHS) {

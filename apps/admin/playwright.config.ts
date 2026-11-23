@@ -21,7 +21,14 @@ export default defineConfig({
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // MDF-906: CI-only, not a continue-on-error-style swallow. A test that
+  // fails then passes on retry is reported FLAKY, not silently dropped --
+  // the occurrence stays visible in the run output and the apps/web
+  // 10-consecutive-run gate on the browser step now requires zero FLAKY
+  // too, not just zero FAILED (same shape here, for consistency). A local
+  // run gets no retry: a developer needs the raw first-failure signal, not
+  // a second attempt that quietly passes.
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   use: {
     baseURL: BASE_URL,

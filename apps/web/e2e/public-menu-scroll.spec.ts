@@ -32,16 +32,22 @@ async function centreOfPanel(page: Page) {
 
 /**
  * MDF-906 (CI-BROWSER-SPECS-FAIL-INSTEAD-OF-SKIPPING): a test in this file
- * failed once in a local full-suite run with the test's own 30000ms global
- * timeout exceeded -- not an action wait, so raising only a locator/click
- * timeout would not help; the test dies at 30s regardless of what any inner
- * wait is still doing. This page has no backend dependency at all -- no API
- * call, no login, just `/` -- so there is no real-backend latency to blame.
- * CI itself has never reproduced the failure; it is single-worker CI/local
- * runner variance (whatever else is on the box as this page's render and
- * mouse-wheel interaction happen to land), not a slow product. Raising the
- * TEST timeout to 60s gives that variance room without touching any
- * assertion.
+ * failed once, in a LOCAL full-suite run only -- CI itself has never
+ * reproduced it, and that local run's own trace was lost before anyone
+ * thought to preserve it, so the cause here is not pinned. A different spec
+ * in this same CI step, address-saved-label-overflow.spec.ts, failed twice in
+ * CI with the identical shape (a locator wait that ran out its full test
+ * timeout with no action ever becoming possible); its trace showed client-
+ * side JS not getting a turn for most of a minute, in two unrelated
+ * components at once, with every network request returning 200 and zero
+ * console/page errors -- environmental, not a defect in that page's code,
+ * though the low-level cause (runner CPU quota, a long renderer pause,
+ * something else tab-specific) was not pinned either. This file's own
+ * failure is consistent with the same failure class, not confirmed to be it.
+ * `retries: process.env.CI ? 1 : 0` in playwright.config.ts is the actual
+ * mitigation for a stall of that shape; the 60s test.setTimeout() below
+ * stays because reverting it costs a PR for nothing, not because either
+ * raise fixed anything observed here.
  */
 test.describe('public mobile menu on a short phone', () => {
   test('the open menu fits the screen', async ({ page }) => {
