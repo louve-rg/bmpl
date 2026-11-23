@@ -64,6 +64,29 @@ const walletAccountOf = (userId: string) => ctx.prisma.walletAccount.findFirstOr
 const transferCountFor = (userId: string) =>
   ctx.prisma.walletTransaction.count({ where: { type: 'TRANSFER', entries: { some: { account: { userId } } } } });
 
+/** Builds a real HELD-not-yet-AUTHORIZED hold against `buyer` for a fixed
+ *  8,000-minor-unit vendor order — same fixture shape as the 'held' test
+ *  below, factored out so the boundary test can run it against two
+ *  separately-funded senders. Returns the hold amount in minor units. */
+async function placeHeldHold(tag: string, buyer: { cookies: string[]; userId: string; email: string }) {
+  const vendor = await registerCustomer(`xfer_v_${tag}_${uniq()}@example.bz`);
+  await ctx.prisma.userRole.create({ data: { userId: vendor.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
+  const vp = await post(vendor.cookies, 'vendor/profile', { businessName: `HoldShop${uniq()}`, contactEmail: vendor.email });
+  await post(vendor.cookies, 'vendor/profile/submit', {}).expect(201);
+  await post(admin, `admin/vendors/${vp.body.profile.id}/approve`, {}).expect(201);
+  await request(ctx.server).patch('/api/vendor/profile').set('Cookie', vendor.cookies).send({ storeStatus: 'OPEN' }).expect(200);
+  const product = await post(vendor.cookies, 'vendor/products', { categoryId, title: `Hold ${uniq()}`, sku: `HOLD${uniq()}`, priceMinor: 8_000 });
+  expect(product.status).toBe(201);
+  await post(vendor.cookies, `vendor/products/${product.body.id}/inventory/adjust`, { delta: 5, reason: 'RESTOCK' }).expect(201);
+  await post(buyer.cookies, 'cart/items', { productId: product.body.id, quantity: 1 }).expect(201);
+  const order = await post(buyer.cookies, 'checkout', {});
+  expect(order.status).toBe(201);
+  const payment = await get(buyer.cookies, 'payments');
+  const hold = await ctx.prisma.walletHold.findFirstOrThrow({ where: { paymentId: payment.body[0].id } });
+  expect(hold.status).toBe('HELD');
+  return Number(hold.amountMinor);
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -324,6 +347,43 @@ describe('POST /wallet/transfers', () => {
     expect(entriesAfter).toBe(entriesBefore);
     const balanceAfter = await balanceOf(sender.userId, sender.cookies);
     expect(balanceAfter.availableMinor).toBe(balanceBefore.availableMinor);
+    expect(await transferCountFor(sender.userId)).toBe(0);
+  });
+
+  // transferAvailableMinor() is a deliberate duplicate of summary()'s
+  // available-balance arithmetic — reading via `tx`, inside the lock,
+  // rather than the outside-transaction summary() call that would defeat
+  // it (see the HELD-hold test above for why the duplicate exists at all).
+  // A duplicate can drift. These two tests pin the duplicate to the exact
+  // number summary() shows the customer: the boundary itself must behave
+  // identically for both formulas, or one of these fails immediately and
+  // names which side moved.
+  it('transferring EXACTLY the availableMinor summary() shows the customer succeeds, leaving available at zero', async () => {
+    const { sender, recipient } = await pair('boundary-exact');
+    await fund(sender.userId, 10_000);
+    await placeHeldHold('boundary-exact', sender);
+
+    const shown = await balanceOf(sender.userId, sender.cookies); // summary()'s own number
+    expect(shown.availableMinor).toBe(2_000);
+
+    const r = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: shown.availableMinor, idempotencyKey: randomUUID() });
+    expect(r.status).toBe(201);
+
+    const after = await balanceOf(sender.userId, sender.cookies);
+    expect(after.availableMinor).toBe(0);
+  });
+
+  it('transferring summary()\'s availableMinor PLUS ONE minor unit is refused — the other side of the same boundary', async () => {
+    const { sender, recipient } = await pair('boundary-over');
+    await fund(sender.userId, 10_000);
+    await placeHeldHold('boundary-over', sender);
+
+    const shown = await balanceOf(sender.userId, sender.cookies);
+    expect(shown.availableMinor).toBe(2_000);
+
+    const r = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: shown.availableMinor + 1, idempotencyKey: randomUUID() });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/available balance/i);
     expect(await transferCountFor(sender.userId)).toBe(0);
   });
 });
