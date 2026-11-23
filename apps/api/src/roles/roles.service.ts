@@ -87,7 +87,7 @@ export class RolesService {
    */
   async presignDocument(userId: string, roleCode: RoleCode, fileName: string, contentType: string) {
     const key = this.storage.buildKey(STORAGE_PREFIX.applicationDocs(userId, roleCode), fileName);
-    return this.storage.presignUpload(key, contentType);
+    return this.storage.presignUpload(key, contentType, 'private');
   }
 
   /**
@@ -140,7 +140,7 @@ export class RolesService {
     const resolved: Array<{ storageKey: string; contentType: string; sizeBytes: number }> = [];
     for (const key of keys) {
       this.storage.assertKeyInNamespace(key, prefix);
-      const meta = await this.storage.headObject(key);
+      const meta = await this.storage.headObject(key, 'private');
       if (!meta) {
         throw new BadRequestException('An uploaded document could not be found in storage.');
       }

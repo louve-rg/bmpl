@@ -27,7 +27,7 @@ import {
   type RoleCode,
 } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageService } from '../storage/storage.service';
+import { StorageService, type Visibility } from '../storage/storage.service';
 import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AvatarVisionService } from '../storage/avatar-vision.service';
 import { AuditService } from '../audit/audit.service';
@@ -307,7 +307,7 @@ export class UsersService {
 
     if (verdict.decision === 'APPROVE') {
       const previousKey = await this.replaceApprovedAvatar(userId, key, verdict.faceScore);
-      await this.deleteQuietly(previousKey);
+      await this.deleteQuietly(previousKey, 'private');
       await this.audit.record({
         action: 'AVATAR_AUTO_APPROVED',
         actorId: userId,
@@ -335,7 +335,7 @@ export class UsersService {
       },
     });
     // A superseded pending upload is dead weight in the bucket.
-    await this.deleteQuietly(previous.avatarPendingKey);
+    await this.deleteQuietly(previous.avatarPendingKey, 'private');
     await this.audit.record({
       action: 'AVATAR_SUBMITTED',
       actorId: userId,
@@ -382,7 +382,7 @@ export class UsersService {
     });
     // moderated=false: cosmetic, so it never reaches the public avatar route.
     const previousKey = await this.replaceApprovedAvatar(userId, key, null, undefined, false);
-    await this.deleteQuietly(previousKey);
+    await this.deleteQuietly(previousKey, 'private');
     await this.audit.record({
       action: 'AVATAR_AUTO_APPROVED',
       actorId: userId,
@@ -411,8 +411,8 @@ export class UsersService {
         avatarReviewedById: null,
       },
     });
-    await this.deleteQuietly(user.avatarKey);
-    await this.deleteQuietly(user.avatarPendingKey);
+    await this.deleteQuietly(user.avatarKey, 'private');
+    await this.deleteQuietly(user.avatarPendingKey, 'private');
     await this.audit.record({ action: 'AVATAR_REMOVED', actorId: userId, targetUserId: userId });
     return this.getMe(userId);
   }
@@ -587,10 +587,10 @@ export class UsersService {
     });
     // Storage deletes are best-effort and not transactional — same pattern
     // as removeAvatar above.
-    await this.deleteQuietly(previous.avatarKey);
-    await this.deleteQuietly(previous.avatarPendingKey);
-    for (const key of previous.orphanedKeys) {
-      await this.deleteQuietly(key);
+    await this.deleteQuietly(previous.avatarKey, 'private');
+    await this.deleteQuietly(previous.avatarPendingKey, 'private');
+    for (const orphan of previous.orphanedKeys) {
+      await this.deleteQuietly(orphan.key, orphan.visibility);
     }
 
     // A stolen session must not survive the account it belonged to being
@@ -718,6 +718,19 @@ export class UsersService {
    *   left exactly as it was — the thread still belongs to both sides,
    *   just no longer carries this account's own verbatim text once gone.)
    *
+   * ACCT-DELETE-STORAGE-OBJECTS — a sixth gap, found while fixing the
+   * `StorageService` default-visibility bug this card was actually about:
+   * `VendorProfile.logoKey`/`bannerKey`, `EmployerProfile.logoKey`/
+   * `bannerKey`, `AgencyProfile.logoKey`/`bannerKey` and
+   * `PassengerProviderProfile.logoKey` were never referenced by this method
+   * at all — not nulled, not queued for deletion. Each is a PUBLIC-bucket
+   * key (schema.prisma), fixed below the same way `RealEstateAgentProfile.
+   * photoKey` already was: null the column, queue the key with
+   * `visibility: 'public'`. Unlike `businessName`/`companyName`/`name`
+   * (the business's own public identity, left alone above), a logo or
+   * banner image is a file someone uploaded — the same standing as the
+   * avatar/photo keys this method already treats as personal data.
+   *
    * MDF-949 — full re-trace against `schema.prisma` (not this method) as the
    * source of truth, prompted by two families the delivery report recorded
    * as "checked? no": NOTIFICATIONS, and whatever else outside the
@@ -795,13 +808,22 @@ export class UsersService {
    * it is nulled, the same scoped exception this method makes for
    * `Conversation.subject`'s copy inside `CONVERSATION_CREATED`'s payload.
    *
-   * Returns every storage key this pass orphaned, so the caller deletes the
-   * actual objects AFTER the transaction commits — best-effort, same
-   * pattern as the avatar cleanup in {@link deleteAccount} and
-   * {@link removeAvatar}.
+   * Returns every storage key this pass orphaned, EACH PAIRED WITH THE
+   * BUCKET IT WAS ACTUALLY UPLOADED TO, so the caller deletes the actual
+   * objects AFTER the transaction commits — best-effort, same pattern as the
+   * avatar cleanup in {@link deleteAccount} and {@link removeAvatar}.
+   * ACCT-DELETE-STORAGE-OBJECTS: this list is a genuine MIX of private
+   * (identity documents, driver/job-seeker photos) and public (vendor/
+   * employer/agency/agent logos, banners and photos) keys — `deleteObject`'s
+   * `visibility` argument is required precisely so this method cannot get
+   * away with tagging all of them 'private' and silently missing the public
+   * ones.
    */
-  private async anonymizePersonalData(tx: Prisma.TransactionClient, userId: string): Promise<string[]> {
-    const orphanedKeys: string[] = [];
+  private async anonymizePersonalData(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<Array<{ key: string; visibility: Visibility }>> {
+    const orphanedKeys: Array<{ key: string; visibility: Visibility }> = [];
 
     await tx.savedAddress.deleteMany({ where: { userId } });
 
@@ -810,7 +832,7 @@ export class UsersService {
       select: { id: true, profilePhotoKey: true },
     });
     if (driver) {
-      if (driver.profilePhotoKey) orphanedKeys.push(driver.profilePhotoKey);
+      if (driver.profilePhotoKey) orphanedKeys.push({ key: driver.profilePhotoKey, visibility: 'private' });
       await tx.driverProfile.update({
         where: { id: driver.id },
         data: {
@@ -834,7 +856,7 @@ export class UsersService {
         select: { id: true, photoKeys: true },
       });
       for (const vehicle of vehicles) {
-        orphanedKeys.push(...vehicle.photoKeys);
+        orphanedKeys.push(...vehicle.photoKeys.map((key) => ({ key, visibility: 'private' as const })));
         await tx.driverVehicle.update({
           where: { id: vehicle.id },
           data: {
@@ -853,7 +875,7 @@ export class UsersService {
       select: { id: true, profilePhotoKey: true },
     });
     if (passengerDriver) {
-      if (passengerDriver.profilePhotoKey) orphanedKeys.push(passengerDriver.profilePhotoKey);
+      if (passengerDriver.profilePhotoKey) orphanedKeys.push({ key: passengerDriver.profilePhotoKey, visibility: 'private' });
       await tx.passengerDriverProfile.update({
         where: { id: passengerDriver.id },
         data: {
@@ -890,7 +912,7 @@ export class UsersService {
         select: { id: true, photoKeys: true },
       });
       for (const vehicle of ownedPassengerVehicles) {
-        orphanedKeys.push(...vehicle.photoKeys);
+        orphanedKeys.push(...vehicle.photoKeys.map((key) => ({ key, visibility: 'private' as const })));
         await tx.passengerVehicle.update({
           where: { id: vehicle.id },
           data: {
@@ -909,7 +931,7 @@ export class UsersService {
       select: { id: true, photoKey: true },
     });
     if (jobSeeker) {
-      if (jobSeeker.photoKey) orphanedKeys.push(jobSeeker.photoKey);
+      if (jobSeeker.photoKey) orphanedKeys.push({ key: jobSeeker.photoKey, visibility: 'private' });
       await tx.jobSeekerProfile.update({
         where: { id: jobSeeker.id },
         // ACCT-DELETE-PII-REMNANTS: headline/summary were left on purpose in
@@ -924,11 +946,20 @@ export class UsersService {
       });
     }
 
-    const employer = await tx.employerProfile.findUnique({ where: { userId }, select: { id: true } });
+    // ACCT-DELETE-STORAGE-OBJECTS: logoKey/bannerKey were never anonymized at
+    // all before this — the business's own public-bucket branding images
+    // outlived the person who uploaded them, with no DB row or storage
+    // cleanup pointing back at them. Both are PUBLIC-bucket keys (schema.prisma).
+    const employer = await tx.employerProfile.findUnique({
+      where: { userId },
+      select: { id: true, logoKey: true, bannerKey: true },
+    });
     if (employer) {
+      if (employer.logoKey) orphanedKeys.push({ key: employer.logoKey, visibility: 'public' });
+      if (employer.bannerKey) orphanedKeys.push({ key: employer.bannerKey, visibility: 'public' });
       await tx.employerProfile.update({
         where: { id: employer.id },
-        data: { contactEmail: `deleted-${employer.id}@deleted.bmpl.internal`, contactPhone: null },
+        data: { contactEmail: `deleted-${employer.id}@deleted.bmpl.internal`, contactPhone: null, logoKey: null, bannerKey: null },
       });
     }
 
@@ -945,26 +976,37 @@ export class UsersService {
       select: { id: true, photoKey: true },
     });
     if (agent) {
-      if (agent.photoKey) orphanedKeys.push(agent.photoKey);
+      // RealEstateAgentProfile.photoKey is a PUBLIC-bucket key — see schema.prisma.
+      if (agent.photoKey) orphanedKeys.push({ key: agent.photoKey, visibility: 'public' });
       await tx.realEstateAgentProfile.update({
         where: { id: agent.id },
         data: { displayName: 'Deleted Agent', legalName: null, phone: null, email: null, photoKey: null, isActive: false },
       });
     }
 
-    const agency = await tx.agencyProfile.findUnique({ where: { managerUserId: userId }, select: { id: true } });
+    const agency = await tx.agencyProfile.findUnique({
+      where: { managerUserId: userId },
+      select: { id: true, logoKey: true, bannerKey: true },
+    });
     if (agency) {
+      if (agency.logoKey) orphanedKeys.push({ key: agency.logoKey, visibility: 'public' });
+      if (agency.bannerKey) orphanedKeys.push({ key: agency.bannerKey, visibility: 'public' });
       await tx.agencyProfile.update({
         where: { id: agency.id },
-        data: { contactEmail: `deleted-agency-${agency.id}@deleted.bmpl.internal`, contactPhone: null },
+        data: { contactEmail: `deleted-agency-${agency.id}@deleted.bmpl.internal`, contactPhone: null, logoKey: null, bannerKey: null },
       });
     }
 
-    const vendorForLocations = await tx.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
+    const vendorForLocations = await tx.vendorProfile.findUnique({
+      where: { userId },
+      select: { id: true, logoKey: true, bannerKey: true },
+    });
     if (vendorForLocations) {
+      if (vendorForLocations.logoKey) orphanedKeys.push({ key: vendorForLocations.logoKey, visibility: 'public' });
+      if (vendorForLocations.bannerKey) orphanedKeys.push({ key: vendorForLocations.bannerKey, visibility: 'public' });
       await tx.vendorProfile.update({
         where: { id: vendorForLocations.id },
-        data: { contactEmail: `deleted-${vendorForLocations.id}@deleted.bmpl.internal`, contactPhone: null },
+        data: { contactEmail: `deleted-${vendorForLocations.id}@deleted.bmpl.internal`, contactPhone: null, logoKey: null, bannerKey: null },
       });
       await tx.vendorLocation.updateMany({
         where: { vendorProfileId: vendorForLocations.id },
@@ -972,8 +1014,14 @@ export class UsersService {
       });
     }
 
-    const passengerProviderForAnon = await tx.passengerProviderProfile.findUnique({ where: { userId }, select: { id: true } });
+    const passengerProviderForAnon = await tx.passengerProviderProfile.findUnique({
+      where: { userId },
+      select: { id: true, logoKey: true },
+    });
     if (passengerProviderForAnon) {
+      if (passengerProviderForAnon.logoKey) {
+        orphanedKeys.push({ key: passengerProviderForAnon.logoKey, visibility: 'public' });
+      }
       await tx.passengerProviderProfile.update({
         where: { id: passengerProviderForAnon.id },
         data: {
@@ -981,6 +1029,7 @@ export class UsersService {
           contactPhone: null,
           addressLine1: null,
           operatingLicenceNumber: null,
+          logoKey: null,
         },
       });
     }
@@ -1008,7 +1057,7 @@ export class UsersService {
         select: { id: true, storageKey: true },
       });
       for (const doc of documents) {
-        orphanedKeys.push(doc.storageKey);
+        orphanedKeys.push({ key: doc.storageKey, visibility: 'private' });
         await tx.roleApplicationDocument.update({ where: { id: doc.id }, data: { storageKey: `deleted-${doc.id}`, label: null } });
       }
     }
@@ -1017,7 +1066,7 @@ export class UsersService {
     if (jobSeeker) {
       const resumes = await tx.jobSeekerResume.findMany({ where: { profileId: jobSeeker.id }, select: { id: true, storageKey: true } });
       for (const resume of resumes) {
-        orphanedKeys.push(resume.storageKey);
+        orphanedKeys.push({ key: resume.storageKey, visibility: 'private' });
         await tx.jobSeekerResume.update({ where: { id: resume.id }, data: { storageKey: `deleted-${resume.id}`, label: 'Removed' } });
       }
     }
@@ -1034,7 +1083,7 @@ export class UsersService {
           select: { id: true, storageKey: true },
         });
         for (const doc of propertyDocs) {
-          orphanedKeys.push(doc.storageKey);
+          orphanedKeys.push({ key: doc.storageKey, visibility: 'private' });
           await tx.propertyDocument.update({ where: { id: doc.id }, data: { storageKey: `deleted-${doc.id}`, label: null } });
         }
       }
@@ -1423,7 +1472,7 @@ export class UsersService {
       throw new BadRequestException('This user has no profile picture awaiting review.');
     }
     const previousKey = await this.replaceApprovedAvatar(userId, user.avatarPendingKey, null, adminId);
-    await this.deleteQuietly(previousKey);
+    await this.deleteQuietly(previousKey, 'private');
     await this.audit.record({ action: 'AVATAR_APPROVED', actorId: adminId, targetUserId: userId });
   }
 
@@ -1448,7 +1497,7 @@ export class UsersService {
         avatarReviewedById: adminId,
       },
     });
-    await this.deleteQuietly(user.avatarPendingKey);
+    await this.deleteQuietly(user.avatarPendingKey, 'private');
     await this.audit.record({
       action: 'AVATAR_REJECTED',
       actorId: adminId,
@@ -1493,9 +1542,10 @@ export class UsersService {
    * Signed download URL, or null when storage is unavailable. A missing picture
    * must degrade to initials, never to a 500 on a page that merely shows a name.
    */
+  /** Avatars are always uploaded to the PRIVATE bucket — see `ingest.image(..., 'private', ...)` above. */
   private async signedOrNull(key: string): Promise<string | null> {
     try {
-      return (await this.storage.presignDownload(key)).url;
+      return (await this.storage.presignDownload(key, 'private')).url;
     } catch {
       return null;
     }
@@ -1512,11 +1562,19 @@ export class UsersService {
    * nothing left to find it by and no way to retry. Log the key so an
    * operator can still purge it by hand — a storage key is not personal
    * data, there is nothing in it to protect by staying silent.
+   *
+   * ACCT-DELETE-STORAGE-OBJECTS: `visibility` is required, not defaulted to
+   * 'private' as it used to be. `anonymizePersonalData`'s orphaned keys are a
+   * MIX of private documents/photos and public logos/banners/agent photos —
+   * a caller that let this default silently issue every delete against the
+   * private bucket would hit a real one (a public key deleted via the
+   * private bucket is a 200 that deletes nothing, indistinguishable from a
+   * real delete) rather than fail loudly.
    */
-  private async deleteQuietly(key: string | null | undefined): Promise<void> {
+  private async deleteQuietly(key: string | null | undefined, visibility: Visibility): Promise<void> {
     if (!key) return;
     try {
-      await this.storage.deleteObject(key);
+      await this.storage.deleteObject(key, visibility);
     } catch (err) {
       this.logger.warn(`Failed to delete orphaned storage object, key=${key}: ${err instanceof Error ? err.message : err}`);
     }
