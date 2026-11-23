@@ -69,11 +69,44 @@ import {
 
 let ctx: TestContext;
 let admin: string[];
+let categoryId: string;
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+
+// ---- Marketplace-checkout fixtures, needed only by the HELD/AUTHORIZED hold
+// pin test below (god, WALLET-SUMMARY-HOLDS-SUBTRACTION follow-up). Same
+// pattern wallet-authorization.integration.spec.ts and
+// wallet-summary-hold-subtraction.integration.spec.ts already use. ----
+async function makeMarketplaceVendor(label: string) {
+  const s = uniq();
+  const v = await registerCustomer(`p2p_vendor_${label}_${s}@example.com`);
+  await ctx.prisma.userRole.create({ data: { userId: v.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
+  const profile = await post(v.cookies, 'vendor/profile', { businessName: `P2PHoldShop ${s}`, contactEmail: v.email });
+  await post(v.cookies, 'vendor/profile/submit');
+  await post(admin, `admin/vendors/${profile.body.profile.id}/approve`, {});
+  await request(ctx.server).patch('/api/vendor/profile').set('Cookie', v.cookies).send({ storeStatus: 'OPEN' });
+  return { cookies: v.cookies, vpId: profile.body.profile.id as string };
+}
+async function createMarketplaceProduct(cookies: string[], priceMinor: number) {
+  const s = uniq();
+  const res = await post(cookies, 'vendor/products', { categoryId, title: `P2PHeld ${s}`, sku: `P2PHELD-${s}`, priceMinor });
+  expect(res.status).toBe(201);
+  return res.body.id as string;
+}
+/** Checks out one product and returns the Payment row for the order just placed, identified by its known, distinct amount — not "the first payment", since this fixture places more than one. */
+async function checkoutOneProduct(customerCookies: string[], priceMinor: number) {
+  const vendor = await makeMarketplaceVendor(`pin-${priceMinor}`);
+  const productId = await createMarketplaceProduct(vendor.cookies, priceMinor);
+  await post(vendor.cookies, `vendor/products/${productId}/inventory/adjust`, { delta: 5, reason: 'RESTOCK' });
+  await post(customerCookies, 'cart/items', { productId, quantity: 1 }).expect(201);
+  const checkoutRes = await post(customerCookies, 'checkout', {});
+  expect(checkoutRes.status).toBe(201);
+  return ctx.prisma.payment.findFirstOrThrow({ where: { amountMinor: BigInt(priceMinor) }, orderBy: { createdAt: 'desc' } });
+}
+const authorize = (cookies: string[], paymentId: string) => post(cookies, `payments/${paymentId}/authorize`, {});
 
 /**
  * Skip (not pass) a Section B/C case when WALLET-P2P-API isn't reachable yet.
@@ -227,6 +260,8 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }).then((r) => cookiesOf(r));
+  const cat = await post(admin, 'admin/categories', { name: 'P2PHeld' });
+  categoryId = cat.body.id;
 });
 afterAll(async () => {
   await ctx.app.close();
@@ -298,6 +333,59 @@ describe('A. baseline — invariants hold under existing (non-transfer) money mo
     const correct = await derivedBalance(wallet.id);
     await ctx.prisma.walletAccount.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: correct } });
     expect(await findCacheMismatches()).toEqual([]);
+  });
+
+  /**
+   * WALLET-SUMMARY-HOLDS-SUBTRACTION regression pin (god, 2026-11-23T22-41):
+   * nothing currently proves summary()'s hold arithmetic, and Pam's transfer
+   * is about to depend on it debiting AVAILABLE balance correctly. Pins both
+   * halves of wallet.service.ts:510's own comment against hand-computed
+   * numbers: a HELD hold is subtracted (money hasn't moved yet, so it must be
+   * reserved out of what's spendable); an AUTHORIZED hold is NOT subtracted
+   * again (it already left the ledger balance via its own escrow debit —
+   * subtracting it twice would show a customer less money than they have).
+   *
+   * Independently confirmed once already with a single HELD hold, by actual
+   * measurement rather than reading the comment (PR #894,
+   * wallet-summary-hold-subtraction.integration.spec.ts: raw=6000, hold=3500,
+   * availableMinor=2500). This pin covers the harder case — ONE of each hold
+   * type on the SAME wallet at once — which that test did not exercise.
+   */
+  it('summary() pin: one HELD hold is subtracted, one AUTHORIZED hold is not subtracted again', async () => {
+    const c = await makeTestCustomer('pin-holds');
+    await fund(c.cookies, 100_00); // BZ$100.00 = 10000 minor
+    const wallet = await walletOf(c.userId);
+
+    // Order A: BZ$20.00, left HELD (checked out, never authorized).
+    const paymentA = await checkoutOneProduct(c.cookies, 20_00);
+    // Order B: BZ$15.00, checked out THEN authorized — the HELD hold payments
+    // creates at checkout transitions to AUTHORIZED and posts a real
+    // customer→escrow debit, which is what must leave the ledger balance.
+    const paymentB = await checkoutOneProduct(c.cookies, 15_00);
+    const authRes = await authorize(c.cookies, paymentB.id);
+    expect(authRes.status).toBe(201);
+
+    const holdA = await ctx.prisma.walletHold.findFirstOrThrow({ where: { paymentId: paymentA.id } });
+    const holdB = await ctx.prisma.walletHold.findFirstOrThrow({ where: { paymentId: paymentB.id } });
+    expect(holdA.status).toBe('HELD');
+    expect(holdB.status).toBe('AUTHORIZED');
+
+    const raw = await derivedBalance(wallet.id);
+    // Hand-computed: funded 10000, order B's 1500 already moved to escrow via
+    // authorize => ledger balance is 10000 - 1500 = 8500. Order A's 2000 is
+    // still sitting in the balance (HELD never touches the ledger).
+    expect(raw).toBe(8500n);
+
+    const summaryRes = await get(c.cookies, 'wallet').expect(200);
+    const { availableMinor, onHoldMinor, totalMinor } = summaryRes.body;
+    // availableMinor = raw(8500) - HELD(2000) = 6500. AUTHORIZED's 1500 is NOT
+    // subtracted a second time — it already left `raw` via the escrow debit.
+    expect(availableMinor, `raw=${raw}, holdA=${holdA.amountMinor}, holdB=${holdB.amountMinor}`).toBe(6500);
+    // onHoldMinor = backedSoft(HELD, 2000) + escrowed(AUTHORIZED, 1500) = 3500.
+    expect(onHoldMinor).toBe(3500);
+    // totalMinor = raw(8500) + escrowed(1500) = 10000 — exactly what was
+    // funded; neither hold changes how much the customer actually owns.
+    expect(totalMinor).toBe(10000);
   });
 });
 
@@ -418,6 +506,43 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
 
     const byStranger = await get(stranger.cookies, `wallet/transfers/${id}`);
     expect(byStranger.status).toBe(404); // not 403 — a 403 would confirm the transfer exists
+  });
+
+  /**
+   * WALLET-SUMMARY-HOLDS-SUBTRACTION regression, assertion 2 (god,
+   * 2026-11-23T22-41): a transfer must debit AVAILABLE balance, not raw
+   * ledger balance — PR #894 (summary-hold-subtraction) and the pin test in
+   * Section A above both confirm summary() itself does this subtraction
+   * correctly, but neither one touches the transfer endpoint. This is the
+   * case that actually matters for Pam's feature: a HELD hold is reserving
+   * money a transfer must not be able to spend out from under it, because
+   * doing so would strand the payment the hold belongs to — exactly the
+   * class of bug the floor has live evidence of (Stanley's three stranded
+   * holds).
+   */
+  it('a HELD hold blocks a transfer from spending the money it is reserving', async (t) => {
+    const sender = await makeTestCustomer('xfer-sender-held-block');
+    const recipient = await makeTestCustomer('xfer-recipient-held-block');
+    await fund(sender.cookies, 100_00); // BZ$100.00
+    const senderWallet = await walletOf(sender.userId);
+    await checkoutOneProduct(sender.cookies, 80_00); // HELD hold for BZ$80.00, never authorized
+
+    const rawBefore = await derivedBalance(senderWallet.id);
+    expect(rawBefore).toBe(10000n); // HELD never touches the ledger — confirms the setup, not the claim under test
+
+    const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (lookup.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — HELD-hold-blocks-transfer case NOT TESTED');
+    }
+    // Available is 10000 - 8000(HELD) = 2000. A transfer of 5000 must be
+    // refused even though RAW balance (10000) could cover it.
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 50_00, idempotencyKey: uniq() });
+    expect(res.status, `expected the transfer to be refused — summary().availableMinor should be 2000, raw balance is ${rawBefore}`).toBe(400);
+
+    // The ledger is untouched: no new transaction, balance unchanged.
+    const rawAfter = await derivedBalance(senderWallet.id);
+    expect(rawAfter).toBe(rawBefore);
+    await assertAllInvariantsHold('after a refused HELD-hold-blocked transfer attempt');
   });
 });
 
