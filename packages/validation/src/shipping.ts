@@ -518,6 +518,19 @@ export const resolveLegExceptionSchema = z.object({
 export type ResolveLegExceptionInput = z.infer<typeof resolveLegExceptionSchema>;
 
 /**
+ * MDF-1074: recovering a leg stranded because its own shipment was already
+ * resolved another way (returned/rerouted) — `resolveLegExceptionSchema`'s
+ * RESUME/RELEASE_DRIVER both deliberately refuse that case (the original
+ * attempt is over), so this is its own, narrower action. No `resolution`
+ * field, same reasoning `unlockShipmentCollectionSchema` already gives: there
+ * is only one way out of this specific dead end.
+ */
+export const recoverStrandedLegSchema = z.object({
+  note: z.string().trim().min(4, 'Say why this leg is being recovered.').max(500),
+});
+export type RecoverStrandedLegInput = z.infer<typeof recoverStrandedLegSchema>;
+
+/**
  * Confirming a return-to-sender (BMPL-183/343). Deliberately its own action,
  * not a third `resolveLegExceptionSchema` resolution: RESUME/RELEASE_DRIVER
  * restore the SAME leg to an active state and create no charge, while a

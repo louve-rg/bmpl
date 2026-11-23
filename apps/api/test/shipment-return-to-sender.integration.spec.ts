@@ -582,3 +582,171 @@ describe('returnToSender — now only PREPARES (BMPL-375): staff action alone mu
     expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
   });
 });
+
+/**
+ * MDF-1074: the one way out of a leg stranded because its OWN shipment was
+ * already resolved another way (RETURNED here) while the original leg still
+ * reads EXCEPTION and still holds the driver who was carrying it when it was
+ * flagged — `resolve-exception` refuses both its resolutions the instant a
+ * return exists (owner Ruling, tested above), so this driver had no legal
+ * exit at all before this action existed.
+ */
+const recoverStranded = (legId: string, body: object = { note: 'Shipment already returned; releasing the stranded driver.' }) =>
+  post(admin, `admin/logistics/legs/${legId}/recover-stranded`, body);
+
+describe('recoverStrandedLeg (MDF-1074) — the way out once resolveException itself refuses', () => {
+  it('releases the driver, writes one new audit row and one new custody event, and never touches status/exceptionAt/exceptionReason', async () => {
+    const { shipment, legId, driver } = await walkToLastMileException();
+    await addReverseRoutes();
+    expect((await returnToSender(legId)).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
+
+    const before = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(before.status).toBe('EXCEPTION');
+    expect(before.assignedDriverProfileId).toBe(driver.driverProfileId);
+    const shipmentRow = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+    expect(shipmentRow.status).toBe('RETURNED');
+
+    const auditsBefore = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_STRANDED_RECOVERED' } });
+    const custodyBefore = await ctx.prisma.custodyEvent.count({ where: { shipmentLegId: legId } });
+
+    const r = await recoverStranded(legId);
+    expect(r.status).toBe(201);
+    expect(r.body.releasedDriverProfileId).toBe(driver.driverProfileId);
+    expect(r.body.alreadyRecovered).toBe(false);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    // The historical record — never rewritten.
+    expect(after.status).toBe('EXCEPTION');
+    expect(after.exceptionAt).toEqual(before.exceptionAt);
+    expect(after.exceptionReason).toBe(before.exceptionReason);
+    // The driver assignment — released.
+    expect(after.assignedDriverProfileId).toBeNull();
+    expect(after.assignedVehicleId).toBeNull();
+    expect(after.courierStatus).toBeNull();
+    expect(after.driverQueuePosition).toBeNull();
+    expect(after.strandedRecoveredAt).not.toBeNull();
+
+    const audits = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_STRANDED_RECOVERED' } });
+    expect(audits.length).toBe(auditsBefore + 1);
+    const mine = audits.find((a) => (a.newValue as { legId?: string }).legId === legId)!;
+    expect(mine).toBeTruthy();
+    expect((mine.newValue as { releasedDriverProfileId?: string }).releasedDriverProfileId).toBe(driver.driverProfileId);
+    expect((mine.newValue as { resolvedVia?: string }).resolvedVia).toBe('RETURNED');
+
+    const custody = await ctx.prisma.custodyEvent.findMany({ where: { shipmentLegId: legId }, orderBy: { occurredAt: 'desc' } });
+    expect(custody.length).toBe(custodyBefore + 1);
+    expect(custody[0]!.verification).toBe('OVERRIDDEN');
+
+    // MDF-927/SHIP-927 standing floor: the customer-facing shape never
+    // carries a staff-entered exception reason to anyone outside staff.
+    expect(JSON.stringify(r.body)).not.toContain(before.exceptionReason);
+  });
+
+  it('is idempotent: a second call returns the same success, with no second audit row, no second custody event, and no settlement call', async () => {
+    const { shipment, legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    expect((await returnToSender(legId)).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
+
+    const first = await recoverStranded(legId);
+    expect(first.status).toBe(201);
+    expect(first.body.alreadyRecovered).toBe(false);
+
+    // Captured AFTER the first (real) call, not before it — the leg already
+    // carries its own HUB->DRIVER custody row from release-to-courier, so
+    // the baseline for "did the SECOND call write anything new" is right
+    // after the first recovery, not zero.
+    const auditsAfterFirst = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_STRANDED_RECOVERED' } })).filter(
+      (a) => (a.newValue as { legId?: string }).legId === legId,
+    );
+    expect(auditsAfterFirst).toHaveLength(1);
+    const custodyAfterFirst = await ctx.prisma.custodyEvent.count({ where: { shipmentLegId: legId } });
+    const paymentsBefore = await ctx.prisma.payment.count();
+
+    const second = await recoverStranded(legId);
+    expect(second.status).toBe(201);
+    expect(second.body.alreadyRecovered).toBe(true);
+
+    const auditsAfterSecond = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_STRANDED_RECOVERED' } })).filter(
+      (a) => (a.newValue as { legId?: string }).legId === legId,
+    );
+    expect(auditsAfterSecond).toHaveLength(1);
+    expect(await ctx.prisma.custodyEvent.count({ where: { shipmentLegId: legId } })).toBe(custodyAfterFirst);
+    // Nothing settlement/money-shaped runs here at all.
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+  });
+
+  it('refuses a role that only holds logistics.operate\'s sibling permissions but not logistics.operate itself', async () => {
+    const { shipment, legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    expect((await returnToSender(legId)).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
+
+    const noPermission = await seedLimitedAdmin(ctx.prisma, `rstaff_${uniq()}@example.com`, ['logistics.read']);
+    const noPermissionCookies = cookiesOf(
+      await request(ctx.server).post('/api/auth/login').send({ email: noPermission.email, password: noPermission.password }),
+    );
+    const refused = await post(noPermissionCookies, `admin/logistics/legs/${legId}/recover-stranded`, { note: 'Should not be allowed.' });
+    expect(refused.status).toBe(403);
+
+    // Unchanged — the refused attempt touched nothing.
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(row.strandedRecoveredAt).toBeNull();
+    expect(row.assignedDriverProfileId).not.toBeNull();
+
+    const operator = await seedLimitedAdmin(ctx.prisma, `roperator2_${uniq()}@example.com`, ['logistics.operate']);
+    const operatorCookies = cookiesOf(
+      await request(ctx.server).post('/api/auth/login').send({ email: operator.email, password: operator.password }),
+    );
+    const allowed = await post(operatorCookies, `admin/logistics/legs/${legId}/recover-stranded`, { note: 'logistics.operate is enough.' });
+    expect(allowed.status).toBe(201);
+  });
+
+  it('refuses a leg that is not an eligible stranded dead end — in exception, but its shipment has not been returned or rerouted', async () => {
+    const driver = await makeDriver();
+    const shipment = await book();
+    const first = (await legs(shipment.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await assign(first.id, driver)).status).toBe(201);
+    expect((await flag(first.id, 'Vehicle broke down at the pickup.')).status).toBe(201);
+
+    const r = await recoverStranded(first.id);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/not been resolved another way/i);
+
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(row.strandedRecoveredAt).toBeNull();
+    expect(row.assignedDriverProfileId).toBe(driver.driverProfileId);
+  });
+
+  it('refuses a leg that is not even in exception, naming that as the reason rather than the return/reroute check', async () => {
+    const driver = await makeDriver();
+    const shipment = await book();
+    const first = (await legs(shipment.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await assign(first.id, driver)).status).toBe(201);
+
+    const r = await recoverStranded(first.id);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/not in exception/i);
+  });
+
+  it('the legitimate path beside it — an ordinary exception with no return/reroute still resolves normally through resolve-exception, untouched by this new action', async () => {
+    const driver = await makeDriver();
+    const shipment = await book();
+    const first = (await legs(shipment.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await assign(first.id, driver)).status).toBe(201);
+    expect((await flag(first.id, 'Vehicle broke down at the pickup.')).status).toBe(201);
+
+    // recover-stranded is NOT the way out of an ordinary, still-live exception.
+    expect((await recoverStranded(first.id)).status).toBe(400);
+
+    const resolved = await post(admin, `admin/logistics/legs/${first.id}/resolve-exception`, {
+      resolution: 'RELEASE_DRIVER',
+      note: 'Driver confirmed the vehicle issue; releasing back to the pool.',
+    });
+    expect(resolved.status).toBe(201);
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(row.status).toBe('READY');
+    expect(row.assignedDriverProfileId).toBeNull();
+  });
+});

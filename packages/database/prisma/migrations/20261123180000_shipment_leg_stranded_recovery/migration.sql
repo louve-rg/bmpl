@@ -1,0 +1,41 @@
+-- MDF-1074: a stranded leg had no legal way back.
+--
+-- `resolveException` already refuses BOTH its resolutions (RESUME and
+-- RELEASE_DRIVER) the instant a shipment's `returnShipment`/`rerouteShipment`
+-- is set -- correctly, because the original attempt is over and resuming or
+-- re-queuing it would contradict a transport service the customer has
+-- already paid for via the new shipment. But that guard is unconditional, so
+-- once a shipment is RETURNED/REROUTED while one of its legs still reads
+-- EXCEPTION, that leg's driver assignment (if any) had no exit at all: not
+-- RESUME (nothing to resume), not RELEASE_DRIVER (the guard above refuses
+-- it), not a second booking (the leg itself is not re-created). The driver
+-- kept a dead leg on their plate forever -- work they could neither do nor
+-- decline.
+--
+-- The owner's resolution, scoped narrowly to exactly this dead end: a
+-- leg whose shipment has already been resolved another way may have its
+-- driver assignment administratively released. `status`/`exceptionAt`/
+-- `exceptionReason` are NEVER rewritten -- the leg stays the honest
+-- historical record of what actually happened to it, per the owner's own
+-- "do not silently rewrite operational history" instruction and the
+-- existing, deliberate shape `shipment-return-to-sender.integration.spec.ts`
+-- already asserts. `strandedRecoveredAt` is therefore its own column, not a
+-- reuse of `exceptionAt`/`completedAt`/any existing marker -- exactly the
+-- same reasoning `courierStatusBeforeException` was given its own column
+-- for (see that migration): overloading an existing column that already
+-- means one specific thing, to also mean "recovery already ran", would make
+-- it lie the rest of the time it is read for its real purpose. It is also
+-- the idempotency key ShipmentService.recoverStrandedLeg reads to tell a
+-- fresh recovery from a harmless repeat, since the columns it actually
+-- clears (assignedDriverProfileId, courierStatus, ...) can legitimately
+-- already be null for an unrelated reason (the leg had no driver, or none
+-- yet, when it was flagged).
+--
+-- Nullable and additive: a pure loosening, no backfill, no existing row
+-- affected -- null for every leg until the first recovery this feature ever
+-- runs.
+ALTER TABLE "shipment_legs" ADD COLUMN "strandedRecoveredAt" TIMESTAMP(3);
+
+-- New audit action for the recovery itself, idempotent so a re-run of this
+-- migration is safe.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_STRANDED_RECOVERED';

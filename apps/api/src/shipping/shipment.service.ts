@@ -50,6 +50,7 @@ import type {
   LegHandoffInput,
   LegPickupInput,
   LegScheduleInput,
+  RecoverStrandedLegInput,
   RerouteInput,
   ResolveLegExceptionInput,
   ReturnToSenderInput,
@@ -2989,6 +2990,141 @@ export class ShipmentService {
 
     const shipment = await this.prisma.shipment.findUniqueOrThrow({ where: { id: outcome.shipmentId }, include: SHIPMENT_INCLUDE });
     return this.serialize(shipment, { audience: 'STAFF' });
+  }
+
+  /**
+   * MDF-1074 design note (god, 2026-11-23): named and kept separate from
+   * `recoverStrandedLeg`'s own body on purpose. A second "stranded, no
+   * workflow out" shape is already on the floor — a cancelled shipment
+   * whose last custody event still sits at the terminal, so the terminal
+   * physically holds a parcel nobody's screen says what to do with — and it
+   * should be addable here as one more OR branch, without reopening the
+   * recovery action itself. Not built now; MDF-1074 stays scoped to the
+   * return/reroute shape it was carded for.
+   *
+   * True exactly when this leg's EXCEPTION can never be worked forward by
+   * anyone, for a reason that is NOT the driver's own next move — i.e. the
+   * leg is a genuine dead end, not merely an open exception still awaiting
+   * ordinary resolution via `resolveException`.
+   */
+  private isStrandedDeadEnd(leg: { status: LegStatus }, shipment: { status: ShipmentStatus }): boolean {
+    return leg.status === 'EXCEPTION' && (shipment.status === 'RETURNED' || shipment.status === 'REROUTED');
+  }
+
+  /**
+   * MDF-1074: the one way out of a leg stranded because its OWN shipment was
+   * already resolved another way (RETURNED/REROUTED) while this leg itself
+   * still reads EXCEPTION and may still hold a driver assignment nothing
+   * will ever dispatch again. `resolveException` above already, correctly,
+   * refuses BOTH its resolutions the instant a return/reroute exists (the
+   * original attempt is over — resuming or re-queuing it would contradict a
+   * transport service the customer has already paid for via the new
+   * shipment) — so this is the dead end that leaves, deliberately separate
+   * rather than a third resolution on that method.
+   *
+   * `status`/`exceptionAt`/`exceptionReason` are NEVER touched here — the
+   * owner's explicit instruction, and the same shape
+   * shipment-return-to-sender.integration.spec.ts already asserts for the
+   * original leg: it stays the honest historical record of what actually
+   * happened, never an edit target. Only the driver-assignment columns move.
+   *
+   * IDEMPOTENT: `strandedRecoveredAt` (not any of the columns it clears,
+   * which can legitimately already be null for an unrelated reason — no
+   * driver was ever assigned before the flag) is the one signal that a prior
+   * call, or a concurrent one that won the race on the conditional write
+   * below, already did this. A repeat returns the same success and writes
+   * nothing a second time: no second audit row, no second custody event —
+   * and, not that this method ever touches money, no settlement.
+   */
+  async recoverStrandedLeg(legId: string, input: RecoverStrandedLegInput, actor: { userId: string }) {
+    return this.prisma.$transaction(async (tx) => {
+      const leg = await tx.shipmentLeg.findUnique({
+        where: { id: legId },
+        include: { shipment: { select: { reference: true, status: true } } },
+      });
+      if (!leg) throw new NotFoundException('Leg not found.');
+      if (!this.isStrandedDeadEnd(leg, leg.shipment)) {
+        if (leg.status !== 'EXCEPTION') {
+          throw new BadRequestException('This leg is not in exception, so there is nothing to recover.');
+        }
+        throw new BadRequestException(
+          'This shipment has not been resolved another way yet (returned or rerouted) — use resolve-exception instead.',
+        );
+      }
+
+      if (leg.strandedRecoveredAt != null) {
+        return { legId: leg.id, shipmentId: leg.shipmentId, reference: leg.shipment.reference, releasedDriverProfileId: null as string | null, alreadyRecovered: true };
+      }
+
+      const releasedDriverProfileId = leg.assignedDriverProfileId;
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, strandedRecoveredAt: null },
+        data: {
+          strandedRecoveredAt: new Date(),
+          assignedDriverProfileId: null,
+          assignedVehicleId: null,
+          courierStatus: null,
+          courierStatusBeforeException: null,
+          offerExpiresAt: null,
+          driverQueuePosition: null,
+          acceptedAt: null,
+        },
+      });
+      if (claimed.count === 0) {
+        // A concurrent call won the race between the read above and this
+        // write — the driver has, in fact, already been released, by
+        // whichever call got there first. Same outcome, not a conflict.
+        return { legId: leg.id, shipmentId: leg.shipmentId, reference: leg.shipment.reference, releasedDriverProfileId: null as string | null, alreadyRecovered: true };
+      }
+
+      if (releasedDriverProfileId) {
+        await tx.shipmentLegOffer.updateMany({
+          where: { shipmentLegId: leg.id, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+          data: { status: 'CANCELLED', endedAt: new Date() },
+        });
+      }
+
+      // Append-only custody closing marker. Nothing physically moved, so
+      // fromHolder/toHolder repeat the last real holder on file — this
+      // record is the administrative closure of a dead leg, never a
+      // transfer, which `verification: 'OVERRIDDEN'` says plainly rather
+      // than claiming a verified handoff that never happened.
+      const lastCustody = await tx.custodyEvent.findFirst({
+        where: { shipmentId: leg.shipmentId },
+        orderBy: { occurredAt: 'desc' },
+        select: { toHolder: true },
+      });
+      const holder: CustodyHolder = lastCustody?.toHolder ?? 'SENDER';
+      await tx.custodyEvent.create({
+        data: {
+          shipmentId: leg.shipmentId,
+          shipmentLegId: leg.id,
+          fromHolder: holder,
+          toHolder: holder,
+          actorUserId: actor.userId,
+          verification: 'OVERRIDDEN',
+          note: `Stranded leg administratively closed: shipment ${leg.shipment.reference} was already resolved via ${leg.shipment.status}.`,
+        },
+      });
+
+      await this.audit.record(
+        {
+          action: 'SHIPMENT_LEG_STRANDED_RECOVERED',
+          actorId: actor.userId,
+          reason: input.note,
+          newValue: {
+            legId: leg.id,
+            shipmentId: leg.shipmentId,
+            reference: leg.shipment.reference,
+            resolvedVia: leg.shipment.status,
+            releasedDriverProfileId,
+          },
+        },
+        tx,
+      );
+
+      return { legId: leg.id, shipmentId: leg.shipmentId, reference: leg.shipment.reference, releasedDriverProfileId, alreadyRecovered: false };
+    });
   }
 
   /**

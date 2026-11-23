@@ -473,6 +473,7 @@ enum AuditAction {
   PASSENGER_TRIP_COMPLETED
   PASSENGER_AFFILIATION_CHANGED
   SHIPMENT_LEG_EXCEPTION_RESOLVED
+  SHIPMENT_LEG_STRANDED_RECOVERED
   SHIPMENT_RECIPIENT_LINKED
   SHIPMENT_RECIPIENT_CLAIM_FAILED
   SHIPMENT_RETURN_INITIATED
@@ -5584,6 +5585,16 @@ model ShipmentLeg {
   cancelledAt     DateTime?
   exceptionAt     DateTime?
   exceptionReason String?
+  /// MDF-1074: set once, by ShipmentService.recoverStrandedLeg, for a leg whose
+  /// own shipment has already been resolved another way (RETURNED/REROUTED)
+  /// while this leg itself still reads EXCEPTION and still holds a driver
+  /// assignment nothing will ever dispatch again. `status`/`exceptionAt`/
+  /// `exceptionReason` stay exactly as flagException wrote them — this leg is
+  /// the historical record of what actually happened, never rewritten — so
+  /// this column, not `status`, is what the resolver reads to know whether
+  /// the stranded driver has already been released: a second call with this
+  /// already set is a no-op repeat, not a second release.
+  strandedRecoveredAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
