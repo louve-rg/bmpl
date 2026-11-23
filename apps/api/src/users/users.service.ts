@@ -83,6 +83,23 @@ const LIVE_SHIPMENT_STATUSES: ShipmentStatus[] = [
 ];
 /** PassengerBooking states a provider still owes an answer or a seat to. */
 const OPEN_PASSENGER_BOOKING_STATUSES: PassengerBookingStatus[] = ['REQUESTED', 'CONFIRMED'];
+/** ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL: PassengerTrip states a
+ *  provider still owes a departure on — every status before the trip
+ *  reaches its own terminal COMPLETED/CANCELLED/EXCEPTION state. Broader
+ *  than {@link LIVE_PASSENGER_TRIP_STATUSES} (that one is the DRIVER's own
+ *  "taken on but not finished" shape, starting at ASSIGNED) because a trip
+ *  this PROVIDER is on the hook for is a real commitment before it even has
+ *  a driver — SCHEDULED and PENDING_ASSIGNMENT included — and the existing
+ *  open-booking check below only catches it once a rider has actually
+ *  booked a seat, which a scheduled departure with zero bookings yet never
+ *  will. */
+const OPEN_PASSENGER_PROVIDER_TRIP_STATUSES: PassengerTripStatus[] = [
+  'SCHEDULED',
+  'PENDING_ASSIGNMENT',
+  'ASSIGNED',
+  'EN_ROUTE_TO_PICKUP',
+  'IN_PROGRESS',
+];
 /** JobApplication states an employer still owes a decision to. */
 const OPEN_JOB_APPLICATION_STATUSES: JobApplicationStatus[] = [
   'SUBMITTED',
@@ -758,11 +775,12 @@ export class UsersService {
    *   `PassengerFleetAffiliation`, any of whom may be actively assigned to
    *   it right now — the same still-active-other-party reasoning round 4
    *   gave for not touching an agent-represented `PropertyDocument`.
-   *   `liveResponsibilities` has no check at all today for a
-   *   `PassengerProviderProfile` with active fleet/trip obligations; that is
-   *   a real gap, but a different one — a missing deletion-refusal business
-   *   rule, not a missed anonymization — and is reported rather than
-   *   invented here, same as the uncarded shipping-carrier-owner floor above.
+   *   `liveResponsibilities` now also refuses a `PassengerProviderProfile`
+   *   with an affiliated active fleet driver or a scheduled/in-progress
+   *   trip, even with zero open bookings (ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL)
+   *   — this comment previously said there was no check at all for that
+   *   shape, which went stale the moment the open-booking check below was
+   *   added for the narrower case; see `liveResponsibilities` itself.
    *
    * Surveyed and left alone, for the reasons already given above for a
    * similarly-shaped field, not re-explained per table: `RoleApplication.
@@ -1441,19 +1459,47 @@ export class UsersService {
       );
     }
 
-    // Passenger operator with an open booking — same shape as the vendor
-    // open-order check above, substituting PassengerBooking for VendorOrder.
+    // Passenger operator with an open booking, a scheduled/in-progress
+    // departure, or an affiliated active fleet driver —
+    // ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL. The open-booking check
+    // (same shape as the vendor open-order check above, substituting
+    // PassengerBooking for VendorOrder) misses two real shapes: a trip with
+    // zero riders booked yet is still a real commitment the moment it is
+    // SCHEDULED, not only once someone books a seat; and a fleet driver's
+    // own standing has nothing to do with bookings at all — this account is
+    // the one holder its PassengerFleetAffiliation names, the same "someone
+    // else depends on this row" reasoning the terminal-company
+    // manager-floor and super-admin anti-lockout guards above already
+    // apply, just never extended here until now.
     const passengerProvider = await this.prisma.passengerProviderProfile.findUnique({
       where: { userId },
       select: { id: true, businessName: true },
     });
     if (passengerProvider) {
-      const openBookings = await this.prisma.passengerBooking.count({
-        where: { status: { in: OPEN_PASSENGER_BOOKING_STATUSES }, trip: { providerProfileId: passengerProvider.id } },
-      });
+      const [openBookings, openTrips, activeFleetDrivers] = await Promise.all([
+        this.prisma.passengerBooking.count({
+          where: { status: { in: OPEN_PASSENGER_BOOKING_STATUSES }, trip: { providerProfileId: passengerProvider.id } },
+        }),
+        this.prisma.passengerTrip.count({
+          where: { providerProfileId: passengerProvider.id, status: { in: OPEN_PASSENGER_PROVIDER_TRIP_STATUSES } },
+        }),
+        this.prisma.passengerFleetAffiliation.count({
+          where: { providerProfileId: passengerProvider.id, status: 'ACCEPTED' },
+        }),
+      ]);
       if (openBookings > 0) {
         reasons.push(
           `Your transport operator "${passengerProvider.businessName}" has ${openBookings} booking${openBookings === 1 ? '' : 's'} still open. Complete or cancel ${openBookings === 1 ? 'it' : 'them'} before deleting your account.`,
+        );
+      }
+      if (openTrips > 0) {
+        reasons.push(
+          `Your transport operator "${passengerProvider.businessName}" has ${openTrips} scheduled or in-progress departure${openTrips === 1 ? '' : 's'}. Complete or cancel ${openTrips === 1 ? 'it' : 'them'} before deleting your account.`,
+        );
+      }
+      if (activeFleetDrivers > 0) {
+        reasons.push(
+          `Your transport operator "${passengerProvider.businessName}" has ${activeFleetDrivers} affiliated fleet driver${activeFleetDrivers === 1 ? '' : 's'}. End ${activeFleetDrivers === 1 ? 'their affiliation' : 'their affiliations'} before deleting your account.`,
         );
       }
     }
