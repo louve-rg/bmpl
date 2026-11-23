@@ -16,7 +16,19 @@
  *      of WalletLedgerEntry rows").
  *   3. No USER account ends at a negative balance, under any sequence of
  *      transfers.
- *   4. Total money in the system is conserved across a transfer.
+ *   4. A transfer touches exactly two USER accounts and nothing else — no fee
+ *      skimmed to a SYSTEM_* account, no stray clearing/escrow leg, and the
+ *      sum over USER accounts only is unchanged. (God's correction,
+ *      2026-11-23: the ORIGINAL version of this invariant — "total money
+ *      across every account is conserved" — is VACUOUS once every account,
+ *      system ones included, is inside the sum: `assertBalanced()` already
+ *      guarantees that for ANY balanced transaction, so it would pass against
+ *      a transfer wired badly wrong, e.g. through a forbidden fee leg, as long
+ *      as that leg still balanced. Caught by my own run showing the "it grows
+ *      by the funded amount" version of this check was itself wrong for a
+ *      TOPUP, which is what surfaced the deeper problem in the original
+ *      card. This version is NOT implied by invariant 1 and can actually
+ *      fail.)
  *   5. isTest money and real money never merge into an unlabelled movement.
  *
  * Section A runs TODAY, against operations that already exist (TOPUP), and is
@@ -141,12 +153,43 @@ async function findNegativeUserBalances(): Promise<Array<{ accountId: string; us
   return bad;
 }
 
-/** Invariant 4: total money across every account in the system (real + test, summed separately must each be internally consistent). */
+/** Total money across EVERY account (system accounts included). Not invariant 4 — see its own comment — but still useful to confirm a non-transfer operation (a TOPUP) legitimately funds itself from a system clearing account rather than leaking money into nowhere. */
 async function totalAcrossAllAccounts(): Promise<bigint> {
   const accounts = await ctx.prisma.walletAccount.findMany({ select: { id: true } });
   let total = 0n;
   for (const a of accounts) total += await derivedBalance(a.id);
   return total;
+}
+
+/** The subtotal invariant 4 actually constrains: derived balance summed over USER accounts only. A transfer must leave this exactly unchanged. */
+async function totalAcrossUserAccounts(): Promise<bigint> {
+  const accounts = await ctx.prisma.walletAccount.findMany({ where: { type: 'USER' }, select: { id: true } });
+  let total = 0n;
+  for (const a of accounts) total += await derivedBalance(a.id);
+  return total;
+}
+
+/**
+ * Invariant 4 (corrected): every TRANSFER transaction touches EXACTLY two
+ * accounts and both are type USER. A third entry, or a USER↔SYSTEM leg, is
+ * how a fee, a stray clearing hop, or an escrow detour would show up — all
+ * forbidden by the owner's "no fee" ruling — and NONE of them would be
+ * caught by invariant 1 (assertBalanced has no opinion on account count or
+ * type, only that debits equal credits).
+ */
+async function findTransferLeakage(): Promise<Array<{ transactionId: string; entryCount: number; nonUserAccountIds: string[] }>> {
+  const transfers = await ctx.prisma.walletTransaction.findMany({
+    where: { type: 'TRANSFER' },
+    select: { id: true, entries: { select: { accountId: true, account: { select: { type: true } } } } },
+  });
+  const bad: Array<{ transactionId: string; entryCount: number; nonUserAccountIds: string[] }> = [];
+  for (const t of transfers) {
+    const nonUserAccountIds = t.entries.filter((e) => e.account.type !== 'USER').map((e) => e.accountId);
+    if (t.entries.length !== 2 || nonUserAccountIds.length > 0) {
+      bad.push({ transactionId: t.id, entryCount: t.entries.length, nonUserAccountIds });
+    }
+  }
+  return bad;
 }
 
 /** Invariant 5: a TRANSFER transaction's isTest flag, cross-checked against whether the money actually moving was test-funded on the sender's side. */
@@ -175,6 +218,7 @@ async function assertAllInvariantsHold(context: string) {
   expect(await findUnbalancedTransactions(), `invariant 1 (entries sum to zero) — ${context}`).toEqual([]);
   expect(await findCacheMismatches(), `invariant 2 (cachedBalanceMinor matches entries) — ${context}`).toEqual([]);
   expect(await findNegativeUserBalances(), `invariant 3 (no negative USER balance) — ${context}`).toEqual([]);
+  expect(await findTransferLeakage(), `invariant 4 (transfer touches exactly 2 USER accounts, nothing else) — ${context}`).toEqual([]);
 }
 
 beforeAll(async () => {
@@ -193,7 +237,7 @@ afterAll(async () => {
 // operations that exist TODAY, before a single transfer exists.
 // ============================================================================
 describe('A. baseline — invariants hold under existing (non-transfer) money movement', () => {
-  it('1,2,4: a batch of ordinary test-credit top-ups stays balanced, cache-accurate, and total-conserving', async () => {
+  it('1,2: a batch of ordinary test-credit top-ups stays balanced and cache-accurate (and leaks no money system-wide)', async () => {
     const totalBefore = await totalAcrossAllAccounts();
     const c1 = await makeTestCustomer('base1');
     const c2 = await makeTestCustomer('base2');
@@ -211,16 +255,17 @@ describe('A. baseline — invariants hold under existing (non-transfer) money mo
     expect(await derivedBalance(w2.id)).toBe(2500n);
     expect(await derivedBalance(w3.id)).toBe(500n);
 
-    // Invariant 4, directly, for a TOPUP specifically: a TOPUP funds itself
-    // from the SYSTEM_TOPUP_CLEARING account in the SAME transaction, and that
-    // clearing account is itself one of the accounts totalAcrossAllAccounts()
-    // sums — so the correct prediction is NO net change across the whole
-    // universe of accounts (money moved from clearing to the user, none was
-    // created from nowhere), the same guarantee invariant 1 gives per-
-    // transaction. (First run of this test wrongly asserted a +4000 delta,
-    // caught immediately by actually running it rather than assuming — see
-    // report to god.) A genuine net-new-money leak would show up here as a
-    // nonzero delta.
+    // NOT invariant 4 (that's specifically about transfers — see its own
+    // comment). This is invariant 1's corollary applied to the whole ledger:
+    // a TOPUP funds itself from SYSTEM_TOPUP_CLEARING in the SAME transaction,
+    // and that clearing account is itself one of the accounts
+    // totalAcrossAllAccounts() sums — so the correct prediction is NO net
+    // change across the whole universe of accounts (money moved from
+    // clearing to the user, none was created from nowhere). (First run of
+    // this test wrongly asserted a +4000 delta, caught immediately by
+    // actually running it rather than assuming — see report to god, which is
+    // also what surfaced that the ORIGINAL invariant-4 wording was vacuous.)
+    // A genuine net-new-money leak would show up here as a nonzero delta.
     const totalAfter = await totalAcrossAllAccounts();
     expect(totalAfter).toBe(totalBefore);
   });
@@ -281,11 +326,11 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     expect(missing.status).toBe(404);
   });
 
-  it('1,2,3,4: a single transfer debits the sender, credits the recipient, stays balanced and conserved', async (t) => {
+  it('1,2,3,4: a single transfer debits the sender, credits the recipient, touches no third account, and leaves the USER-only subtotal unchanged', async (t) => {
     const sender = await makeTestCustomer('xfer-sender-1');
     const recipient = await makeTestCustomer('xfer-recipient-1');
     await fund(sender.cookies, 50_00);
-    const totalBefore = await totalAcrossAllAccounts();
+    const userTotalBefore = await totalAcrossUserAccounts();
 
     const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
     if (lookup.status !== 200) {
@@ -304,7 +349,12 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     const recipientWallet = await walletOf(recipient.userId);
     expect(await derivedBalance(senderWallet.id)).toBe(3000n);
     expect(await derivedBalance(recipientWallet.id)).toBe(2000n);
-    expect(await totalAcrossAllAccounts()).toBe(totalBefore); // transfer moves money, creates none
+    // The real invariant-4 claim: USER-only subtotal unchanged (money moved
+    // between two customers), NOT "total across every account unchanged" —
+    // that broader version is vacuous, guaranteed by assertBalanced() alone.
+    expect(await totalAcrossUserAccounts()).toBe(userTotalBefore);
+    const txn = await ctx.prisma.walletTransaction.findUniqueOrThrow({ where: { id: res.body.transactionId }, include: { entries: true } });
+    expect(txn.entries).toHaveLength(2); // no fee, no stray system leg
   });
 
   it('idempotent replay of the identical key does not move money twice', async (t) => {
@@ -386,7 +436,7 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
       return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — drain race NOT TESTED');
     }
 
-    const totalBefore = await totalAcrossAllAccounts();
+    const userTotalBefore = await totalAcrossUserAccounts();
     const probe = await raceWithRequiredOverlap(
       ctx.prisma,
       lookups.map((l, i) => () => post(sender.cookies, 'wallet/transfers', { recipientUserId: l.body.recipientUserId, amountMinor: STAKE, idempotencyKey: uniq() }).then((r) => r.status)),
@@ -400,7 +450,7 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
     await assertAllInvariantsHold('after N-way drain race');
     const senderWallet = await walletOf(sender.userId);
     expect(await derivedBalance(senderWallet.id)).toBe(0n);
-    expect(await totalAcrossAllAccounts()).toBe(totalBefore); // money moved, none created
+    expect(await totalAcrossUserAccounts()).toBe(userTotalBefore); // money moved between USER accounts, none created, none skimmed
   });
 
   it('two SIMULTANEOUS OPPOSITE transfers (A→B and B→A): no deadlock/timeout, invariants hold afterward', async (t) => {
@@ -415,7 +465,7 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
       return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — opposite-transfer race NOT TESTED');
     }
 
-    const totalBefore = await totalAcrossAllAccounts();
+    const userTotalBefore = await totalAcrossUserAccounts();
     const DEADLOCK_TIMEOUT_MS = 15_000;
     const withTimeout = <T,>(p: Promise<T>, label: string) =>
       Promise.race([
@@ -446,6 +496,6 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
     // A sent 1500, received 1200 => net -300. B sent 1200, received 1500 => net +300.
     expect(await derivedBalance(walletA.id)).toBe(4000n - 300n);
     expect(await derivedBalance(walletB.id)).toBe(4000n + 300n);
-    expect(await totalAcrossAllAccounts()).toBe(totalBefore);
+    expect(await totalAcrossUserAccounts()).toBe(userTotalBefore); // net zero across the two customers, no third account touched
   });
 });
