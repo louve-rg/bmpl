@@ -129,6 +129,52 @@ export class PickupService {
   /**
    * Transition to PICKED_UP + finalize inventory exactly once, atomically.
    *
+   * ORDER-PICKUP-DOUBLE-FINALIZE: the ONLY exactly-once guard used to be an
+   * unlocked read of `inventoryFinalizedAt`, checked BEFORE
+   * `finalizeReservation`/`finalizeLocationReservation` ever take their own
+   * `FOR UPDATE` lock — and that lock is on the INVENTORY row, never on this
+   * vendor-order. Two concurrent `confirmPickup` calls with the same valid
+   * PIN (the PIN is never consumed/invalidated by verifyPin) both read
+   * `inventoryFinalizedAt: null` before either committed, so both ran the
+   * finalization loop: measured on a qty=2 order, {quantity:10,reserved:2}
+   * went to {quantity:6,reserved:0} — four units gone, two FULFILLED
+   * `InventoryChange` rows, both calls returning 201.
+   *
+   * Fixed by claiming the STATUS transition FIRST, via the same
+   * conditional-claim pattern `DriverJobService.confirmPickup` already uses
+   * for the identical class of race on the DELIVERY path (and every
+   * SHIP-LEG-CONCURRENT-WRITES fix tonight): `updateMany` re-asserts the
+   * exact status this call's own callers (`confirmPickup`,
+   * `adminConfirmPickup`) already checked, non-atomically, before calling
+   * here. Only one concurrent caller's `updateMany` can ever match — the
+   * loser never reaches the inventory finalization code at all, so
+   * `inventoryFinalizedAt`'s own unlocked read is no longer load-bearing for
+   * concurrency; it stays as the exactly-once guard for a (not currently
+   * reachable) future caller of this same method, same role
+   * `OrderDelivery.inventoryFinalizedAt` plays after
+   * `DriverJobService.confirmPickup`'s own claim.
+   *
+   * ORDER-PICKUP-DOUBLE-FINALIZE, second pass (CI caught it, not a local
+   * run — see the PR for the full story): the claim above is correct and
+   * sufficient to protect INVENTORY — it was never the thing that failed.
+   * What failed was treating "I lost the claim" as always a CONFLICT. A PIN
+   * confirmation is not two competing actions with one legitimate loser —
+   * it is the SAME fact (this order was collected), possibly confirmed more
+   * than once (a double-tap, a client retry, a slow network). `confirmPickup`
+   * already has an outer idempotent check for a caller who discovers
+   * "already PICKED_UP" BEFORE even reaching here — but a caller who loses
+   * the claim INSIDE this transaction, because another call finished
+   * between their own outer check and this one, discovers the exact same
+   * fact a few milliseconds later and got a 409 for it, purely as an
+   * artifact of timing. Measured: 5 calls with the SAME valid PIN, staggered
+   * 40ms apart — 1 real claim, 4 lose it, and because the outer check can no
+   * longer save them (the order is READY_FOR_PICKUP when THEY read it too),
+   * all 4 hit this method's claim and must get the SAME answer the real
+   * winner got, not a conflict. So a lost claim is only ever a true
+   * CONFLICT if the row is in neither "still claimable" NOR "already done by
+   * this same action" — checked once more, still inside the same
+   * transaction, still before any caller sees a response.
+   *
    * ORD-RELEASED-GUARD: `InventoryService.finalizeReservation`/
    * `finalizeLocationReservation` decrement real on-hand `quantity`
    * unconditionally — they do not throw or check `reserved` first, so
@@ -143,7 +189,29 @@ export class PickupService {
    */
   private async finalize(vendorOrderId: string, actorId: string, reason: string | null) {
     const vo = await this.load(vendorOrderId);
-    await this.prisma.$transaction(async (tx) => {
+    // true for the real winner AND for a caller whose own claim lost only
+    // because the order was already PICKED_UP by this same confirmation —
+    // false only for a genuine conflict (see the ORDER-PICKUP-DOUBLE-FINALIZE
+    // comment above).
+    const succeeded = await this.prisma.$transaction(async (tx) => {
+      // ORDER-PICKUP-DOUBLE-FINALIZE: the claim gates everything below it —
+      // a loser never reaches the inventory finalization loop.
+      const claimed = await tx.vendorOrder.updateMany({
+        where: { id: vendorOrderId, status: { in: ['READY_FOR_PICKUP', 'PENDING'] } },
+        data: { status: 'PICKED_UP', pickedUpAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        // Lost the claim — but losing it only means someone else's call for
+        // THIS SAME confirmation already landed. If that someone already
+        // finished (status is PICKED_UP), this call gets the same success a
+        // caller who read that state a moment earlier already got from
+        // confirmPickup's own outer idempotent check — never a conflict for
+        // the same reason, just because of when this call happened to look.
+        const current = await tx.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrderId }, select: { status: true } });
+        if (current.status === 'PICKED_UP') return true;
+        return false;
+      }
+
       const fresh = await tx.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrderId }, select: { inventoryFinalizedAt: true } });
       if (!fresh.inventoryFinalizedAt) {
         for (const item of vo.items) {
@@ -159,12 +227,16 @@ export class PickupService {
             await this.inventory.finalizeReservation(inv.id, item.quantity, actorId, tx);
           }
         }
+        await tx.vendorOrder.update({ where: { id: vendorOrderId }, data: { inventoryFinalizedAt: new Date() } });
+        await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId, newValue: { vendorOrderId } }, tx);
       }
-      await tx.vendorOrder.update({ where: { id: vendorOrderId }, data: { status: 'PICKED_UP', pickedUpAt: new Date(), inventoryFinalizedAt: fresh.inventoryFinalizedAt ?? new Date() } });
       await this.audit.record({ action: 'VENDOR_ORDER_PICKED_UP', actorId, reason: reason ?? undefined, newValue: { vendorOrderId, orderNumber: vo.orderNumber, override: reason != null } }, tx);
-      if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId, newValue: { vendorOrderId } }, tx);
       await this.notifications.notifyUsers([vo.order.userId, vo.vendorProfile.userId], { type: 'MARKETPLACE', category: 'ORDER', event: 'ORDER_PLACED', title: 'Order collected', body: `Order ${vo.orderNumber} was collected.`, data: { vendorOrderId } }, tx);
+      return true;
     });
+    if (!succeeded) {
+      throw new ConflictException('This order changed state before pickup could be confirmed — reload and try again.');
+    }
     // SHIP-PICKUP-NO-SETTLE: collection triggers internal settlement (M18),
     // mirroring DriverJobService.confirmDelivery's own trigger immediately
     // after its delivery transition commits — its own atomic, idempotent
