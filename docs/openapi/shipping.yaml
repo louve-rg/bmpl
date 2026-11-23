@@ -1833,8 +1833,12 @@ paths:
         MDF-COURIER D3, mutual consent: the admin's `POST
         /admin/logistics/legs/{id}/operator` only PROPOSES an operator; this
         is the carrier accepting that proposal before depart/arrive/schedule
-        unlock. No body. 400 if the leg was already accepted or already
-        rejected; 409 if the leg changed between read and write (reload and
+        unlock. No body. 400 if the leg was already accepted, already
+        rejected, or already departed — SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG
+        (2026-11-23): staff may depart a carrier-operated leg whose operator
+        never answered the proposal (MDF-560), and this door used to still
+        accept the stale proposal afterward; see `canAccept` on the response.
+        409 if the leg changed between read and write (reload and
         retry). A SUSPENDED or REVOKED organization is refused here even
         though it still owns the leg: accepting is a NEW commitment, not a
         continuation of one already made.
@@ -1864,8 +1868,10 @@ paths:
         carrier-visible side of anything. Unlike accept, this is NOT status-
         gated: giving back work a suspended or revoked org was never going
         to fulfil is the intended behaviour, not a hole. 400 if the leg was
-        already rejected, or already accepted (once accepted this is no
-        longer a rejectable proposal — see `canReject` on the response).
+        already rejected, already accepted (once accepted this is no
+        longer a rejectable proposal — see `canReject` on the response), or
+        already departed (same SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG fix,
+        2026-11-23, as `accept` above).
         409 if the leg changed between read and write. The response is the
         caller's own leg shape one more time, for symmetry with every other
         provider action — but by the time it is returned the leg no longer
@@ -4030,8 +4036,8 @@ components:
           format: date-time
           description: "Both this and operatorRejectedAt null = a live operator proposal awaiting this org's response."
         operatorRejectedAt: { type: [string, "null"], format: date-time }
-        canAccept: { type: boolean, description: "operatorAcceptedAt and operatorRejectedAt are both null" }
-        canReject: { type: boolean, description: "operatorAcceptedAt and operatorRejectedAt are both null" }
+        canAccept: { type: boolean, description: "operatorAcceptedAt, operatorRejectedAt and departedAt are all null (SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG, 2026-11-23: a leg staff departed without the operator ever answering the proposal used to still show this true)" }
+        canReject: { type: boolean, description: "operatorAcceptedAt, operatorRejectedAt and departedAt are all null (same 2026-11-23 fix as canAccept)" }
         canDepart: { type: boolean, description: "READY or IN_PROGRESS, not yet departed, and its turn has come" }
         canArrive: { type: boolean, description: "IN_PROGRESS and not yet arrived" }
         canSchedule: { type: boolean, description: "PENDING, READY, IN_PROGRESS or EXCEPTION — every status except the two terminal ones (BMPL-346)" }
