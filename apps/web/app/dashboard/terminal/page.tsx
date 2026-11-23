@@ -1251,7 +1251,7 @@ function QueueRowCard({
                   value={handoffForm?.pin ?? ''}
                   onChange={(e) => onHandoffChange({ pin: e.target.value, receivedByName: handoffForm?.receivedByName ?? '' })}
                   inputMode="numeric"
-                  className="w-full font-mono sm:w-28"
+                  className="w-full font-mono text-base sm:w-28"
                   placeholder="1234"
                 />
               </Field>
@@ -1280,7 +1280,7 @@ function QueueRowCard({
                   value={releaseValue ?? ''}
                   onChange={(e) => onReleaseChange(e.target.value)}
                   inputMode="numeric"
-                  className="w-full font-mono sm:w-28"
+                  className="w-full font-mono text-base sm:w-28"
                   placeholder="1234"
                 />
               </Field>
@@ -1304,7 +1304,7 @@ function QueueRowCard({
                   onChange={(e) => onCollectChange({ code: e.target.value, collectedByName: collectForm?.collectedByName ?? '' })}
                   inputMode="numeric"
                   autoComplete="off"
-                  className="w-full font-mono sm:w-28"
+                  className="w-full font-mono text-base sm:w-28"
                   placeholder="1234"
                 />
               </Field>
@@ -2040,6 +2040,32 @@ function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: Staff
                           // WCAG 2.5.8 AA floor, not the AAA 44px, since this
                           // sits inside a dense inline chip list rather than
                           // standing alone.
+                          //
+                          // S2-TERM-MOBILE: Stanley separately measured this
+                          // same control at 24x24 and flagged it as
+                          // inconsistent with the 44px floor held on this
+                          // workspace's full-width primary actions (Mark
+                          // departed, Record handoff, etc). REVIEWED AND
+                          // INTENTIONAL, ruled on by god: those are a
+                          // different WCAG control category under the SAME
+                          // standard -- 2.5.8 Target Size (Minimum), AA, 24px
+                          // floor, is exactly the criterion written for a
+                          // small inline icon inside a text-sized chip; 44px
+                          // is 2.5.5 Target Size (Enhanced), AAA, and does not
+                          // apply here. The real risk at this size is not a
+                          // miss but a mis-tap onto the NEIGHBOURING chip's
+                          // own remove control (2.5.8's offset path: a target
+                          // under 24px still conforms if a 24px circle
+                          // centred on it doesn't overlap an adjacent
+                          // target's) -- measured live at 390px against real
+                          // hub names (Belize City Hub / San Pedro Hub /
+                          // Orange Walk Hub): adjacent remove-button centres
+                          // sit 114-123px apart, far clear of the 24px
+                          // overlap threshold. Do not raise this to 44px to
+                          // "match" the primary actions -- that would make
+                          // the x visually dominate the pill it sits in and
+                          // force the chip list to wrap harder at 390px, to
+                          // exceed a standard this control already meets.
                           className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center font-semibold text-slate-600 hover:text-amber-800 disabled:opacity-50"
                         >
                           ×
@@ -2150,13 +2176,27 @@ function StaffMembersSection({ staff, currentUserId, onChanged }: { staff: Staff
               <p className="text-xs text-[color:var(--bmpl-text-muted)]">No locations to grant.</p>
             ) : (
               locations!.map((l) => (
-                <label key={l.id} className={`flex items-center gap-2 text-sm ${l.isActive ? '' : 'text-[color:var(--bmpl-text-muted)]'}`}>
+                <label
+                  key={l.id}
+                  // TERM-MOBILE-390: Stanley measured this native checkbox's
+                  // own box at 13x13px. The whole row is a <label>, so
+                  // clicking the location name already toggles it too (a
+                  // bigger, already-compliant target under WCAG 2.5.8's
+                  // Equivalent exception) -- but the box itself is still what
+                  // a thumb aims at, so it gets its own real size rather than
+                  // relying on that to excuse a tiny visible target. Sized
+                  // to the same 24x24 WCAG 2.5.8 AA floor as this tab's own
+                  // location-remove control a few hundred lines up, for the
+                  // same reason: a dense inline list, not a standalone
+                  // control, so AA's 24px rather than AAA's 44px.
+                  className={`flex min-h-6 items-center gap-2 text-sm ${l.isActive ? '' : 'text-[color:var(--bmpl-text-muted)]'}`}
+                >
                   <input
                     type="checkbox"
                     checked={invitePicked.has(l.id)}
                     disabled={!l.isActive}
                     onChange={() => toggleInvitePicked(l.id)}
-                    className="accent-belize-blue"
+                    className="h-6 w-6 accent-belize-blue"
                   />
                   {l.hub.name} ({l.hub.code}){l.isActive ? '' : ' -- inactive'}
                 </label>
