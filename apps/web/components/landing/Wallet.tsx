@@ -13,12 +13,19 @@ const svg = (children: ReactNode) => (
   </svg>
 );
 
+/**
+ * S2-WALLET-CLAIMS: every remaining claim here must be checkable against
+ * code (wallet.service.ts's escrow hold/release, and the real GET
+ * /wallet/transactions ledger). "Customer Payments", "Vendor Earnings",
+ * "Transfers" and "Withdrawals" were cut: no payment provider, payout,
+ * transfer or bank/withdrawal rail exists anywhere in this system
+ * (WalletTransactionType.TRANSFER/WITHDRAWAL are schema enum values with no
+ * code path that ever creates one), and apps/web/app/wallet/page.tsx tells
+ * UAT testers directly that funds "cannot be withdrawn or transferred" --
+ * the opposite of what this section used to promise.
+ */
 const FEATURES: Array<{ title: string; desc: string; icon: ReactNode }> = [
-  { title: 'Customer Payments', desc: 'Seamless checkout across every service.', icon: svg(<><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /></>) },
-  { title: 'Vendor Earnings', desc: 'Fast, transparent payouts.', icon: svg(<><path d="M12 19V5" /><path d="m6 11 6-6 6 6" /></>) },
   { title: 'Escrow Protection', desc: 'Funds held safely until delivery.', icon: svg(<><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>) },
-  { title: 'Transfers', desc: 'Move money in seconds.', icon: svg(<><path d="M4 8h13m0 0-3-3m3 3-3 3" /><path d="M20 16H7m0 0 3-3m-3 3 3 3" /></>) },
-  { title: 'Withdrawals', desc: 'Cash out straight to your bank.', icon: svg(<><path d="M4 10h16M6 10V7l6-3 6 3v3M6 10v7m5-7v7m4-7v7M4 20h16" /></>) },
   { title: 'Secure Ledger', desc: 'Every entry auditable.', icon: svg(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>) },
 ];
 
@@ -50,8 +57,8 @@ export function WalletSection() {
             <br /> Every transaction.
           </h2>
           <p className="mt-4 max-w-lg text-base leading-relaxed text-slate-600">
-            Pay vendors, receive earnings, manage escrow, transfer funds, and track every transaction
-            from one secure balance built into the platform.
+            Hold funds safely in escrow until delivery, and track every transaction from one secure
+            balance built into the platform.
           </p>
 
           <dl className="mt-8 grid gap-x-6 gap-y-5 sm:grid-cols-2">
