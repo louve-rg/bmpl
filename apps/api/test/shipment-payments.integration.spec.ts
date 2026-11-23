@@ -559,6 +559,118 @@ describe('cancelling after custody has actually transferred (BMPL-183 — owner 
   });
 });
 
+/**
+ * SHIP-CANCEL-AT-ORIGIN-HUB-INCONSISTENT.
+ *
+ * Every custody-transferred stage already refuses a self-service cancel
+ * (proven above) — except one. The up-front "already moving" guard used to
+ * be computed from per-leg STATUS ("is any leg IN_PROGRESS right now"),
+ * which reads false in the gap between two legs: the first already
+ * COMPLETED and handed off to a hub, the next not yet started. A shipment
+ * sitting AT_ORIGIN_HUB is exactly that gap — custody plainly already left
+ * the sender (the FIRST_MILE leg's own handoff wrote the custody row), but
+ * no leg reads IN_PROGRESS, so the old guard let the cancel through with no
+ * refund to match: the held fee was simply orphaned. god's ruling: refuse,
+ * with the same message every other custody-transferred stage already
+ * gives — applying the existing BMPL-183 rule, not inventing a refund path.
+ */
+describe('cancelling at a custody gap between two legs (SHIP-CANCEL-AT-ORIGIN-HUB-INCONSISTENT)', () => {
+  const hub: Record<string, string> = {};
+
+  beforeAll(async () => {
+    for (const h of [
+      { code: 'CGPO', name: 'Cancel-Gap Origin Hub', district: 'BELIZE', city: 'Belize City', fee: 1000 },
+      { code: 'CGPD', name: 'Cancel-Gap Dest Hub', district: 'STANN_CREEK', city: 'Placencia', fee: 1200 },
+    ]) {
+      const r = await post(admin, 'admin/logistics/hubs', {
+        code: h.code, name: h.name, type: 'AIRSTRIP', district: h.district, city: h.city, modes: ['LAND', 'AIR'],
+        courierFeeMinor: h.fee,
+      });
+      expect(r.status).toBe(201);
+      hub[h.code] = r.body.id;
+    }
+    expect(
+      (
+        await post(admin, 'admin/logistics/routes', {
+          originHubId: hub.CGPO, destinationHubId: hub.CGPD, mode: 'AIR',
+          durationMinutes: 45, priceMinor: 8000, carrierName: 'Tropic Air',
+        })
+      ).status,
+    ).toBe(201);
+  });
+
+  const doorToHub = () => ({
+    service: 'DOOR_TO_HUB',
+    origin: { district: 'BELIZE', city: 'Belize City', address: '5 Barrack Road', name: 'Sender', phone: '501-222-3333' },
+    destination: { hubId: hub.CGPD, name: 'Recipient', phone: '501-444-5555' },
+    preferredMode: 'AIR',
+    description: 'One box',
+    payWithWallet: true,
+  });
+
+  /** Books, then admin-drives only the FIRST_MILE leg to its own handoff —
+   *  no driver needed (startLeg/handoff both work unassigned, same as
+   *  `deliverDirectShipment` above) — and stops there, in the AT_ORIGIN_HUB
+   *  gap, never touching the LINE_HAUL leg at all. */
+  async function bookToOriginHubGap() {
+    await fund(customerId, 10_000);
+    const r = await post(customer, 'shipping', doorToHub());
+    expect(r.status).toBe(201);
+    const first = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id, kind: 'FIRST_MILE' } });
+    expect((await post(admin, `admin/logistics/legs/${first.id}/start`, {})).status).toBe(201);
+    const { handoffPin } = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id }, select: { handoffPin: true } });
+    expect(
+      (await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: handoffPin, receivedByName: 'Counter staff' })).status,
+    ).toBe(201);
+    return { shipmentId: r.body.id as string, payment: await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId: r.body.id } }) };
+  }
+
+  it('refuses a self-service cancel once the shipment sits AT_ORIGIN_HUB — the gap where custody already left the sender but no leg reads IN_PROGRESS — wallet is UNCHANGED on both available and hold', async () => {
+    const { shipmentId, payment } = await bookToOriginHubGap();
+    const atGap = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    expect(atGap.status).toBe('AT_ORIGIN_HUB');
+
+    const before = await balanceOf(customerId);
+
+    const cancel = await post(customer, `shipping/${shipmentId}/cancel`, { reason: 'Trying to stop it.' });
+    expect(cancel.status).toBe(400);
+    expect(cancel.body.message).toMatch(/already moving/i);
+
+    const after = await balanceOf(customerId);
+    expect(after.availableMinor).toBe(before.availableMinor);
+    expect(after.onHoldMinor).toBe(before.onHoldMinor);
+
+    const holds = await holdsFor(payment.id);
+    expect(holds[0]!.status).toBe('AUTHORIZED'); // never released — nothing moved
+
+    const unchanged = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    expect(unchanged.status).toBe('AT_ORIGIN_HUB');
+    expect(unchanged.cancelledAt).toBeNull();
+  });
+
+  it('control: a cancel at AWAITING_PICKUP (before anything moved) still succeeds and still releases the hold — this must not become a blanket refusal', async () => {
+    await fund(customerId, 10_000);
+    const r = await post(customer, 'shipping', doorToHub());
+    expect(r.status).toBe(201);
+    const booked = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(booked.status).toBe('AWAITING_PICKUP');
+
+    const cancel = await post(customer, `shipping/${r.body.id}/cancel`, { reason: 'Changed my mind before it moved.' });
+    expect(cancel.status).toBe(201);
+
+    const after = await balanceOf(customerId);
+    expect(after.onHoldMinor).toBe(0);
+    expect(after.availableMinor).toBe(10_000);
+
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    const holds = await holdsFor(payment.id);
+    expect(holds[0]!.status).toBe('RELEASED');
+
+    const cancelled = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(cancelled.status).toBe('CANCELLED');
+  });
+});
+
 describe('test money stays test money', () => {
   it('a shipment paid with test credit posts test-marked ledger movements', async () => {
     await post(admin, 'admin/users/test-flag', { userId: customerId, isTest: true, reason: 'Isolation test.' });
