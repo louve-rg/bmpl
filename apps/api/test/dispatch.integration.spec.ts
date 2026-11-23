@@ -833,6 +833,11 @@ describe('visibility, proof, permissions', () => {
     expect(row.newValue).toEqual({ deliveryId: order.deliveryId });
     expect(row.previousValue).toBeNull();
     expect(row.reason).toBeNull();
+    // API-PINS-REVEAL-NO-IP: a secret-disclosure event recording WHO without
+    // WHERE FROM is half a trace. The controller's actor() already builds
+    // both for every other write in this file — this route must reuse it.
+    expect(row.ipAddress).not.toBeNull();
+    expect(row.sessionId).not.toBeNull();
 
     // THE NON-NEGOTIABLE: no PIN-shaped value anywhere in the row, in any field.
     const serialized = JSON.stringify(row);
