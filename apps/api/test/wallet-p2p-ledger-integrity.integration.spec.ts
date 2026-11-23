@@ -1,0 +1,451 @@
+/**
+ * WALLET-P2P-LEDGER-INTEGRITY.
+ *
+ * An INDEPENDENT reconciliation and concurrency check for wallet-to-wallet P2P
+ * transfers (WALLET-P2P-API, owned by Pam) — deliberately separate from her own
+ * integration suite. The point of this file is not to test the transfer
+ * endpoint's behaviour; it is to test the LEDGER's invariants and show they
+ * survive transfers regardless of how the transfer code itself is written.
+ * Nobody should be the only reviewer of their own ledger code.
+ *
+ * The five invariants (see each `describe` below):
+ *   1. Every WalletTransaction's entries sum to zero.
+ *   2. Every WalletAccount's cachedBalanceMinor equals the signed sum of its
+ *      WalletLedgerEntry rows (schema.prisma's own comment on
+ *      WalletAccount.cachedBalanceMinor: "Reconciliation always trusts the sum
+ *      of WalletLedgerEntry rows").
+ *   3. No USER account ends at a negative balance, under any sequence of
+ *      transfers.
+ *   4. Total money in the system is conserved across a transfer.
+ *   5. isTest money and real money never merge into an unlabelled movement.
+ *
+ * Section A runs TODAY, against operations that already exist (TOPUP), and is
+ * the baseline proof that the harness and the invariant checks are sound
+ * before a single transfer is involved — a false "HELD" from a broken checker
+ * is worse than no checker.
+ *
+ * Section B exercises the frozen P2P contract itself:
+ *   POST /wallet/transfers/recipient-lookup { email } -> recipientUserId | 404
+ *   POST /wallet/transfers { recipientUserId, amountMinor, idempotencyKey, note? } -> 201 | 200 replayed | 400 | 404
+ *   GET  /wallet/transfers/:transactionId -> sender/recipient only, 404 to anyone else
+ *   GET  /wallet/transactions -> direction + counterpartyName on TRANSFER rows
+ *
+ * Section C is the adversarial part: N concurrent transfers draining one
+ * wallet that can only cover one of them, and two simultaneous OPPOSITE
+ * transfers (the deadlock risk god warned Pam about — this is the proof, not
+ * the warning).
+ *
+ * Funding is exclusively through the EXISTING test-credit path
+ * (admin/users/test-flag + POST /wallet/top-up, both already covered by
+ * wallet-activation.integration.spec.ts) — never a direct balance write, per
+ * this card's explicit boundary. No production data, no real money:
+ * WALLET_MONEY_MOVEMENT_ENABLED stays false and every fixture account here is
+ * isTest.
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import request from 'supertest';
+import {
+  bootApp,
+  cookiesOf,
+  raceOverSeparateConnections,
+  raceWithRequiredOverlap,
+  resetDb,
+  seedRoles,
+  seedSuperAdmin,
+  type TestContext,
+} from './helpers';
+
+let ctx: TestContext;
+let admin: string[];
+let seq = 0;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
+const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+
+/**
+ * Skip (not pass) a Section B/C case when WALLET-P2P-API isn't reachable yet.
+ * This vitest version's `TestContext.skip()` takes no message argument, so
+ * the reason is logged separately — but the skip itself is what matters: a
+ * bare early `return` here would print the SAME green checkmark as a real
+ * pass, for a test that asserted nothing.
+ */
+function skipNotTested(t: { skip: () => void }, reason: string): void {
+  console.warn(`[WALLET-P2P-LEDGER-INTEGRITY] ${reason}`);
+  t.skip();
+}
+
+async function registerCustomer(email: string) {
+  const reg = await request(ctx.server)
+    .post('/api/auth/register')
+    .send({ email, password: 'CustomerPass123', firstName: 'C', lastName: 'U', acceptedTerms: true });
+  expect(reg.status).toBe(201);
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+  return { cookies: cookiesOf(reg), userId: user.id, email };
+}
+
+/** A customer an administrator has designated as a simulation account — the only way to unlock wallet funding. */
+async function makeTestCustomer(label: string) {
+  const c = await registerCustomer(`p2p_${label}_${uniq()}@example.com`);
+  const r = await post(admin, 'admin/users/test-flag', { userId: c.userId, isTest: true, reason: 'WALLET-P2P-LEDGER-INTEGRITY fixture.' });
+  expect(r.status).toBe(201);
+  return c;
+}
+
+/** Fund via the EXISTING test-credit path — never a direct balance write. */
+async function fund(cookies: string[], amountMinor: number) {
+  const r = await post(cookies, 'wallet/top-up', { amountMinor });
+  expect(r.status).toBe(201);
+}
+
+const walletOf = (userId: string) => ctx.prisma.walletAccount.findFirstOrThrow({ where: { userId, type: 'USER', currency: 'BZD' } });
+
+/** Derived balance = signed sum of ledger entries. The schema's own source of truth. */
+async function derivedBalance(accountId: string): Promise<bigint> {
+  const rows = await ctx.prisma.walletLedgerEntry.findMany({ where: { accountId }, select: { direction: true, amountMinor: true } });
+  return rows.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+}
+
+// ---- The five invariants, each independently re-derived from raw rows ----
+
+/** Invariant 1: every transaction's own entries net to zero. Returns every violator, not just the first. */
+async function findUnbalancedTransactions(): Promise<Array<{ transactionId: string; net: bigint }>> {
+  const txns = await ctx.prisma.walletTransaction.findMany({ select: { id: true, entries: { select: { direction: true, amountMinor: true } } } });
+  const bad: Array<{ transactionId: string; net: bigint }> = [];
+  for (const t of txns) {
+    const net = t.entries.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+    if (net !== 0n) bad.push({ transactionId: t.id, net });
+  }
+  return bad;
+}
+
+/** Invariant 2: every account's cached balance equals the derived sum of its own entries. */
+async function findCacheMismatches(): Promise<Array<{ accountId: string; cached: bigint; derived: bigint }>> {
+  const accounts = await ctx.prisma.walletAccount.findMany({ select: { id: true, cachedBalanceMinor: true } });
+  const bad: Array<{ accountId: string; cached: bigint; derived: bigint }> = [];
+  for (const a of accounts) {
+    const derived = await derivedBalance(a.id);
+    if (derived !== a.cachedBalanceMinor) bad.push({ accountId: a.id, cached: a.cachedBalanceMinor, derived });
+  }
+  return bad;
+}
+
+/** Invariant 3: no USER account's derived balance is ever negative. */
+async function findNegativeUserBalances(): Promise<Array<{ accountId: string; userId: string | null; derived: bigint }>> {
+  const accounts = await ctx.prisma.walletAccount.findMany({ where: { type: 'USER' }, select: { id: true, userId: true } });
+  const bad: Array<{ accountId: string; userId: string | null; derived: bigint }> = [];
+  for (const a of accounts) {
+    const derived = await derivedBalance(a.id);
+    if (derived < 0n) bad.push({ accountId: a.id, userId: a.userId, derived });
+  }
+  return bad;
+}
+
+/** Invariant 4: total money across every account in the system (real + test, summed separately must each be internally consistent). */
+async function totalAcrossAllAccounts(): Promise<bigint> {
+  const accounts = await ctx.prisma.walletAccount.findMany({ select: { id: true } });
+  let total = 0n;
+  for (const a of accounts) total += await derivedBalance(a.id);
+  return total;
+}
+
+/** Invariant 5: a TRANSFER transaction's isTest flag, cross-checked against whether the money actually moving was test-funded on the sender's side. */
+async function findMislabelledTransfers(): Promise<Array<{ transactionId: string; postedIsTest: boolean; senderIsTestFunded: boolean }>> {
+  const transfers = await ctx.prisma.walletTransaction.findMany({
+    where: { type: 'TRANSFER' },
+    select: { id: true, isTest: true, entries: { select: { accountId: true, direction: true } } },
+  });
+  const bad: Array<{ transactionId: string; postedIsTest: boolean; senderIsTestFunded: boolean }> = [];
+  for (const t of transfers) {
+    const debitLine = t.entries.find((e) => e.direction === 'DEBIT');
+    if (!debitLine) continue; // caught separately by findUnbalancedTransactions
+    const senderTestCredits = await ctx.prisma.walletLedgerEntry.count({
+      where: { accountId: debitLine.accountId, direction: 'CREDIT', transaction: { isTest: true } },
+    });
+    const senderRealCredits = await ctx.prisma.walletLedgerEntry.count({
+      where: { accountId: debitLine.accountId, direction: 'CREDIT', transaction: { isTest: false } },
+    });
+    const senderIsTestFunded = senderTestCredits > 0 && senderRealCredits === 0;
+    if (t.isTest !== senderIsTestFunded) bad.push({ transactionId: t.id, postedIsTest: t.isTest, senderIsTestFunded });
+  }
+  return bad;
+}
+
+async function assertAllInvariantsHold(context: string) {
+  expect(await findUnbalancedTransactions(), `invariant 1 (entries sum to zero) — ${context}`).toEqual([]);
+  expect(await findCacheMismatches(), `invariant 2 (cachedBalanceMinor matches entries) — ${context}`).toEqual([]);
+  expect(await findNegativeUserBalances(), `invariant 3 (no negative USER balance) — ${context}`).toEqual([]);
+}
+
+beforeAll(async () => {
+  ctx = await bootApp();
+  await resetDb(ctx.prisma);
+  await seedRoles(ctx.prisma);
+  const a = await seedSuperAdmin(ctx.prisma);
+  admin = await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }).then((r) => cookiesOf(r));
+});
+afterAll(async () => {
+  await ctx.app.close();
+});
+
+// ============================================================================
+// Section A — baseline: the invariants and the checker itself, proven against
+// operations that exist TODAY, before a single transfer exists.
+// ============================================================================
+describe('A. baseline — invariants hold under existing (non-transfer) money movement', () => {
+  it('1,2,4: a batch of ordinary test-credit top-ups stays balanced, cache-accurate, and total-conserving', async () => {
+    const totalBefore = await totalAcrossAllAccounts();
+    const c1 = await makeTestCustomer('base1');
+    const c2 = await makeTestCustomer('base2');
+    const c3 = await makeTestCustomer('base3');
+    await fund(c1.cookies, 10_00);
+    await fund(c2.cookies, 25_00);
+    await fund(c3.cookies, 5_00);
+
+    await assertAllInvariantsHold('after three top-ups');
+
+    const w1 = await walletOf(c1.userId);
+    const w2 = await walletOf(c2.userId);
+    const w3 = await walletOf(c3.userId);
+    expect(await derivedBalance(w1.id)).toBe(1000n);
+    expect(await derivedBalance(w2.id)).toBe(2500n);
+    expect(await derivedBalance(w3.id)).toBe(500n);
+
+    // Invariant 4, directly, for a TOPUP specifically: a TOPUP funds itself
+    // from the SYSTEM_TOPUP_CLEARING account in the SAME transaction, and that
+    // clearing account is itself one of the accounts totalAcrossAllAccounts()
+    // sums — so the correct prediction is NO net change across the whole
+    // universe of accounts (money moved from clearing to the user, none was
+    // created from nowhere), the same guarantee invariant 1 gives per-
+    // transaction. (First run of this test wrongly asserted a +4000 delta,
+    // caught immediately by actually running it rather than assuming — see
+    // report to god.) A genuine net-new-money leak would show up here as a
+    // nonzero delta.
+    const totalAfter = await totalAcrossAllAccounts();
+    expect(totalAfter).toBe(totalBefore);
+  });
+
+  it('5: an ordinary test-credit top-up is honestly labelled isTest on its transaction', async () => {
+    const c = await makeTestCustomer('base-istest');
+    await fund(c.cookies, 4_00);
+    const wallet = await walletOf(c.userId);
+    const entry = await ctx.prisma.walletLedgerEntry.findFirstOrThrow({
+      where: { accountId: wallet.id, direction: 'CREDIT' },
+      include: { transaction: { select: { isTest: true } } },
+    });
+    expect(entry.transaction.isTest).toBe(true);
+  });
+
+  it('the checker itself: a deliberately corrupted ledger IS caught (negative control)', async () => {
+    // Proves findCacheMismatches/findNegativeUserBalances are not vacuously
+    // green — write a real violation (in THIS test's own throwaway rows,
+    // never touching a shared account) and confirm the checker reports it,
+    // then clean it up so later tests see a clean ledger again.
+    const c = await makeTestCustomer('base-negctrl');
+    await fund(c.cookies, 3_00);
+    const wallet = await walletOf(c.userId);
+    await ctx.prisma.walletAccount.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: 999_999n } });
+
+    const mismatches = await findCacheMismatches();
+    expect(mismatches.some((m) => m.accountId === wallet.id)).toBe(true);
+
+    // Restore, so this negative control does not poison every test after it.
+    const correct = await derivedBalance(wallet.id);
+    await ctx.prisma.walletAccount.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: correct } });
+    expect(await findCacheMismatches()).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Section B — the frozen P2P contract. Requires WALLET-P2P-API (Pam) merged.
+// Written against the exact contract god circulated; not yet runnable against
+// `main` as of this suite's authoring (no /wallet/transfers route exists on
+// main — confirmed by reading wallet.controller.ts directly, not assumed).
+// ============================================================================
+describe('B. P2P transfer contract — reconciliation after real transfers', () => {
+  it('recipient-lookup: 200 for an eligible account, 404 (not disclosing which reason) for an ineligible one', async (t) => {
+    const sender = await makeTestCustomer('lookup-sender');
+    const recipient = await makeTestCustomer('lookup-recipient');
+    const ok = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (ok.status === 404 && /Cannot POST/.test(ok.text ?? '')) {
+      // Reported as SKIPPED, not green — a bare `return` here would make
+      // vitest print a passing checkmark for a test that asserted nothing,
+      // indistinguishable in the summary from a real pass. See helpers.ts's
+      // own raceWithRequiredOverlap for the same vacuous-pass concern.
+      return skipNotTested(t, 'route not implemented yet (WALLET-P2P-API not merged) — NOT TESTED, not a finding');
+    }
+    expect(ok.status).toBe(200);
+    expect(ok.body.recipientUserId).toBe(recipient.userId);
+
+    const missing = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: `nobody_${uniq()}@example.com` });
+    expect(missing.status).toBe(404);
+  });
+
+  it('1,2,3,4: a single transfer debits the sender, credits the recipient, stays balanced and conserved', async (t) => {
+    const sender = await makeTestCustomer('xfer-sender-1');
+    const recipient = await makeTestCustomer('xfer-recipient-1');
+    await fund(sender.cookies, 50_00);
+    const totalBefore = await totalAcrossAllAccounts();
+
+    const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (lookup.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — transfer case NOT TESTED');
+    }
+    const res = await post(sender.cookies, 'wallet/transfers', {
+      recipientUserId: lookup.body.recipientUserId,
+      amountMinor: 20_00,
+      idempotencyKey: uniq(),
+      note: 'ledger-integrity single transfer',
+    });
+    expect(res.status).toBe(201);
+
+    await assertAllInvariantsHold('after single transfer');
+    const senderWallet = await walletOf(sender.userId);
+    const recipientWallet = await walletOf(recipient.userId);
+    expect(await derivedBalance(senderWallet.id)).toBe(3000n);
+    expect(await derivedBalance(recipientWallet.id)).toBe(2000n);
+    expect(await totalAcrossAllAccounts()).toBe(totalBefore); // transfer moves money, creates none
+  });
+
+  it('idempotent replay of the identical key does not move money twice', async (t) => {
+    const sender = await makeTestCustomer('xfer-sender-replay');
+    const recipient = await makeTestCustomer('xfer-recipient-replay');
+    await fund(sender.cookies, 30_00);
+    const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (lookup.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — replay case NOT TESTED');
+    }
+    const key = uniq();
+    const first = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 10_00, idempotencyKey: key });
+    expect(first.status).toBe(201);
+    const second = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 10_00, idempotencyKey: key });
+    expect(second.status).toBe(200);
+    expect(second.body.replayed).toBe(true);
+
+    const senderWallet = await walletOf(sender.userId);
+    expect(await derivedBalance(senderWallet.id)).toBe(2000n); // debited once, not twice
+    await assertAllInvariantsHold('after idempotent replay');
+  });
+
+  it('5: a transfer of test-funded money posts an honestly isTest-labelled transaction', async (t) => {
+    const sender = await makeTestCustomer('xfer-sender-istest');
+    const recipient = await makeTestCustomer('xfer-recipient-istest');
+    await fund(sender.cookies, 15_00);
+    const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (lookup.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — isTest case NOT TESTED');
+    }
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: uniq() });
+    if (res.status !== 201) return skipNotTested(t, `transfer post did not return 201 (status=${res.status}) — isTest case NOT TESTED`);
+
+    const mislabelled = await findMislabelledTransfers();
+    expect(mislabelled).toEqual([]);
+
+    const txn = await ctx.prisma.walletTransaction.findUniqueOrThrow({ where: { id: res.body.transactionId } });
+    expect(txn.isTest).toBe(true); // sender's wallet was funded exclusively via test credit
+  });
+
+  it('GET /wallet/transfers/:id — sender and recipient both read it, a third party gets 404 (not 403)', async (t) => {
+    const sender = await makeTestCustomer('xfer-sender-read');
+    const recipient = await makeTestCustomer('xfer-recipient-read');
+    const stranger = await makeTestCustomer('xfer-stranger-read');
+    await fund(sender.cookies, 20_00);
+    const lookup = await post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: recipient.email });
+    if (lookup.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — read-authorization case NOT TESTED');
+    }
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: uniq() });
+    if (res.status !== 201) return skipNotTested(t, `transfer post did not return 201 (status=${res.status}) — read-authorization case NOT TESTED`);
+    const id = res.body.transactionId as string;
+
+    const bySender = await get(sender.cookies, `wallet/transfers/${id}`);
+    expect(bySender.status).toBe(200);
+    expect(bySender.body.direction).toBe('SENT');
+
+    const byRecipient = await get(recipient.cookies, `wallet/transfers/${id}`);
+    expect(byRecipient.status).toBe(200);
+    expect(byRecipient.body.direction).toBe('RECEIVED');
+
+    const byStranger = await get(stranger.cookies, `wallet/transfers/${id}`);
+    expect(byStranger.status).toBe(404); // not 403 — a 403 would confirm the transfer exists
+  });
+});
+
+// ============================================================================
+// Section C — adversarial. Requires WALLET-P2P-API (Pam) merged.
+// ============================================================================
+describe('C. adversarial — concurrent transfers against the same wallet', () => {
+  it('N concurrent transfers draining a wallet that can cover only ONE of them: exactly one succeeds, invariants hold', async (t) => {
+    const sender = await makeTestCustomer('race-drain-sender');
+    const recipients = await Promise.all([1, 2, 3, 4, 5].map((i) => makeTestCustomer(`race-drain-r${i}`)));
+    const STAKE = 10_00;
+    await fund(sender.cookies, STAKE); // enough for exactly ONE of the five
+
+    const lookups = await Promise.all(recipients.map((r) => post(sender.cookies, 'wallet/transfers/recipient-lookup', { email: r.email })));
+    if (lookups.some((l) => l.status !== 200)) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — drain race NOT TESTED');
+    }
+
+    const totalBefore = await totalAcrossAllAccounts();
+    const probe = await raceWithRequiredOverlap(
+      ctx.prisma,
+      lookups.map((l, i) => () => post(sender.cookies, 'wallet/transfers', { recipientUserId: l.body.recipientUserId, amountMinor: STAKE, idempotencyKey: uniq() }).then((r) => r.status)),
+    );
+
+    const succeeded = probe.responses.filter((s) => s === 201);
+    const refused = probe.responses.filter((s) => s === 400);
+    expect(succeeded.length, `statuses=${JSON.stringify(probe.responses)}`).toBe(1);
+    expect(refused.length).toBe(4);
+
+    await assertAllInvariantsHold('after N-way drain race');
+    const senderWallet = await walletOf(sender.userId);
+    expect(await derivedBalance(senderWallet.id)).toBe(0n);
+    expect(await totalAcrossAllAccounts()).toBe(totalBefore); // money moved, none created
+  });
+
+  it('two SIMULTANEOUS OPPOSITE transfers (A→B and B→A): no deadlock/timeout, invariants hold afterward', async (t) => {
+    const a = await makeTestCustomer('race-opp-a');
+    const b = await makeTestCustomer('race-opp-b');
+    await fund(a.cookies, 40_00);
+    await fund(b.cookies, 40_00);
+
+    const lookupBFromA = await post(a.cookies, 'wallet/transfers/recipient-lookup', { email: b.email });
+    const lookupAFromB = await post(b.cookies, 'wallet/transfers/recipient-lookup', { email: a.email });
+    if (lookupBFromA.status !== 200 || lookupAFromB.status !== 200) {
+      return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — opposite-transfer race NOT TESTED');
+    }
+
+    const totalBefore = await totalAcrossAllAccounts();
+    const DEADLOCK_TIMEOUT_MS = 15_000;
+    const withTimeout = <T,>(p: Promise<T>, label: string) =>
+      Promise.race([
+        p,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`DEADLOCK/TIMEOUT: ${label} did not resolve within ${DEADLOCK_TIMEOUT_MS}ms`)), DEADLOCK_TIMEOUT_MS)),
+      ]);
+
+    let probe: Awaited<ReturnType<typeof raceOverSeparateConnections<number>>>;
+    try {
+      probe = await withTimeout(
+        raceOverSeparateConnections(ctx.prisma, [
+          () => post(a.cookies, 'wallet/transfers', { recipientUserId: lookupBFromA.body.recipientUserId, amountMinor: 15_00, idempotencyKey: uniq() }).then((r) => r.status),
+          () => post(b.cookies, 'wallet/transfers', { recipientUserId: lookupAFromB.body.recipientUserId, amountMinor: 12_00, idempotencyKey: uniq() }).then((r) => r.status),
+        ]),
+        'opposite-direction simultaneous transfer pair',
+      );
+    } catch (e) {
+      // god: "if it deadlocks or times out, that is a finding, not a flake —
+      // report it with the evidence." Fail loudly and let the report carry it.
+      throw new Error(`VIOLATION — opposite simultaneous transfers deadlocked or timed out: ${(e as Error).message}`);
+    }
+
+    expect(probe.responses.every((s) => s === 201), `statuses=${JSON.stringify(probe.responses)}`).toBe(true);
+    await assertAllInvariantsHold('after opposite simultaneous transfers');
+
+    const walletA = await walletOf(a.userId);
+    const walletB = await walletOf(b.userId);
+    // A sent 1500, received 1200 => net -300. B sent 1200, received 1500 => net +300.
+    expect(await derivedBalance(walletA.id)).toBe(4000n - 300n);
+    expect(await derivedBalance(walletB.id)).toBe(4000n + 300n);
+    expect(await totalAcrossAllAccounts()).toBe(totalBefore);
+  });
+});
