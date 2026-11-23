@@ -372,6 +372,42 @@ describe('SendMoneyPage confirm + receipt', () => {
     }
   });
 
+  it('"Send another" starts a genuinely new attempt -- a SECOND transfer from the same mount uses a DIFFERENT idempotencyKey, not the first transfer\'s', async () => {
+    sendMoney.mockResolvedValueOnce(RECEIPT);
+    await reachReview('25.00');
+
+    await act(async () => {
+      findButton(/^Send BZ\$/).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(text()).toContain('Sent');
+
+    await act(async () => {
+      findButton('Send another').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // Back to the recipient step, with nothing left over from the first attempt.
+    expect(text()).not.toContain('Sent');
+    expect(text()).not.toContain('Pamela B.');
+
+    recipientLookup.mockResolvedValue({ recipientUserId: 'user-3', displayName: 'Edward B.' });
+    sendMoney.mockResolvedValueOnce({ ...RECEIPT, transactionId: 'txn2', reference: 'TRF-XYZ999', counterpartyName: 'Edward B.' });
+    await fillEmailAndLookup('edward@example.com');
+    await fillAmount('50.00');
+
+    await act(async () => {
+      findButton(/^Send BZ\$/).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(sendMoney).toHaveBeenCalledTimes(2);
+    const firstKey = (sendMoney.mock.calls[0]![0] as Record<string, unknown>).idempotencyKey;
+    const secondKey = (sendMoney.mock.calls[1]![0] as Record<string, unknown>).idempotencyKey;
+    expect(secondKey).not.toBe(firstKey);
+    expect(text()).toContain('TRF-XYZ999');
+  });
+
   it('exhausting every automatic retry on a dropped connection still never calls it a failure -- offers "Check again" instead', async () => {
     vi.useFakeTimers();
     try {

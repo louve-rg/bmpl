@@ -39,18 +39,25 @@ function delay(ms: number): Promise<void> {
 
 export default function SendMoneyPage() {
   /**
-   * Generated exactly once, the moment this flow opens, and kept for its
-   * entire life -- a retry of the SAME attempt (a corrected amount after an
-   * insufficient-funds refusal, a dropped connection) reuses it so the
-   * server can tell "this is the same thing again" from "this is a new
-   * transfer". A rejected attempt never reaches the money-moving step on
-   * the server (same precedent as shipping's own idempotency key), so
-   * reusing this key after a 400 and changing the amount or recipient is
-   * safe -- nothing was reserved against it yet. This page never represents
-   * more than one attempt at a time: it ends at a receipt or the visitor
-   * leaves, and either way the next visit is a fresh mount with a fresh key.
+   * Generated once per ATTEMPT, not once per mount -- a retry of the SAME
+   * attempt (a corrected amount after an insufficient-funds refusal, a
+   * dropped connection) reuses it so the server can tell "this is the same
+   * thing again" from "this is a new transfer". A rejected attempt never
+   * reaches the money-moving step on the server (same precedent as
+   * shipping's own idempotency key), so reusing this key after a 400 and
+   * changing the amount or recipient is safe -- nothing was reserved
+   * against it yet.
+   *
+   * It must NOT be assumed stable for the life of the mount: "Send another"
+   * on the receipt step is a same-route navigation (/wallet/send ->
+   * /wallet/send), which the App Router does not remount, so a brand new
+   * attempt from THIS mount needs its own explicit reset -- see
+   * `startNewAttempt` below. Without it, a second transfer would be sent
+   * under the first transfer's key, the server would replay the first
+   * receipt, and the UI would show success while the second transfer's
+   * money never moved.
    */
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
   const [walletError, setWalletError] = useState(false);
@@ -133,6 +140,24 @@ export default function SendMoneyPage() {
         await delay(CONFIRM_RETRY_DELAYS_MS[attempt]!);
       }
     }
+  }
+
+  /** Explicit reset for a genuinely new attempt from this same mount -- see
+   *  the idempotencyKey comment above for why this cannot be left to happen
+   *  as a side effect of navigation. */
+  function startNewAttempt() {
+    setIdempotencyKey(crypto.randomUUID());
+    setEmail('');
+    setRecipient(null);
+    setLookingUp(false);
+    setLookupError(null);
+    setAmount('');
+    setNote('');
+    setConfirming(false);
+    setConfirmError(null);
+    setStillConfirming(false);
+    setReceipt(null);
+    confirmInFlight.current = false;
   }
 
   async function confirm() {
@@ -220,12 +245,13 @@ export default function SendMoneyPage() {
               <Link href="/wallet" className="min-h-[44px] inline-flex items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">
                 Back to wallet
               </Link>
-              <Link
-                href="/wallet/send"
+              <button
+                type="button"
+                onClick={startNewAttempt}
                 className="min-h-[44px] inline-flex items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700"
               >
                 Send another
-              </Link>
+              </button>
             </div>
           </Card>
         ) : stillConfirming ? (
