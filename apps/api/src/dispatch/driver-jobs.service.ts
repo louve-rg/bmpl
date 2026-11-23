@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  canPerform,
   canReorderQueueItem,
   DELIVERY_PIN_MAX_ATTEMPTS,
   DELIVERY_STATUS_LABELS,
@@ -545,7 +546,21 @@ export class DriverJobService {
     // 404, not 400/403 — same reasoning as ownedDelivery: to this driver, as
     // a driver, their own order simply does not exist.
     if (d.vendorOrder.order.userId === actor.userId) throw new NotFoundException('Job not found.');
-    this.core.assertAction('CLAIM', d.status);
+    // SHIP-CLAIM-ROUTE-EXISTENCE-LEAK: every other customer/driver/vendor
+    // route in this system hides a foreign delivery's existence behind a
+    // 404 — this was the one exception. `assertAction`'s own refusal names
+    // the delivery's CURRENT status ("Cannot claim a delivery that is
+    // 'Driver assigned'"), which both confirms the id is real and reveals
+    // exactly what stage it is at, to a driver this delivery was never
+    // offered to (claim's open pool is PENDING_ASSIGNMENT/DRIVER_DECLINED,
+    // dispatch-exhausted, unassigned — anything else was never a candidate
+    // for ANY driver to claim, not just this one). Checked directly here,
+    // rather than through assertAction, specifically so the refusal can be
+    // 404 instead of a status-naming 400. Not exploitable as it stands —
+    // ids are long random strings and nothing changes either way — but it
+    // was the one place the existence guarantee this system otherwise keeps
+    // everywhere else was inconsistent.
+    if (!canPerform('CLAIM', d.status)) throw new NotFoundException('Job not found.');
     if (!d.dispatchExhaustedAt) {
       throw new BadRequestException('Automatic dispatch has not given up on this delivery yet.');
     }
