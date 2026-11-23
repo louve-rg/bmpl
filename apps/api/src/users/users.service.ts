@@ -36,8 +36,18 @@ import { VendorService } from '../vendor/vendor.service';
 import { publicAvatarUrl } from '../common/avatar-url';
 
 /** The committed-and-not-yet-finished delivery/courier statuses — a driver
- *  in one of these cannot simply vanish; see {@link UsersService.liveResponsibilities}. */
-const LIVE_DRIVER_STATUSES: DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
+ *  in one of these cannot simply vanish; see {@link UsersService.liveResponsibilities}.
+ *  MDF-1074: EXCEPTION is deliberately included, same principle
+ *  {@link LIVE_SHIPMENT_STATUSES}'s own comment already states for the
+ *  shipment-level set three lines below this one ("still unresolved, not
+ *  done") — this driver-level set had simply never had it applied. Without
+ *  it, a driver's account could be deleted while they still held a flagged,
+ *  unresolved job: RAISE_EXCEPTION's own `from` list means an OrderDelivery
+ *  can only ever REACH EXCEPTION already mid-carry (PICKUP_CONFIRMED/
+ *  IN_TRANSIT/ARRIVING), so every delivery in EXCEPTION is, structurally, a
+ *  driver still holding a real customer's parcel — exactly the account this
+ *  guard exists to stop from vanishing. */
+const LIVE_DRIVER_STATUSES: DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING', 'EXCEPTION'];
 /** Vendor order states still awaiting the vendor's own action — reused for
  *  both the vendor's own open orders and a CUSTOMER's in-flight orders. */
 const LIVE_VENDOR_ORDER_STATUSES: VendorOrderStatus[] = ['PENDING', 'PREPARING', 'READY_FOR_PICKUP'];

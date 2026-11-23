@@ -324,6 +324,84 @@ describe('account deletion — refusals', () => {
     expect(allowed.status).toBe(200);
   });
 
+  /**
+   * MDF-1074: before this, LIVE_DRIVER_STATUSES omitted EXCEPTION, so a
+   * driver whose delivery/leg had been flagged (never DELIVERED/COMPLETED,
+   * never resolved) was not counted as holding a live responsibility at
+   * all — RAISE_EXCEPTION's own `from` list means an OrderDelivery can only
+   * reach EXCEPTION already mid-carry, so this account could have been
+   * deleted while the driver still physically held a real customer's
+   * parcel. Both kinds LIVE_DRIVER_STATUSES feeds: an OrderDelivery and a
+   * ShipmentLeg.
+   */
+  it('refuses when the caller is a driver whose delivery is flagged (EXCEPTION), not merely in transit — RAISE_EXCEPTION means this is still mid-carry', async () => {
+    const email = 'delete-exception-delivery@example.bz';
+    const password = 'DriverPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const driver = await ctx.prisma.driverProfile.create({
+      data: {
+        userId, legalName: 'Test Driver', displayName: 'Test Driver', phone: '6650020', homeDistrict: 'BELIZE',
+        licenceNumber: 'LIC-DEL-TEST-EXC', licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const vendorUser = await registerAndLogin('delete-exception-delivery-vendor@example.bz', 'VendorPass12345');
+    const vendor = await ctx.prisma.vendorProfile.create({
+      data: { userId: vendorUser.userId, businessName: 'Exception Fixture Store', slug: 'exception-fixture-store', contactEmail: 'excstore@example.bz' },
+    });
+    const order = await ctx.prisma.order.create({
+      data: { orderNumber: 'ORD-DEL-TEST-EXC', userId: vendorUser.userId, itemCount: 1, subtotalMinor: 1000n, totalMinor: 1000n },
+    });
+    const vendorOrder = await ctx.prisma.vendorOrder.create({
+      data: { orderNumber: 'ORD-DEL-TEST-EXC-V1', orderId: order.id, vendorProfileId: vendor.id, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n },
+    });
+    const delivery = await ctx.prisma.orderDelivery.create({
+      data: { vendorOrderId: vendorOrder.id, assignedDriverProfileId: driver.id, status: 'EXCEPTION', exceptionReason: 'Recipient unreachable.', exceptionAt: new Date() },
+    });
+
+    const res = await request(ctx.server).delete('/api/me').set('Cookie', cookies).send({ currentPassword: password });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.some((r: string) => /in progress/.test(r))).toBe(true);
+
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.status).toBe('ACTIVE');
+
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+    const allowed = await request(ctx.server).delete('/api/me').set('Cookie', cookies).send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('refuses when the caller is a driver whose shipment leg is flagged (EXCEPTION), not merely in transit', async () => {
+    const email = 'delete-exception-leg@example.bz';
+    const password = 'DriverPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const driver = await ctx.prisma.driverProfile.create({
+      data: {
+        userId, legalName: 'Test Driver', displayName: 'Test Driver', phone: '6650021', homeDistrict: 'BELIZE',
+        licenceNumber: 'LIC-DEL-TEST-LEGEXC', licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const shipment = await ctx.prisma.shipment.create({
+      data: { reference: 'SDEL-TEST-EXC', service: 'DOOR_TO_DOOR', description: 'One box', pieces: 1 },
+    });
+    const leg = await ctx.prisma.shipmentLeg.create({
+      data: {
+        shipmentId: shipment.id, sequence: 1, kind: 'DIRECT', mode: 'LAND', status: 'EXCEPTION',
+        exceptionAt: new Date(), exceptionReason: 'Vehicle broke down.',
+        assignedDriverProfileId: driver.id, courierStatus: 'EXCEPTION',
+      },
+    });
+
+    const res = await request(ctx.server).delete('/api/me').set('Cookie', cookies).send({ currentPassword: password });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.some((r: string) => /in progress/.test(r))).toBe(true);
+
+    await ctx.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { courierStatus: 'DELIVERED', status: 'COMPLETED' } });
+    const allowed = await request(ctx.server).delete('/api/me').set('Cookie', cookies).send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
   it('refuses when the caller is a passenger driver with a trip still in progress, and allows it once the trip finishes', async () => {
     const email = 'delete-active-trip@example.bz';
     const password = 'PaxDriverPass12345';
