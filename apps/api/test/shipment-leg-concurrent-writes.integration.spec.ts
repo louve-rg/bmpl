@@ -395,3 +395,44 @@ describe('recordCollection: concurrent collections on one AWAITING_COLLECTION sh
     expect(await auditCountByShipment('SHIPMENT_LEG_HANDOFF', booked.id)).toBe(handoffAuditBefore + 1);
   });
 });
+
+describe('ShipmentService.cancel: concurrent cancels of one shipment (SHIP-CONCURRENT-CANCEL-TRIPLE-AUDIT)', () => {
+  it('exactly one winner, one refund, one SHIPMENT_CANCELLED audit row, losers refuse — never 429', async () => {
+    const booked = await book();
+    const shipmentId = booked.id as string;
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId } });
+    // The fixture's own beforeEach funds this customer with exactly 100_000 —
+    // a single correct refund restores exactly that, whatever the leg's own
+    // priced fee was held for in between.
+    const funded = 100_000;
+
+    const responses = await Promise.all(
+      Array.from({ length: N }, () => post(customer, `shipping/${shipmentId}/cancel`, { reason: 'Changed my mind.' })),
+    );
+    const wins = responses.filter((r2) => r2.status === 201);
+    const losses = responses.filter((r2) => r2.status !== 201);
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(N - 1);
+    // Trap recordCollection's own suite already caught once: a rate-limit
+    // 429 is not the conditional claim this test exists to prove.
+    for (const r2 of losses) {
+      expect(r2.status).not.toBe(429);
+      expect([400, 409]).toContain(r2.status);
+    }
+
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    expect(shipment.status).toBe('CANCELLED');
+
+    const audits = await ctx.prisma.auditLog.findMany({
+      where: { action: 'SHIPMENT_CANCELLED', newValue: { path: ['shipmentId'], equals: shipmentId } },
+    });
+    expect(audits).toHaveLength(1);
+
+    const after = (await request(ctx.server).get('/api/wallet').set('Cookie', customer)).body as { availableMinor: number; onHoldMinor: number };
+    expect(after.availableMinor).toBe(funded);
+    expect(after.onHoldMinor).toBe(0);
+    const holds = await ctx.prisma.walletHold.findMany({ where: { paymentId: payment.id } });
+    expect(holds).toHaveLength(1);
+    expect(holds[0]!.status).toBe('RELEASED');
+  });
+});
