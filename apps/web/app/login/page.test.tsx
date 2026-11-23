@@ -105,17 +105,19 @@ describe('MDF-925/MDF-924 -- the account-anonymized notice', () => {
   });
 });
 
-describe('MDF-PWCONFIRM -- the notice survives React 18 Strict Mode double-invoking the mount effect', () => {
-  it('still shows the confirmation under StrictMode, where the effect runs twice', async () => {
-    // Root cause: the mount effect both READ window.location.search and
-    // STRIPPED it (history.replaceState) in one invocation. React 18 Strict
-    // Mode calls a mount effect twice in dev (effect, cleanup, effect again)
-    // -- without StrictMode this repo's other tests above never exercised
-    // that path, which is exactly why this regressed unnoticed. The second
-    // invocation sees the already-stripped URL; an unconditional
-    // setNotice(reason ? msg : null) would clobber the first invocation's
-    // correct value back to null. This reproduces that on the unfixed code.
-    window.history.replaceState(null, '', '/login?reason=password-changed');
+describe('MDF-PWCONFIRM -- double-invocation safety, not just "the notice shows"', () => {
+  // This bans the SHAPE of the defect, not just today's symptom. A test that
+  // only checks "the message shows" would pass again the moment someone
+  // reintroduces a null-write on a later line and the effect happens to run
+  // only once -- React 18 Strict Mode's real mount/cleanup/remount cycle
+  // (effect, cleanup, effect again) is what actually invokes this effect
+  // twice in practice, and both invocations must land on the same correct
+  // value for either reason this page recognizes, or the test must fail.
+  it.each([
+    ['password-changed', 'Your password was changed. Please sign in again.'],
+    ['account-anonymized', 'Your profile has been anonymized and your past order records are retained.'],
+  ])('reason=%s survives the effect running twice under StrictMode', async (reason, message) => {
+    window.history.replaceState(null, '', `/login?reason=${reason}`);
     document.body.innerHTML = '<div id="root"></div>';
     container = document.getElementById('root') as HTMLDivElement;
     root = createRoot(container);
@@ -127,7 +129,7 @@ describe('MDF-PWCONFIRM -- the notice survives React 18 Strict Mode double-invok
       );
     });
 
-    expect(container.textContent).toContain('Your password was changed. Please sign in again.');
+    expect(container.textContent).toContain(message);
     expect(window.location.search).toBe('');
   });
 });
