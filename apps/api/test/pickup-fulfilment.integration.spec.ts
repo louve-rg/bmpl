@@ -237,9 +237,23 @@ describe('pickup fulfilment', () => {
    * all finalize inventory before any of them committed. Measured on
    * unmodified code: a qty=2 order's inventory lost 2*N units instead of
    * 2, with N FULFILLED InventoryChange rows instead of 1.
+   *
+   * Second pass, after CI caught the first fix's own test asserting the
+   * wrong invariant (god's mechanism check + a staggered-dispatch repro
+   * confirmed it: with real concurrency, calls that lose the claim because
+   * the order is ALREADY PICKED_UP correctly get the SAME success a caller
+   * who discovered that a moment earlier already gets from `confirmPickup`'s
+   * own outer idempotent check — see the existing "confirmation is
+   * idempotent" test above for the non-concurrent half of that same
+   * contract). So "exactly one 201" was never the right thing to assert — a
+   * PIN confirmed five times concurrently is one fact, confirmed five
+   * times, not five callers competing for one win. The real invariant,
+   * unchanged by this correction, is that the EXPENSIVE WORK — the
+   * inventory finalize, the audit row, the notification — happens exactly
+   * once no matter how many callers confirm it.
    */
   describe('finalize(): concurrent confirmPickup calls on one READY_FOR_PICKUP order (ORDER-PICKUP-DOUBLE-FINALIZE)', () => {
-    it('exactly one winner, inventory decremented by quantity exactly ONCE, one FULFILLED change row, losers refuse — never 429', async () => {
+    it('every concurrent confirm with the same valid PIN succeeds, but inventory finalizes exactly ONCE — never 429, never a false conflict', async () => {
       const vendor = await makeVendor();
       const o = await makePickupOrder(vendor, 2);
       await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`).expect(201);
@@ -247,27 +261,32 @@ describe('pickup fulfilment', () => {
 
       const invBefore = await ctx.prisma.inventory.findUniqueOrThrow({ where: { id: vendor.inventoryId } });
       const changeCountBefore = await ctx.prisma.inventoryChange.count({ where: { inventoryId: vendor.inventoryId, reason: 'FULFILLED' } });
+      const pickedUpAuditBefore = await ctx.prisma.auditLog.count({ where: { action: 'VENDOR_ORDER_PICKED_UP', newValue: { path: ['vendorOrderId'], equals: o.vendorOrderId } } });
 
       const N = 5;
       const responses = await Promise.all(
         Array.from({ length: N }, () => post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/confirm-pickup`, { pin })),
       );
-      const wins = responses.filter((r) => r.status === 201);
-      const losses = responses.filter((r) => r.status !== 201);
-      expect(wins).toHaveLength(1);
-      expect(losses).toHaveLength(N - 1);
-      for (const r of losses) {
-        // Trap: the route carries @StrictThrottle() — a test asserting only
-        // "the losers failed" without excluding 429 would pass against
-        // completely unguarded code too.
+      for (const r of responses) {
+        // Trap: the route carries @StrictThrottle() — a test that only
+        // checks the HAPPY shape without excluding 429 would pass against
+        // a completely unguarded (and separately broken) throttle config.
         expect(r.status).not.toBe(429);
-        expect([400, 409]).toContain(r.status);
+        // Every one of these five calls submits the SAME correct PIN for the
+        // SAME order — there is no genuine conflict to have here, win or
+        // echo, so every single one must succeed.
+        expect(r.status).toBe(201);
+        expect(r.body.status).toBe('PICKED_UP');
       }
 
+      // The side effects of actually finalizing — the part the original
+      // defect duplicated — happen exactly once, regardless of how many of
+      // the five calls above were the real winner vs. an idempotent echo.
       const invAfter = await ctx.prisma.inventory.findUniqueOrThrow({ where: { id: vendor.inventoryId } });
       expect(invAfter.quantity).toBe(invBefore.quantity - 2); // NOT -2*N
       expect(invAfter.reserved).toBe(0);
       expect(await ctx.prisma.inventoryChange.count({ where: { inventoryId: vendor.inventoryId, reason: 'FULFILLED' } })).toBe(changeCountBefore + 1);
+      expect(await ctx.prisma.auditLog.count({ where: { action: 'VENDOR_ORDER_PICKED_UP', newValue: { path: ['vendorOrderId'], equals: o.vendorOrderId } } })).toBe(pickedUpAuditBefore + 1);
 
       const voAfter = await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: o.vendorOrderId } });
       expect(voAfter.status).toBe('PICKED_UP');
