@@ -59,6 +59,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import {
   bootApp,
   cookiesOf,
@@ -458,10 +459,13 @@ describe('A. baseline — invariants hold under existing (non-transfer) money mo
 });
 
 // ============================================================================
-// Section B — the frozen P2P contract. Requires WALLET-P2P-API (Pam) merged.
-// Written against the exact contract god circulated; not yet runnable against
-// `main` as of this suite's authoring (no /wallet/transfers route exists on
-// main — confirmed by reading wallet.controller.ts directly, not assumed).
+// Section B — the frozen P2P contract. Requires WALLET-P2P-API (Pam) merged
+// to main; verified for real against her branch `feat/wallet-p2p-api` (#895,
+// ecbef64a) by a local, uncommitted merge into this worktree — not guessed
+// from reading her diff. The `skipNotTested` fallbacks below stay in place
+// deliberately as a load-bearing safety net (dormant once main has the real
+// routes, loud instead of silently green if a route ever regresses away
+// again — the same vacuous-pass lesson this whole file was built around.
 // ============================================================================
 describe('B. P2P transfer contract — reconciliation after real transfers', () => {
   it('recipient-lookup: 200 for an eligible account, 404 (not disclosing which reason) for an ineligible one', async (t) => {
@@ -495,7 +499,7 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     const res = await post(sender.cookies, 'wallet/transfers', {
       recipientUserId: lookup.body.recipientUserId,
       amountMinor: 20_00,
-      idempotencyKey: uniq(),
+      idempotencyKey: randomUUID(),
       note: 'ledger-integrity single transfer',
     });
     expect(res.status).toBe(201);
@@ -521,7 +525,7 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     if (lookup.status !== 200) {
       return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — replay case NOT TESTED');
     }
-    const key = uniq();
+    const key = randomUUID();
     const first = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 10_00, idempotencyKey: key });
     expect(first.status).toBe(201);
     const second = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 10_00, idempotencyKey: key });
@@ -541,7 +545,7 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     if (lookup.status !== 200) {
       return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — isTest case NOT TESTED');
     }
-    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: uniq() });
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: randomUUID() });
     if (res.status !== 201) return skipNotTested(t, `transfer post did not return 201 (status=${res.status}) — isTest case NOT TESTED`);
 
     const mislabelled = await findMislabelledTransfers();
@@ -560,7 +564,7 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     if (lookup.status !== 200) {
       return skipNotTested(t, 'recipient-lookup not available (WALLET-P2P-API not merged) — read-authorization case NOT TESTED');
     }
-    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: uniq() });
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 5_00, idempotencyKey: randomUUID() });
     if (res.status !== 201) return skipNotTested(t, `transfer post did not return 201 (status=${res.status}) — read-authorization case NOT TESTED`);
     const id = res.body.transactionId as string;
 
@@ -604,7 +608,7 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
     }
     // Available is 10000 - 8000(HELD) = 2000. A transfer of 5000 must be
     // refused even though RAW balance (10000) could cover it.
-    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 50_00, idempotencyKey: uniq() });
+    const res = await post(sender.cookies, 'wallet/transfers', { recipientUserId: lookup.body.recipientUserId, amountMinor: 50_00, idempotencyKey: randomUUID() });
     expect(res.status, `expected the transfer to be refused — summary().availableMinor should be 2000, raw balance is ${rawBefore}`).toBe(400);
 
     // The ledger is untouched: no new transaction, balance unchanged.
@@ -615,7 +619,10 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
 });
 
 // ============================================================================
-// Section C — adversarial. Requires WALLET-P2P-API (Pam) merged.
+// Section C — adversarial. Requires WALLET-P2P-API (Pam) merged to main;
+// verified for real against feat/wallet-p2p-api (#895) — including the
+// opposite-direction deadlock case, with Pam's sorted-account-id row-locking
+// at transferFunds confirmed by reading her code before this ran.
 // ============================================================================
 describe('C. adversarial — concurrent transfers against the same wallet', () => {
   it('N concurrent transfers draining a wallet that can cover only ONE of them: exactly one succeeds, invariants hold', async (t) => {
@@ -632,7 +639,7 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
     const userTotalBefore = await totalAcrossUserAccounts();
     const probe = await raceWithRequiredOverlap(
       ctx.prisma,
-      lookups.map((l, i) => () => post(sender.cookies, 'wallet/transfers', { recipientUserId: l.body.recipientUserId, amountMinor: STAKE, idempotencyKey: uniq() }).then((r) => r.status)),
+      lookups.map((l, i) => () => post(sender.cookies, 'wallet/transfers', { recipientUserId: l.body.recipientUserId, amountMinor: STAKE, idempotencyKey: randomUUID() }).then((r) => r.status)),
     );
 
     const succeeded = probe.responses.filter((s) => s === 201);
@@ -670,8 +677,8 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
     try {
       probe = await withTimeout(
         raceOverSeparateConnections(ctx.prisma, [
-          () => post(a.cookies, 'wallet/transfers', { recipientUserId: lookupBFromA.body.recipientUserId, amountMinor: 15_00, idempotencyKey: uniq() }).then((r) => r.status),
-          () => post(b.cookies, 'wallet/transfers', { recipientUserId: lookupAFromB.body.recipientUserId, amountMinor: 12_00, idempotencyKey: uniq() }).then((r) => r.status),
+          () => post(a.cookies, 'wallet/transfers', { recipientUserId: lookupBFromA.body.recipientUserId, amountMinor: 15_00, idempotencyKey: randomUUID() }).then((r) => r.status),
+          () => post(b.cookies, 'wallet/transfers', { recipientUserId: lookupAFromB.body.recipientUserId, amountMinor: 12_00, idempotencyKey: randomUUID() }).then((r) => r.status),
         ]),
         'opposite-direction simultaneous transfer pair',
       );
@@ -681,7 +688,16 @@ describe('C. adversarial — concurrent transfers against the same wallet', () =
       throw new Error(`VIOLATION — opposite simultaneous transfers deadlocked or timed out: ${(e as Error).message}`);
     }
 
-    expect(probe.responses.every((s) => s === 201), `statuses=${JSON.stringify(probe.responses)}`).toBe(true);
+    // Overlap evidence for the report — not a hard requirement here (an
+    // inconclusive-overlap run is a DIFFERENT failure mode than a deadlock,
+    // so it must not be conflated with the VIOLATION throw above), but the
+    // claim "no deadlock under genuine concurrency" is only as strong as the
+    // proof that the two calls actually overlapped rather than serializing
+    // by luck before either lock was taken.
+    console.warn(
+      `[WALLET-P2P-LEDGER-INTEGRITY] opposite-transfer race overlap evidence: observed=${probe.observed}, peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs}`,
+    );
+    expect(probe.responses.every((s) => s === 201), `statuses=${JSON.stringify(probe.responses)}, observed=${probe.observed}, peakConcurrentActive=${probe.peakConcurrentActive}`).toBe(true);
     await assertAllInvariantsHold('after opposite simultaneous transfers');
 
     const walletA = await walletOf(a.userId);
