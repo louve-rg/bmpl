@@ -860,7 +860,10 @@ export class OrdersService {
     });
     let itemsReleased = 0;
     for (const o of orders) {
-      const r = await this.releaseReservations(o.id, null);
+      // actorId null (no signed-in person did this) + an explicit system
+      // reason, so the audit row names the trigger instead of leaving reason
+      // null — the one gap left by making reason mandatory everywhere else.
+      const r = await this.releaseReservations(o.id, null, 'System: boot-time cleanup of reservations held by the production verification account (MaintenanceService.onApplicationBootstrap).');
       itemsReleased += r.itemsReleased;
     }
     return { orders: orders.length, itemsReleased };
