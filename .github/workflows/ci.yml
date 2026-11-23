@@ -878,6 +878,35 @@ jobs:
       - name: Shipping OpenAPI route drift (DOCS-SHIPPING-SPEC-24-UNDOCUMENTED)
         run: node scripts/detect-shipping-openapi-route-drift.mjs
 
+      # Adopted at zero drift on purpose, same reasoning as account.yaml's and
+      # shipping.yaml's checks just above (API-MARKETPLACE-OPENAPI-UNGATED,
+      # 2026-11-23): marketplace.yaml was the one OpenAPI doc in this repo
+      # with NO drift check at all -- #854 shipped a documented route with no
+      # requestBody and the wrong response codes, and nothing noticed, because
+      # nothing was looking. A route-presence sizing pass found marketplace.yaml
+      # missing 9 real routes and an `{action}` path-param template where the
+      # controllers actually expose 4 literal verb routes each; both were
+      # fixed (#863) before this check was switched on. Scoped to an EXACT
+      # allowlist of marketplace.yaml's own base prefixes (MARKETPLACE_PREFIXES
+      # in the script, not a shipping-style prefix-family match -- several of
+      # marketplace's own roots, admin/* and vendor/* and driver/*, are ALSO
+      # used by other specs for unrelated sub-trees, so a family match here
+      # would wrongly sweep those in; see the script's own header for the
+      # full reasoning), never the other hand-maintained specs under
+      # docs/openapi/ that still have real, measured drift
+      # (scripts/measure-openapi-route-drift-all-specs.mjs) and would redden
+      # main immediately if checked this way.
+      #
+      # THIS CHECKS ROUTE PRESENCE ONLY -- method + path existence. It does
+      # NOT check parameters, request bodies, response codes or any other
+      # content of a documented operation, which is exactly the #854 class
+      # of defect that triggered this card. A green tick here means every
+      # real route has a matching spec entry, never that the entry is
+      # correct. Content accuracy is a separate, unstarted, unmeasured
+      # initiative -- do not read this check passing as evidence of it.
+      - name: Marketplace OpenAPI route drift (API-MARKETPLACE-OPENAPI-UNGATED)
+        run: node scripts/detect-marketplace-openapi-route-drift.mjs
+
       # scripts/detect-tracked-deletions.mjs is DELIBERATELY NOT WIRED HERE,
       # and must not be added later without re-reading this comment first
       # (BMPL-310/BMPL-312): it checks `git status` across every checkout
