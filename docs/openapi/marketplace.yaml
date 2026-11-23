@@ -961,6 +961,56 @@ paths:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [] }]
       responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /wallet/transfers/recipient-lookup:
+    post:
+      tags: [Wallet]
+      summary: Resolve a transfer recipient by exact email (rate-limited; POST so the email never reaches a URL, access log or browser history)
+      description: >
+        Recipient identification is EXACT EMAIL ONLY — no partial search, no
+        autocomplete, no phone lookup. `{ recipientUserId, displayName }` on
+        success, where `displayName` is first name + last-initial only
+        (nothing else about the recipient leaves the server). Not found,
+        suspended and deactivated all return the SAME 404 message, so a
+        sender can never tell which of the three they hit for someone
+        else's email. A pure read — never creates a wallet account.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: OK }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { description: "No eligible BML account for that email address" }
+  /wallet/transfers:
+    post:
+      tags: [Wallet]
+      summary: Send money to another BML wallet (rate-limited; audited)
+      description: >
+        Body `{ recipientUserId, amountMinor (integer, > 0), idempotencyKey
+        (client-generated uuid), note? (<= 140 chars) }`. No fee, no limit
+        beyond the sender's own AVAILABLE balance (ledger minus active HELD
+        holds — never raw balance, so a transfer can never outrun an
+        escrow hold), no pending state: posts atomically through the same
+        double-entry engine as every other wallet movement, or refuses.
+        `isTest` is inherited from the sender's own funds
+        (`isTestFunded`), never from the request and never from either
+        party's `User.isTest`. A repeated `idempotencyKey` replays the
+        ORIGINAL receipt with `replayed: true` at 200, rather than posting
+        a second movement.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: "Posted — TransferReceipt" }
+        "200": { description: "Replayed an already-posted transfer — TransferReceipt with replayed:true" }
+        "400": { description: "Amount <= 0 or non-integer, insufficient available funds, self-transfer, sender or recipient wallet not ACTIVE" }
+        "404": { description: Unknown recipient }
+  /wallet/transfers/{transactionId}:
+    get:
+      tags: [Wallet]
+      summary: A single transfer's receipt — sender or recipient only
+      description: >
+        Anyone else gets the SAME 404 a nonexistent id gets, never a 403
+        — a 403 would confirm the transfer exists. `direction` and
+        `counterpartyName` are computed relative to the caller.
+      parameters: [ { name: transactionId, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
   /wallet/top-up:
     post:
       tags: [Wallet]

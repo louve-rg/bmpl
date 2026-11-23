@@ -17,3 +17,4 @@ export * from './realestate';
 export * from './marketing';
 export * from './shipping';
 export * from './terminal';
+export * from './wallet';

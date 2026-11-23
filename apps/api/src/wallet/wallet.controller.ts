@@ -1,6 +1,16 @@
-import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, Post, Query, Res } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { paginationSchema, walletTopUpSchema, type Pagination, type WalletTopUpInput } from '@bmpl/validation';
+import type { Response } from 'express';
+import {
+  createTransferSchema,
+  paginationSchema,
+  transferRecipientLookupSchema,
+  walletTopUpSchema,
+  type CreateTransferInput,
+  type Pagination,
+  type TransferRecipientLookupInput,
+  type WalletTopUpInput,
+} from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
@@ -51,6 +61,53 @@ export class WalletController {
   @Get('transactions/:id')
   transaction(@CurrentUser() user: AuthContext, @Param('id') id: string) {
     return this.wallet.getForUser(user.userId, id);
+  }
+
+  /**
+   * Resolve who BZ$ would go to before committing to send it.
+   *
+   * POST, not GET — deliberately: the email stays out of URLs, access logs
+   * and browser history. Same response either way a human asked the
+   * question wrongly (no such account, a suspended one, an ineligible one):
+   * see `WalletService.lookupTransferRecipient`'s own comment for why a
+   * sender must never be able to tell those apart.
+   */
+  @StrictThrottle()
+  @HttpCode(200)
+  @Post('transfers/recipient-lookup')
+  lookupTransferRecipient(@Body(ZodBody(transferRecipientLookupSchema)) dto: TransferRecipientLookupInput) {
+    return this.wallet.lookupTransferRecipient(dto.email);
+  }
+
+  /**
+   * Send money to another BML wallet. No fee, no limit beyond your own
+   * available balance, no pending state — this posts, atomically, or it
+   * refuses. See `WalletService.transferFunds` for the ledger mechanics.
+   *
+   * A replay of the same `idempotencyKey` returns 200 with the ORIGINAL
+   * receipt (`replayed: true`) rather than the 201 a fresh post gets — not
+   * an error, because it is not a second movement.
+   */
+  @StrictThrottle()
+  @Post('transfers')
+  async createTransfer(
+    @CurrentUser() user: AuthContext,
+    @Body(ZodBody(createTransferSchema)) dto: CreateTransferInput,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const receipt = await this.wallet.transferFunds(user.userId, dto);
+    res.status(receipt.replayed ? 200 : 201);
+    return receipt;
+  }
+
+  /**
+   * A single transfer's receipt — sender or recipient only. Anyone else
+   * gets the same 404 a nonexistent id gets; see
+   * `WalletService.getTransferReceipt` for why that is never a 403.
+   */
+  @Get('transfers/:transactionId')
+  getTransferReceipt(@CurrentUser() user: AuthContext, @Param('transactionId') transactionId: string) {
+    return this.wallet.getTransferReceipt(user.userId, transactionId);
   }
 
   /**
