@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SessionExpiredBanner } from '../components/SessionExpiredBanner';
+import { LaunchAnnouncementBar } from '../components/marketing/LaunchAnnouncementBar';
 
 export const metadata: Metadata = {
   title: 'Belize Marketplace & Logistics — Your Complete Commerce Solution',
@@ -25,6 +26,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        {/* S2-ANNOUNCE: first in the body, in normal flow (not sticky/fixed) --
+            see LaunchAnnouncementBar's own comment for why that keeps both
+            existing `sticky top-0` headers (public Header, dashboard shell)
+            unaffected, and why THIS element owns the top safe-area inset
+            rather than either of them. */}
+        <LaunchAnnouncementBar />
         {children}
         <SessionExpiredBanner />
       </body>
