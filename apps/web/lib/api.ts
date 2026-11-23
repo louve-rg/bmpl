@@ -142,16 +142,24 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
     // level down to the response shape instead of the endpoint).
     //
     // Inverted instead: fire ONLY on a POSITIVE confirmation the session is
-    // actually dead, never by elimination. `session.service.ts`'s `rotate()`
-    // (the only code path behind this endpoint, auth.controller.ts:118) has
-    // exactly two throw sites and both are a genuine 401 -- "Session
-    // expired. Please sign in again." (:89, a real dead/revoked session) and
-    // "Account is not active." (:92) -- neither is the no-cookie case, which
-    // throws its own distinct 401 "No refresh token provided." one level up
-    // in the controller itself (auth.controller.ts:117). Anything else this
-    // endpoint can return -- a 429 throttle, a CSRF 403, a proxy 502/503, an
-    // unhandled 500 -- is NOT a confirmed expiry and must not fire the
-    // listener either, because none of them went through `rotate()` at all.
+    // actually dead, never by elimination. POST /auth/refresh can return
+    // exactly THREE distinguishable 401 messages, and no others, traced to
+    // their only call sites: `session.service.ts`'s `rotate()` (the only
+    // code path behind this endpoint, auth.controller.ts:118) throws
+    // "Session expired. Please sign in again." (:89, a revoked/expired/
+    // unknown session) and "Account is not active." (:92, a deactivated
+    // user) -- both genuine, both should warn. The no-cookie case throws its
+    // own distinct "No refresh token provided." one level up, in the
+    // controller itself, BEFORE rotate() is ever called (auth.controller.ts:117)
+    // -- never a real expiry. `status === 401 && message !== 'No refresh
+    // token provided.'` therefore catches both real-expiry messages and
+    // nothing else. (apps/web/next.config.mjs:75-79 proxies /api/* with a
+    // plain Next.js rewrite, not a route handler, so this status and body
+    // reach the browser exactly as the API sent them -- nothing here is
+    // reshaping the response in between.) Anything else this endpoint can
+    // return -- a 429 throttle, a CSRF 403, a proxy 502/503, an unhandled
+    // 500 -- is NOT a confirmed expiry and must not fire the listener
+    // either, because none of them went through `rotate()` at all.
     // The bias this leaves: a real dead session arriving in some shape this
     // endpoint has never actually been observed to return would show no
     // banner -- the visitor just hits a login wall on their next real action,

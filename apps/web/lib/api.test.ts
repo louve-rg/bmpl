@@ -358,4 +358,31 @@ describe('web api session-expiry notification', () => {
     } satisfies Partial<ApiError>);
     expect(listener).not.toHaveBeenCalled();
   });
+
+  /**
+   * god (2026-11-23): "that one has NO /auth/ guard at all" -- uploadBinary's
+   * suppression check is a second, separate copy of the same logic
+   * requestWithResponse uses, and had the same unenumerated-shape gap. Same
+   * proof, same test, on the other call site.
+   */
+  it('does NOT notify an upload attempt on an unexpected 5xx from refresh (e.g. a proxy 502) -- silent by construction, not by enumeration', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        return url.endsWith('/auth/refresh')
+          ? new Response('<html>502 Bad Gateway</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })
+          : jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    await expect(
+      api.upload('/products/images', new Blob(['x'], { type: 'image/png' })),
+    ).rejects.toMatchObject({
+      status: 401,
+    } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
