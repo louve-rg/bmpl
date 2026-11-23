@@ -98,10 +98,25 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
       credentials: 'include',
     });
     if (refreshed.ok) return requestWithResponse(path, init, false);
-    // Refresh itself failed, not just the original call -- a real expiry, not
-    // a guess. Never for an `/auth/*` call itself (login/register/etc. 401
-    // for their own reasons; there was no session there to have expired).
-    if (!path.startsWith('/auth/')) sessionExpiredListener?.();
+    // Refresh itself failed, not just the original call. That is NOT the
+    // same thing as a real expiry: a visitor with no refresh cookie at all
+    // (never signed in) hits this exact branch too, since several nav-level
+    // components call auth-gated endpoints unconditionally on every page
+    // load regardless of login state (WEB-FALSE-SESSION-EXPIRED). The old
+    // guard here only excluded `/auth/*` calls themselves, which left every
+    // one of those background calls free to tell an anonymous visitor their
+    // session expired when they never had one.
+    //
+    // auth.controller.ts's refresh endpoint already distinguishes the two
+    // cases in its own response body: no cookie sent at all throws exactly
+    // "No refresh token provided." (auth.controller.ts:117), while a real,
+    // dead session throws a different message (session.service.ts:89/92,
+    // e.g. "Session expired. Please sign in again."). Suppress the listener
+    // only for the former -- never widen this into a per-endpoint allowlist,
+    // which would leave the next auth-gated nav call to re-create this bug.
+    const refreshBody = await refreshed.json().catch(() => null);
+    const neverHadASession = refreshBody?.message === 'No refresh token provided.';
+    if (!path.startsWith('/auth/') && !neverHadASession) sessionExpiredListener?.();
   }
 
   const text = await res.text();
@@ -170,7 +185,10 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   if (res.status === 401 && retry) {
     const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
     if (refreshed.ok) return uploadBinary<T>(path, body, false);
-    sessionExpiredListener?.();
+    // Same distinction as `requestWithResponse` above -- see its comment.
+    const refreshBody = await refreshed.json().catch(() => null);
+    const neverHadASession = refreshBody?.message === 'No refresh token provided.';
+    if (!neverHadASession) sessionExpiredListener?.();
   }
 
   const text = await res.text();
