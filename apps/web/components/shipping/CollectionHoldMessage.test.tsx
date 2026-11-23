@@ -37,7 +37,7 @@ describe('CollectionHoldMessageText (MDF-942)', () => {
     const link = el.querySelector('a');
     expect(link).toBeTruthy();
     expect(link!.textContent).toBe('contact support');
-    expect(link!.getAttribute('href')).toBe('mailto:support@bzemarketplace.com?subject=Collection%20code%20locked');
+    expect(link!.getAttribute('href')).toBe('mailto:info@bzemarketplace.com?subject=Collection%20code%20locked');
   });
 
   it('matches the phrase case-insensitively', () => {

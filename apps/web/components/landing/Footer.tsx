@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BrandLockup } from '../Logo';
+import { contactMailto } from '../../lib/contact';
 
 type LinkItem = { label: string; href: string };
 
@@ -18,7 +19,7 @@ const COLUMNS: Array<{ heading: string; links: LinkItem[] }> = [
   {
     heading: 'Company',
     links: [
-      { label: 'Contact', href: 'mailto:support@bzemarketplace.com' },
+      { label: 'Contact', href: contactMailto() },
     ],
   },
   {
