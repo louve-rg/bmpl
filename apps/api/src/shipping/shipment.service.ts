@@ -4157,9 +4157,18 @@ export class ShipmentService {
    * TERM-12 / MDF-645: `code` is verified by verifyCollectionPinOrThrow
    * BEFORE this transaction opens — closing the gap where collection took a
    * typed name and verified nothing at all. The transaction's own
-   * status/collectedAt checks stay exactly as they were: the race-safe,
-   * authoritative copy, same two-guards-for-one-fact shape MDF-641 uses for
-   * completeLeg's arrival check.
+   * status/collectedAt checks, on the other hand, were NOT race-safe despite
+   * saying so here until SHIP-RECORDCOLLECTION-CONCURRENT: the read above was
+   * unlocked and the write that followed was an unconditional tx.shipment.update
+   * — three concurrent calls with the right code all read collectedAt null,
+   * all passed, and all committed their own HUB->RECIPIENT custody row and
+   * their own SHIPMENT_LEG_HANDOFF audit row for one real collection. Fixed
+   * below with the same conditional-claim pattern completeLeg/flagException/
+   * departLeg/arriveLeg/startLeg/confirmAndStartLeg already use for the
+   * identical class of race (MDF-223, SHIP-LEG-CONCURRENT-WRITES): the
+   * `updateMany` re-asserts `collectedAt: null` inside the write itself, and
+   * a loser whose read already matched this call's own `s.collectedAt`
+   * check still fails to claim the row.
    */
   async recordCollection(id: string, collectedByName: string, code: string | undefined, actor: { userId: string }) {
     await this.verifyCollectionPinOrThrow(id, code, actor);
@@ -4174,7 +4183,13 @@ export class ShipmentService {
         throw new BadRequestException('That shipment is not waiting to be collected yet.');
       }
 
-      await tx.shipment.update({ where: { id }, data: { collectedAt: new Date() } });
+      // SHIP-RECORDCOLLECTION-CONCURRENT: the claim gates the custody write
+      // (and everything after it) rather than sitting beside it — refusing
+      // here means appendCustody below never runs for a loser.
+      const claimed = await tx.shipment.updateMany({ where: { id, collectedAt: null }, data: { collectedAt: new Date() } });
+      if (claimed.count === 0) {
+        throw new ConflictException('That shipment changed state before the collection could be recorded — reload and try again.');
+      }
       const finalLeg = [...s.legs].sort((a, b) => b.sequence - a.sequence)[0];
       await this.appendCustody(tx, s.id, finalLeg?.id ?? null, {
         fromHolder: 'HUB',
