@@ -13,12 +13,19 @@ const svg = (children: ReactNode) => (
   </svg>
 );
 
+/**
+ * S2-WALLET-CLAIMS: every remaining claim here must be checkable against
+ * code (wallet.service.ts's escrow hold/release, and the real GET
+ * /wallet/transactions ledger). "Customer Payments", "Vendor Earnings",
+ * "Transfers" and "Withdrawals" were cut: no payment provider, payout,
+ * transfer or bank/withdrawal rail exists anywhere in this system
+ * (WalletTransactionType.TRANSFER/WITHDRAWAL are schema enum values with no
+ * code path that ever creates one), and apps/web/app/wallet/page.tsx tells
+ * UAT testers directly that funds "cannot be withdrawn or transferred" --
+ * the opposite of what this section used to promise.
+ */
 const FEATURES: Array<{ title: string; desc: string; icon: ReactNode }> = [
-  { title: 'Customer Payments', desc: 'Seamless checkout across every service.', icon: svg(<><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /></>) },
-  { title: 'Vendor Earnings', desc: 'Fast, transparent payouts.', icon: svg(<><path d="M12 19V5" /><path d="m6 11 6-6 6 6" /></>) },
   { title: 'Escrow Protection', desc: 'Funds held safely until delivery.', icon: svg(<><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>) },
-  { title: 'Transfers', desc: 'Move money in seconds.', icon: svg(<><path d="M4 8h13m0 0-3-3m3 3-3 3" /><path d="M20 16H7m0 0 3-3m-3 3 3 3" /></>) },
-  { title: 'Withdrawals', desc: 'Cash out straight to your bank.', icon: svg(<><path d="M4 10h16M6 10V7l6-3 6 3v3M6 10v7m5-7v7m4-7v7M4 20h16" /></>) },
   { title: 'Secure Ledger', desc: 'Every entry auditable.', icon: svg(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>) },
 ];
 
@@ -50,8 +57,8 @@ export function WalletSection() {
             <br /> Every transaction.
           </h2>
           <p className="mt-4 max-w-lg text-base leading-relaxed text-slate-600">
-            Pay vendors, receive earnings, manage escrow, transfer funds, and track every transaction
-            from one secure balance built into the platform.
+            Hold funds safely in escrow until delivery, and track every transaction from one secure
+            balance built into the platform.
           </p>
 
           <dl className="mt-8 grid gap-x-6 gap-y-5 sm:grid-cols-2">
@@ -85,17 +92,30 @@ export function WalletSection() {
 
 /* ------------------------------------------------------------- dashboard */
 
-const ACTIONS: Array<{ label: string; icon: ReactNode }> = [
-  { label: 'Send', icon: <path d="M4 12 20 5l-6 15-3-6-7-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /> },
-  { label: 'Request', icon: <path d="M12 5v14m0 0-5-5m5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /> },
-  { label: 'Top up', icon: <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /> },
-  { label: 'QR', icon: <><rect x="4" y="4" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><rect x="14" y="4" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><rect x="4" y="14" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><path d="M14 14h3v3m3 0v3h-6v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></> },
-];
+/**
+ * S2-WALLET-CLAIMS: the quick-actions row (Send / Request / Top up / QR) was
+ * removed entirely, not just its labels. None pass the same checkable-code
+ * rule the FEATURES list above was just held to: there is no send/request/QR
+ * transfer endpoint anywhere in apps/api/src/wallet, and "Top up" throws
+ * ForbiddenException for any non-test account ("Adding money to your wallet
+ * is not available yet. BML does not have a card or bank payment method
+ * connected." -- wallet.controller.ts) and is itself a temporary,
+ * self-service UAT-only mechanism that must be disabled before commercial
+ * launch (CLAUDE.md section 4). Four labelled affordances is a stronger claim
+ * than a sentence, so a row where none of the four check out doesn't get a
+ * lighter standard than the prose did -- the row is gone, not rebuilt smaller.
+ */
 
+/**
+ * Recent-activity sample entries, replaced for the same reason: the old
+ * "Sunrise Grocers" purchase, "Delivery earnings" and "Wallet top-up" lines
+ * each implied a payment/earning/funding capability this file's FEATURES
+ * list no longer claims. Escrow hold/release is the one real, checkable
+ * mechanism (wallet.service.ts) left to illustrate.
+ */
 const TXNS: Array<{ label: string; sub: string; amount: string; positive?: boolean; icon: ReactNode }> = [
-  { label: 'Sunrise Grocers', sub: 'Today · 9:41 AM', amount: '−BZ$84.50', icon: <><path d="M4 8h16l-1 3H5L4 8Z" stroke="currentColor" strokeWidth="1.5" /><path d="M5 11v8h14v-8" stroke="currentColor" strokeWidth="1.5" /></> },
-  { label: 'Delivery earnings', sub: 'Today · 8:12 AM', amount: '+BZ$32.00', positive: true, icon: <><path d="M3 7h11v9H3z" stroke="currentColor" strokeWidth="1.5" /><path d="M14 10h4l3 3v3h-7" stroke="currentColor" strokeWidth="1.5" /></> },
-  { label: 'Wallet top-up', sub: 'Yesterday', amount: '+BZ$500.00', positive: true, icon: <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /> },
+  { label: 'Order #BZ-4821 — escrow held', sub: 'Today · 9:41 AM', amount: '−BZ$84.50', icon: <><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" strokeWidth="1.5" /></> },
+  { label: 'Escrow released', sub: 'Yesterday', amount: '+BZ$32.00', positive: true, icon: <><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" strokeWidth="1.5" /><path d="m9 12 2 2 4-4" strokeWidth="1.5" /></> },
 ];
 
 function WalletDashboard() {
@@ -110,22 +130,21 @@ function WalletDashboard() {
         </div>
         <p className="relative mt-4 text-[11px] text-white/60">Available balance</p>
         <p className="relative text-3xl font-bold tracking-tight">BZ$1,250.00</p>
+        {/* S2-WALLET-CLAIMS: a masked "•••• •••• •••• 4821" number used to sit
+            here. A card number is a stronger claim than any sentence this file
+            removed -- it reads as a funded instrument behind the balance, and
+            PaymentMethodType.CREDIT_CARD is an enum value with nothing behind
+            it, same shape as TRANSFER/WITHDRAWAL. Replaced with what the
+            wallet actually is: a platform balance, escrow-protected. */}
         <div className="relative mt-5 flex items-center justify-between">
-          <span className="font-mono text-sm tracking-widest text-white/80">•••• •••• •••• 4821</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-white/80">
+            <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden>
+              <path d="M10 2.5l5.5 2v4.2c0 3.4-2.3 6-5.5 7-3.2-1-5.5-3.6-5.5-7V4.5L10 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            </svg>
+            Escrow protected
+          </span>
           <span className="text-xs font-semibold text-white/70">BZD</span>
         </div>
-      </div>
-
-      {/* Quick actions */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {ACTIONS.map((a) => (
-          <div key={a.label} className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-100 bg-slate-50 py-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-belize-blue/10 text-belize-blue" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">{a.icon}</svg>
-            </span>
-            <span className="text-[10px] font-medium text-slate-600">{a.label}</span>
-          </div>
-        ))}
       </div>
 
       {/* Recent activity */}
