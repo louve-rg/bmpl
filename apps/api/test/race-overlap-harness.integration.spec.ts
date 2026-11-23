@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, raceWithRequiredOverlap, seedRoles, type TestContext } from './helpers';
+import { bootApp, cookiesOf, raceWithRequiredOverlap, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -75,9 +75,11 @@ async function inv(productId: string) {
 beforeAll(async () => {
   ctx = await bootApp();
   await seedRoles(ctx.prisma);
-  const adminLogin = await request(ctx.server)
-    .post('/api/auth/login')
-    .send({ email: 'admin@bzemarketplace.com', password: 'ChangeMe!Admin123' });
+  // Fixture admin created in THIS run, not a login against a seeded account
+  // CI's own seed step may not produce — same pattern as
+  // wallet-activation.integration.spec.ts and others.
+  const a = await seedSuperAdmin(ctx.prisma, `raceharness_admin_${uniq()}@example.bz`);
+  const adminLogin = await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password });
   if (adminLogin.status !== 200 && adminLogin.status !== 201) throw new Error(`admin login failed ${adminLogin.status}: ${JSON.stringify(adminLogin.body)}`);
   admin = cookiesOf(adminLogin);
   const cat = await post(admin, 'admin/categories', { name: `RaceHarness ${uniq()}` });
