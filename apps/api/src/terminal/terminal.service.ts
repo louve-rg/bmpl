@@ -430,19 +430,36 @@ export class TerminalService {
 
   /* ---- admin: end member --------------------------------------------------- */
 
+  /**
+   * TERMINAL-ENDMEMBER-NO-MANAGER-FLOOR: this admin door had NO floor
+   * check of any kind until this fix — unlike `staffDeactivateMember`
+   * (its self-serve mirror, guarded by `assertManagerFloorHolds` since
+   * FIN-SELF-LOCKOUT), an administrator could end a company's sole
+   * ACTIVE MANAGER outright, leaving zero live managers with no
+   * self-serve path back in. Same floor, same helper, no self-action
+   * guard here — an administrator acting on a member is never "acting
+   * on themselves" in the sense that guard exists for, so only the
+   * company-wide floor applies.
+   */
   async endMember(actorId: string, companyId: string, userId: string) {
-    const existing = await this.prisma.terminalCompanyMember.findUnique({
-      where: { terminalCompanyId_userId: { terminalCompanyId: companyId, userId } },
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.terminalCompanyMember.findUnique({
+        where: { terminalCompanyId_userId: { terminalCompanyId: companyId, userId } },
+      });
+      if (!existing || existing.status === 'ENDED') throw new NotFoundException('Member not found.');
+      await this.assertManagerFloorHolds(tx, companyId, existing.memberRole === 'MANAGER');
+      await tx.terminalCompanyMember.update({ where: { id: existing.id }, data: { status: 'ENDED', endedAt: new Date() } });
+      await this.audit.record(
+        {
+          action: 'TERMINAL_COMPANY_MEMBER_ENDED',
+          actorId,
+          targetUserId: userId,
+          newValue: { terminalCompanyId: companyId },
+        },
+        tx,
+      );
+      return { ended: true as const };
     });
-    if (!existing || existing.status === 'ENDED') throw new NotFoundException('Member not found.');
-    await this.prisma.terminalCompanyMember.update({ where: { id: existing.id }, data: { status: 'ENDED', endedAt: new Date() } });
-    await this.audit.record({
-      action: 'TERMINAL_COMPANY_MEMBER_ENDED',
-      actorId,
-      targetUserId: userId,
-      newValue: { terminalCompanyId: companyId },
-    });
-    return { ended: true };
   }
 
   /**
