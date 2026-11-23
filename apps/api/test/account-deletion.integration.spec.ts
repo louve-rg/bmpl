@@ -580,8 +580,13 @@ describe('account deletion — refusals', () => {
     const provider = await ctx.prisma.passengerProviderProfile.create({
       data: { userId, businessName: 'Open Booking Transport', contactEmail: 'pax-ops@example.bz' },
     });
+    // Trip itself is already COMPLETED — deliberately terminal, so this
+    // test isolates the BOOKING check alone from the separate scheduled-
+    // trip check (ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL, its own
+    // test below): a booking can still be open on a trip whose own status
+    // no longer blocks anything by itself.
     const trip = await ctx.prisma.passengerTrip.create({
-      data: { reference: 'PAX-DEL-TEST-2', kind: 'SCHEDULED', status: 'SCHEDULED', providerProfileId: provider.id },
+      data: { reference: 'PAX-DEL-TEST-2', kind: 'SCHEDULED', status: 'COMPLETED', providerProfileId: provider.id },
     });
     const booking = await ctx.prisma.passengerBooking.create({
       data: { reference: 'PAX-BOOK-DEL-TEST-1', tripId: trip.id, status: 'CONFIRMED' },
@@ -595,6 +600,93 @@ describe('account deletion — refusals', () => {
     expect(res.body.reasons.some((r: string) => r.includes('Open Booking Transport'))).toBe(true);
 
     await ctx.prisma.passengerBooking.update({ where: { id: booking.id }, data: { status: 'CANCELLED' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  /**
+   * ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL: the open-booking check
+   * above only catches a trip once a rider has actually booked a seat on
+   * it. A SCHEDULED departure with zero bookings yet — or a fleet driver
+   * still affiliated to this operator, which has nothing to do with
+   * bookings at all — used to fall through with zero live-responsibility
+   * reasons and delete successfully, stranding the driver's affiliation.
+   */
+  it('refuses when the caller is a passenger operator with a scheduled trip and zero open bookings, and allows it once cancelled', async () => {
+    const email = 'delete-pax-operator-scheduled@example.bz';
+    const password = 'OperatorPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const provider = await ctx.prisma.passengerProviderProfile.create({
+      data: { userId, businessName: 'Scheduled Departure Transport', contactEmail: 'pax-sched@example.bz' },
+    });
+    const trip = await ctx.prisma.passengerTrip.create({
+      data: { reference: 'PAX-DEL-TEST-SCHED-1', kind: 'SCHEDULED', status: 'SCHEDULED', providerProfileId: provider.id },
+    });
+
+    const res = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.some((r: string) => r.includes('Scheduled Departure Transport'))).toBe(true);
+
+    await ctx.prisma.passengerTrip.update({ where: { id: trip.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: 'PROVIDER' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('refuses when the caller is a passenger operator with an affiliated active fleet driver, and allows it once the affiliation ends', async () => {
+    const email = 'delete-pax-operator-fleet@example.bz';
+    const password = 'OperatorPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+    const fleetDriver = await registerAndLogin('delete-pax-operator-fleet-driver@example.bz', 'FleetDriverPass123');
+
+    const provider = await ctx.prisma.passengerProviderProfile.create({
+      data: { userId, businessName: 'Affiliated Fleet Transport', contactEmail: 'pax-fleet@example.bz' },
+    });
+    const driverProfile = await ctx.prisma.passengerDriverProfile.create({
+      data: {
+        userId: fleetDriver.userId, legalName: 'Fleet Driver', displayName: 'Fleet Driver', phone: '6650097',
+        homeDistrict: 'BELIZE', licenceNumber: 'FLEET-LICENCE-DEL-1', licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const affiliation = await ctx.prisma.passengerFleetAffiliation.create({
+      data: { providerProfileId: provider.id, driverProfileId: driverProfile.id, initiatedBy: 'PROVIDER', status: 'ACCEPTED', acceptedAt: new Date() },
+    });
+
+    const res = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.some((r: string) => r.includes('Affiliated Fleet Transport'))).toBe(true);
+
+    await ctx.prisma.passengerFleetAffiliation.update({
+      where: { id: affiliation.id },
+      data: { status: 'ENDED', endedAt: new Date(), endedBy: 'PROVIDER' },
+    });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('allows a passenger operator with no open bookings, no scheduled trips and no affiliated fleet drivers to delete immediately', async () => {
+    const email = 'delete-pax-operator-clean@example.bz';
+    const password = 'OperatorPass12345';
+    const { cookies } = await registerAndLogin(email, password);
+    await ctx.prisma.passengerProviderProfile.create({
+      data: { userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email } })).id, businessName: 'Clean Transport', contactEmail: 'pax-clean@example.bz' },
+    });
+
     const allowed = await request(ctx.server)
       .delete('/api/me')
       .set('Cookie', cookies)
@@ -738,9 +830,15 @@ describe('account deletion — refusals', () => {
     });
 
     // MDF-949: a FLEET vehicle belonging to this account's OWN passenger-
-    // transport business, currently assigned to a SEPARATE, still-active
-    // driver. Must be LEFT ALONE even though the fleet's owner is the
-    // account being deleted — that driver may be using it right now.
+    // transport business. Must be LEFT ALONE even though the fleet's owner
+    // is the account being deleted. The driver below is deliberately an
+    // ENDED affiliation, not ACCEPTED — ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL
+    // now refuses deletion outright while any fleet driver is actively
+    // affiliated (own test below), so this fixture cannot reach a
+    // successful delete at all with a currently-active one. An ENDED
+    // affiliation still proves the real claim here: the fleet vehicle and
+    // its (former) driver's own row are never swept just because their
+    // shared provider is being deleted.
     const otherPaxDriverUser = await ctx.prisma.user.create({ data: { email: 'other-pax-driver@example.bz', passwordHash: 'x', firstName: 'Other', lastName: 'PaxDriver' } });
     const otherPaxDriver = await ctx.prisma.passengerDriverProfile.create({
       data: { userId: otherPaxDriverUser.id, legalName: 'Other Pax Driver', displayName: 'Other Pax Driver', phone: '6650098', homeDistrict: 'BELIZE', licenceNumber: 'OTHER-PAX-LICENCE-1', licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) },
@@ -749,7 +847,10 @@ describe('account deletion — refusals', () => {
       data: { providerProfileId: passengerProvider.id, type: 'VAN', make: 'Toyota', model: 'Hiace', licencePlate: 'REAL-FLEET-PLATE-1', seatCapacity: 10 },
     });
     await ctx.prisma.passengerFleetAffiliation.create({
-      data: { providerProfileId: passengerProvider.id, driverProfileId: otherPaxDriver.id, initiatedBy: 'PROVIDER', status: 'ACCEPTED', acceptedAt: new Date() },
+      data: {
+        providerProfileId: passengerProvider.id, driverProfileId: otherPaxDriver.id, initiatedBy: 'PROVIDER',
+        status: 'ENDED', acceptedAt: new Date(), endedAt: new Date(), endedBy: 'PROVIDER',
+      },
     });
     const roleApplication = await ctx.prisma.roleApplication.create({
       data: { userId, roleCode: 'DELIVERY_DRIVER', status: 'PENDING' },
