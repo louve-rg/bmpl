@@ -597,15 +597,30 @@ export class ShippingProviderService {
    * refuses a leg this org does not hold (404, not 403 — cross-org probing
    * learns nothing), so the only thing left to check is that there is a
    * live, unanswered proposal at all.
+   *
+   * SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG: a live, unanswered proposal is
+   * not the same thing as a leg nobody has moved yet. The staff door
+   * (`departLeg`) is deliberately allowed to depart a carrier-operated leg
+   * whose operator never accepted (MDF-560's own ruling — an admin
+   * arranging a departure by phone is ordinary operational work) — but that
+   * leaves a leg already at sea still showing this org a pending proposal.
+   * Accepting it there would be consent backdated onto a fact already in
+   * motion, not a real decision; `departedAt` is the one column that is
+   * always true the instant the leg physically left, however it got
+   * departed, so it is the correct gate here — same role `arrivedAt` plays
+   * for `departLeg` itself (MDF-907). Refusing this also closes `arrive()`
+   * below: it is gated on `operatorAcceptedAt`, which a refused accept can
+   * now never set.
    */
   async acceptLeg(userId: string, legId: string) {
     await this.assertMyLeg(userId, legId);
     const leg = await this.prisma.shipmentLeg.findUniqueOrThrow({
       where: { id: legId },
-      select: { id: true, operatedByProviderId: true, operatorAcceptedAt: true, operatorRejectedAt: true, shipment: { select: { id: true, reference: true } } },
+      select: { id: true, operatedByProviderId: true, operatorAcceptedAt: true, operatorRejectedAt: true, departedAt: true, shipment: { select: { id: true, reference: true } } },
     });
     if (leg.operatorAcceptedAt) throw new BadRequestException('This leg was already accepted.');
     if (leg.operatorRejectedAt) throw new BadRequestException('This leg was already rejected and is no longer yours to accept.');
+    if (leg.departedAt) throw new BadRequestException('This leg has already departed and can no longer be accepted as a pending proposal.');
     // MDF-500 security fix: accepting is a NEW commitment, not a
     // continuation of one already made. assertMyLeg above proves OWNERSHIP
     // only — a SUSPENDED/REVOKED org's isActive is untouched by design, so
@@ -657,10 +672,18 @@ export class ShippingProviderService {
         operatedByProviderId: true,
         operatorAcceptedAt: true,
         operatorRejectedAt: true,
+        departedAt: true,
         shipment: { select: { id: true, reference: true } },
       },
     });
     if (leg.operatorRejectedAt) throw new BadRequestException('This leg was already rejected.');
+    // SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG: the same "already at sea"
+    // fact that blocks a backdated accept blocks giving the leg back too —
+    // the staff door can depart a leg whose operator never answered the
+    // proposal (operatorAcceptedAt/operatorRejectedAt both still null), and
+    // rejecting that leg would clear operatedByProviderId on a leg already
+    // physically moving, leaving it departed with no carrier on record.
+    if (leg.departedAt) throw new BadRequestException('This leg has already departed and can no longer be rejected as a pending proposal.');
     // Reject answers a PROPOSAL. Once accepted, this org has already
     // committed — backing out from there is an exception/cancellation, not
     // a rejection of an offer that no longer exists. Keeps the write path
@@ -1062,11 +1085,17 @@ export class ShippingProviderService {
       isTest: l.shipment.isTest,
       // D3: mutual consent. Both null = a live proposal awaiting this org's
       // response — the UI's cue to show accept/reject instead of the
-      // ordinary depart/arrive controls.
+      // ordinary depart/arrive controls. SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG:
+      // a proposal stops being "live" the instant the leg actually departs,
+      // however that happened — the staff door may depart a carrier-operated
+      // leg whose operator never answered (MDF-560), and offering accept/
+      // reject on a leg already at sea is consent backdated onto a fact
+      // already in motion. Mirrors acceptLeg/rejectLeg's own write-side gate;
+      // not advisory-only, same as `assertMyAcceptedLeg`'s own comment notes.
       operatorAcceptedAt: l.operatorAcceptedAt,
       operatorRejectedAt: l.operatorRejectedAt,
-      canAccept: l.operatorAcceptedAt == null && l.operatorRejectedAt == null,
-      canReject: l.operatorAcceptedAt == null && l.operatorRejectedAt == null,
+      canAccept: l.operatorAcceptedAt == null && l.operatorRejectedAt == null && l.departedAt == null,
+      canReject: l.operatorAcceptedAt == null && l.operatorRejectedAt == null && l.departedAt == null,
       // What the operator can do right now, so the UI carries no second copy
       // of the state machine. PENDING means an earlier leg has not finished.
       // A proposal not yet accepted is not yet operable — depart/arrive stay

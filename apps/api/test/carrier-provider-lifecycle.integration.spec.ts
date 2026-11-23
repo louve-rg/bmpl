@@ -446,6 +446,60 @@ describe('D2/D3 — proposal, idempotency, and mutual consent', () => {
   });
 });
 
+/**
+ * SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG: Stanley's carrier-portal walk
+ * found the staff depart door (MDF-560's own allowed path — an admin may
+ * depart a carrier-operated leg whose operator never accepted) left the
+ * portal still showing that leg as a live, answerable proposal: canAccept
+ * stayed true on a leg already at sea, the carrier could accept it after
+ * the fact, and could then record an arrival on a leg it never itself
+ * departed. Deliberately NOT a consent gate on the staff door — that is the
+ * separate, owner-routed policy question (SHIP-CARRIER-CONSENT-STAFF-OVERRIDE).
+ * This closes the half that needs no ruling: once a leg has genuinely
+ * departed, it is no longer a pending proposal for ANYONE to answer.
+ */
+describe('SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG — a departed leg is no longer a pending proposal', () => {
+  it('canAccept/canReject go false, and accept/reject/arrive are all refused, once staff depart a leg its operator never answered', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+
+    // The staff door departs it with no operator consent at all — exactly
+    // the shape MDF-560 ruled legal for an admin arranging this by phone.
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/depart`, {})).status).toBe(201);
+
+    const read = await get(carrier.cookies, `shipping/provider/legs/${leg.id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.canAccept).toBe(false);
+    expect(read.body.canReject).toBe(false);
+
+    const accept = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {});
+    expect(accept.status).toBe(400);
+    expect(accept.body.message).toContain('already departed');
+
+    const reject = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/reject`, { reason: 'Too late now.' });
+    expect(reject.status).toBe(400);
+    expect(reject.body.message).toContain('already departed');
+
+    // Never accepted — the refused accept above never set operatorAcceptedAt
+    // — so arrive stays refused exactly like an unanswered proposal's would.
+    const arrive = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {});
+    expect(arrive.status).toBe(400);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(after.operatorAcceptedAt).toBeNull();
+    expect(after.operatorRejectedAt).toBeNull();
+    expect(after.operatedByProviderId).toBe(carrier.profileId);
+  });
+
+  it('a carrier that legitimately accepted and departed its own leg can still arrive it', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {})).status).toBe(201);
+  });
+});
+
 describe('self-service scope — own membership and route claim/release', () => {
   it("the org's OWNER manages its own membership; a non-owner STAFF member cannot", async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
