@@ -28,7 +28,10 @@
  *      by the funded amount" version of this check was itself wrong for a
  *      TOPUP, which is what surfaced the deeper problem in the original
  *      card. This version is NOT implied by invariant 1 and can actually
- *      fail.)
+ *      fail — proven, not assumed: Section A constructs a deliberately leaky
+ *      three-entry TRANSFER by hand and confirms the checker flags it
+ *      (god's second correction, 2026-11-23T22-47 — the same vacuity trap
+ *      applies to a leakage detector with nothing yet to detect).)
  *   5. isTest money and real money never merge into an unlabelled movement.
  *
  * Section A runs TODAY, against operations that already exist (TOPUP), and is
@@ -333,6 +336,71 @@ describe('A. baseline — invariants hold under existing (non-transfer) money mo
     const correct = await derivedBalance(wallet.id);
     await ctx.prisma.walletAccount.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: correct } });
     expect(await findCacheMismatches()).toEqual([]);
+  });
+
+  /**
+   * The checker itself, part 2 (god, 2026-11-23T22-47): findTransferLeakage()
+   * is vacuous today for the SAME reason the original invariant 4 was — no
+   * TRANSFER rows exist yet, so it returns [] whether or not its filter logic
+   * is actually correct. A wrong account-type comparison, a wrong entry-count
+   * check, or an off-by-one would ALSO return [] right now and keep returning
+   * [] right through the arrival of a genuinely leaky transfer. Same fix as
+   * the cachedBalanceMinor negative control above: construct the exact bad
+   * shape by hand — a deliberately-leaky three-entry row typed TRANSFER,
+   * touching a SYSTEM_* account, on throwaway accounts in this isolated test
+   * database — confirm the checker flags it, then delete it immediately. This
+   * never goes through WalletService and never represents real money; it
+   * exists solely to prove the detector fires, the same narrow licence as the
+   * cache-mismatch control. The same construction also proves
+   * totalAcrossUserAccounts() is sensitive: a fee skimmed to a SYSTEM account
+   * is exactly the kind of leak that must move it, and does.
+   */
+  it('the checker itself: findTransferLeakage and the USER-only subtotal actually catch a leaky transfer (negative control)', async () => {
+    const sender = await makeTestCustomer('leak-negctrl-sender');
+    const recipient = await makeTestCustomer('leak-negctrl-recipient');
+    await fund(sender.cookies, 50_00); // also guarantees a SYSTEM_TOPUP_CLEARING account exists
+    const senderWallet = await walletOf(sender.userId);
+    const recipientWallet = await walletOf(recipient.userId);
+    const systemClearing = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { type: 'SYSTEM_TOPUP_CLEARING', currency: 'BZD' } });
+
+    const userTotalBefore = await totalAcrossUserAccounts();
+
+    // Deliberately bad: sender debited 700, recipient credited only 500, the
+    // remaining 200 skimmed to a SYSTEM account as a third leg — balanced
+    // (700 = 500 + 200), so invariant 1 alone would wave it through. This is
+    // precisely the forbidden fee-leg shape invariant 4 exists to catch.
+    const leakyTxn = await ctx.prisma.walletTransaction.create({
+      data: {
+        type: 'TRANSFER',
+        status: 'POSTED',
+        isTest: true,
+        currency: 'BZD',
+        entries: {
+          create: [
+            { accountId: senderWallet.id, direction: 'DEBIT', amountMinor: 700n },
+            { accountId: recipientWallet.id, direction: 'CREDIT', amountMinor: 500n },
+            { accountId: systemClearing.id, direction: 'CREDIT', amountMinor: 200n },
+          ],
+        },
+      },
+    });
+
+    const leaksDuring = await findTransferLeakage();
+    const flagged = leaksDuring.find((l) => l.transactionId === leakyTxn.id);
+    expect(flagged, `findTransferLeakage() did not flag a transaction with a SYSTEM-account third leg: ${JSON.stringify(leaksDuring)}`).toBeDefined();
+    expect(flagged?.entryCount).toBe(3);
+    expect(flagged?.nonUserAccountIds).toEqual([systemClearing.id]);
+
+    // The USER-only subtotal moved too — the two customers are, together, 200
+    // worse off than before the leak, which is the real invariant-4 claim.
+    expect(await totalAcrossUserAccounts()).toBe(userTotalBefore - 200n);
+
+    // Clean up immediately so this fabricated row never poisons a later test.
+    await ctx.prisma.walletLedgerEntry.deleteMany({ where: { transactionId: leakyTxn.id } });
+    await ctx.prisma.walletTransaction.delete({ where: { id: leakyTxn.id } });
+
+    expect(await findTransferLeakage()).toEqual([]);
+    expect(await totalAcrossUserAccounts()).toBe(userTotalBefore);
   });
 
   /**
