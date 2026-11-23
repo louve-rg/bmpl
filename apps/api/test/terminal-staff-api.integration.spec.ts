@@ -775,3 +775,45 @@ describe('TERMINAL-MANAGER-FLOOR-STALE-VOTE: countActiveManagers ignores a deact
     await expect(terminal.staffChangeRole(secondReal.userId, real.userId, { memberRole: 'OPERATOR' })).resolves.toMatchObject({ memberRole: 'OPERATOR' });
   });
 });
+
+describe('TERMINAL-ENDMEMBER-NO-MANAGER-FLOOR: DELETE admin/terminal/companies/:id/members/:userId', () => {
+  it("refuses to end the company's sole active manager, and allows it once a second active manager exists", async () => {
+    const { company, loc } = await makeCompanyWithLocation('EndMemberFloor');
+    const manager = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+
+    const refused = await del(admin, `admin/terminal/companies/${company.id}/members/${manager.userId}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toBe(FLOOR_MESSAGE);
+
+    const stillActive = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(stillActive.status).toBe('ACTIVE');
+
+    const second = await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    const allowed = await del(admin, `admin/terminal/companies/${company.id}/members/${manager.userId}`);
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.ended).toBe(true);
+
+    const ended = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: manager.userId } },
+    });
+    expect(ended.status).toBe('ENDED');
+
+    // Second manager still stands, company still has a live manager.
+    const secondStill = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: company.id, userId: second.userId } },
+    });
+    expect(secondStill.status).toBe('ACTIVE');
+    expect(secondStill.memberRole).toBe('MANAGER');
+  });
+
+  it('never trips the floor for an OPERATOR — only MANAGER standing counts', async () => {
+    const { company, loc } = await makeCompanyWithLocation('EndMemberOperator');
+    await inviteAndAccept(company.id, [loc.id], 'MANAGER');
+    const operator = await inviteAndAccept(company.id, [loc.id], 'OPERATOR');
+
+    const res = await del(admin, `admin/terminal/companies/${company.id}/members/${operator.userId}`);
+    expect(res.status).toBe(200);
+  });
+});
