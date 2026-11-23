@@ -89,8 +89,8 @@ export class AdminDispatchController {
 
   @Get(':id/pins')
   @RequirePermission('deliveries.verify')
-  pins(@Param('id') id: string) {
-    return this.dispatch.revealPins(id);
+  pins(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.dispatch.revealPins(id, { userId: u.userId });
   }
 
   @Post(':id/assign')

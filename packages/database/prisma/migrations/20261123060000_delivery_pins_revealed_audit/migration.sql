@@ -1,0 +1,22 @@
+-- ADMIN-PINS-NO-AUDIT: GET admin/deliveries/:id/pins (DispatchService.
+-- revealPins) took no actor and wrote no audit row at all. The shipment
+-- side's equivalent (ShipmentService.revealHandoffPin) already writes
+-- SHIPMENT_HANDOFF_PIN_REVEALED whenever staff reads a handoff code; this is
+-- the same record for the marketplace delivery side's pickup/delivery PINs.
+--
+-- NON-NEGOTIABLE: the audit row this value backs records the actor, the
+-- delivery, and the fact of the reveal — it must NEVER carry the PIN value
+-- itself, in newValue, previousValue, reason or anywhere else. Every audit
+-- row in this system is currently free of PIN-shaped values; this must stay
+-- true after this ships.
+--
+-- ADD ONLY: nothing in this migration references the new value — Postgres
+-- refuses a transaction that both adds an enum member and uses it (see
+-- packages/database/CLAUDE.md §2). The code that writes this value ships in
+-- the same PR but runs only after this migration has committed.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'DELIVERY_PINS_REVEALED';

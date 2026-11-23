@@ -517,6 +517,15 @@ enum AuditAction {
   // session action whose blast radius is "every other device", and that
   // is exactly the shape worth a record.
   SESSIONS_REVOKED_OTHERS
+  // ---- Dispatch (ADMIN-PINS-NO-AUDIT) ----
+  // GET admin/deliveries/:id/pins (DispatchService.revealPins) took no actor
+  // and wrote no audit row at all — the one place on the admin surface where
+  // WHO looked at a pickup/delivery PIN went unrecorded. The shipment side's
+  // equivalent (revealHandoffPin) already writes SHIPMENT_HANDOFF_PIN_REVEALED;
+  // this is that same record for the marketplace delivery side. Records the
+  // actor, the delivery, and the fact of the reveal — never the code value
+  // itself, in any field.
+  DELIVERY_PINS_REVEALED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
