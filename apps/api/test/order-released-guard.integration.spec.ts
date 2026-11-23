@@ -25,6 +25,7 @@ import { OrdersService } from '../src/orders/orders.service';
 
 let ctx: TestContext;
 let adminCookies: string[];
+let adminUserId: string;
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
@@ -159,6 +160,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const admin = await seedSuperAdmin(ctx.prisma);
   adminCookies = await login(admin.email, admin.password);
+  adminUserId = admin.id;
   const cat = await ctx.prisma.category.create({ data: { name: 'Guard General', slug: `guard-gen-${uniq()}` } });
   categoryId = cat.id;
 });
@@ -386,6 +388,11 @@ describe('ORD-RELEASE-AFTER-READY: releasing after an OrderDelivery already exis
     // confirmDelivery already settled this one (DriverJobService's own trigger) —
     // the refused release must not touch that either.
     expect(after.payment!.status).toBe('SETTLED');
+
+    // API-AUDIT-REFUSED-ACTIONS: the refusal itself is recorded.
+    const auditRow = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'ORDER_RESERVATION_RELEASE_FAILED' }, orderBy: { createdAt: 'desc' } });
+    expect(auditRow.actorId).toBe(adminUserId);
+    expect(auditRow.newValue).toEqual({ orderId, collectedVendorOrderId: after.vendorOrders[0]!.id, reason: 'delivered', submittedReason: 'Guard-fixture release.' });
   });
 
   it('REFUSES the release once a PICKUP order has been collected — the customer already has the goods, same guard as the DELIVERY side (ADMIN-RELEASE-ON-PICKEDUP)', async () => {
@@ -406,6 +413,12 @@ describe('ORD-RELEASE-AFTER-READY: releasing after an OrderDelivery already exis
     expect(after.reservationsReleasedAt).toBeNull();
     // SHIP-PICKUP-NO-SETTLE already settled this one — the refused release must not touch it.
     expect(after.payment!.status).toBe('SETTLED');
+
+    // API-AUDIT-REFUSED-ACTIONS: the refusal itself is recorded.
+    const auditRow = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'ORDER_RESERVATION_RELEASE_FAILED' }, orderBy: { createdAt: 'desc' } });
+    expect(auditRow.actorId).toBe(adminUserId);
+    expect(auditRow.newValue).toEqual({ orderId, collectedVendorOrderId: vo.id, reason: 'picked up', submittedReason: 'Guard-fixture release.' });
+
     // MDF-1023, checked rather than assumed: disabled the guard above and
     // re-ran this test twice, once against this ordinary tracked-stock
     // fixture and once against a separate UNLIMITED-inventory product. In
@@ -431,6 +444,22 @@ describe('ORD-RELEASE-AFTER-READY: releasing after an OrderDelivery already exis
     expect(invAfterRefusal.reserved).toBe(invAfterCollection.reserved);
   });
 
+  it('a second refused release on the same collected order gets its own audit row — each attempt is its own record, not deduplicated (API-AUDIT-REFUSED-ACTIONS)', async () => {
+    const vendor = await makeVendor();
+    const { orderId } = await checkout(vendor, 'PICKUP');
+    const vo = await vendorOrderOf(orderId);
+    expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/ready`)).status).toBe(201);
+    const ready = await vendorOrderOf(orderId);
+    expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/confirm-pickup`, { pin: ready.pickupPin! })).status).toBe(201);
+
+    expect((await release(orderId)).status).toBe(409);
+    expect((await release(orderId)).status).toBe(409);
+
+    const rows = (await ctx.prisma.auditLog.findMany({ where: { action: 'ORDER_RESERVATION_RELEASE_FAILED' } })).filter(
+      (row) => (row.newValue as { orderId?: string } | null)?.orderId === orderId,
+    );
+    expect(rows).toHaveLength(2);
+  });
 
   it('requires a reason — a release call with no reason is refused before anything is touched', async () => {
     const vendor = await makeVendor();

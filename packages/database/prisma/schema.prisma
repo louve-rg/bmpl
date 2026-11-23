@@ -182,6 +182,15 @@ enum AuditAction {
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   ORDER_CREATED
   ORDER_RESERVATION_RELEASED
+  // API-AUDIT-REFUSED-ACTIONS: the refusal counterpart to the action above —
+  // an admin attempted to release reservations on an order already picked
+  // up or delivered, and the request was refused. Written OUTSIDE the
+  // enclosing transaction (releaseReservationsInTx throws a ConflictException
+  // right after), same reasoning as the PIN-attempt *_FAILED family: a
+  // refusal is itself worth recording, and recording it via the transaction
+  // that is about to roll back would lose the record along with everything
+  // else.
+  ORDER_RESERVATION_RELEASE_FAILED
   ORDER_CANCELLED
   // ---- Marketplace: Payments (Phase 3 · M11) ----
   PAYMENT_CREATED
