@@ -400,7 +400,7 @@ describe('M10.1 — reservation release (admin operational)', () => {
   });
 
   const release = (cookie: string[]) =>
-    request(ctx.server).post(`/api/admin/orders/${orderId}/release-reservations`).set('Cookie', cookie);
+    request(ctx.server).post(`/api/admin/orders/${orderId}/release-reservations`).set('Cookie', cookie).send({ reason: 'Release fixture.' });
 
   it('reserves on checkout, then releases via the admin endpoint (restores stock)', async () => {
     expect(await reservedFor(productId)).toBe(2);

@@ -372,7 +372,7 @@ describe('authorization + escrow release round-trip (returns funds)', () => {
     await authorize(customer, paymentId).expect(201);
     expect(await balanceOf(walletId)).toBe(0n); // all escrowed
 
-    await request(ctx.server).post(`/api/admin/orders/${order.id}/release-reservations`).set('Cookie', adminCookies).expect(201);
+    await request(ctx.server).post(`/api/admin/orders/${order.id}/release-reservations`).set('Cookie', adminCookies).send({ reason: 'Release fixture.' }).expect(201);
 
     const detail = await request(ctx.server).get(`/api/payments/${paymentId}`).set('Cookie', customer).expect(200);
     expect(detail.body.status).toBe('CANCELLED');

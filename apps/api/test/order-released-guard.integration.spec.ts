@@ -83,7 +83,7 @@ async function checkout(vendor: Awaited<ReturnType<typeof makeVendor>>, delivery
 
 const orderRow = (orderId: string) => ctx.prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { vendorOrders: true, payment: true } });
 const vendorOrderOf = async (orderId: string) => (await orderRow(orderId)).vendorOrders[0]!;
-const release = (orderId: string) => post(adminCookies, `admin/orders/${orderId}/release-reservations`);
+const release = (orderId: string) => post(adminCookies, `admin/orders/${orderId}/release-reservations`, { reason: 'Guard-fixture release.' });
 const inventoryOf = (productId: string) => ctx.prisma.inventory.findFirstOrThrow({ where: { productId } });
 const deliveryOf = (orderId: string) => ctx.prisma.orderDelivery.findFirstOrThrow({ where: { vendorOrder: { orderId } } });
 
@@ -370,14 +370,73 @@ describe('ORD-RELEASE-AFTER-READY: releasing after an OrderDelivery already exis
   // to drive a real delivery into it, so the claim above is reasoned, not
   // proven, and should get its own integration test once #801 merges.
 
-  it('leaves an already-DELIVERED order alone — nothing live to cancel, release behaves exactly as #797 left it', async () => {
+  it('REFUSES the release once an order has been DELIVERED — the customer already has the goods, and nothing is half-applied (ADMIN-RELEASE-ON-PICKEDUP)', async () => {
     const vendor = await makeVendor();
     const { orderId, delivery } = await dispatched(vendor, 'DELIVERED');
 
-    expect((await release(orderId)).status).toBe(201);
+    const res = await release(orderId);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('already been delivered');
+
     const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
     expect(row.status).toBe('DELIVERED'); // untouched — already terminal
     const after = await orderRow(orderId);
-    expect(after.reservationsReleasedAt).not.toBeNull(); // the release itself still proceeds
+    expect(after.reservationsReleasedAt).toBeNull(); // the release no longer proceeds
+    // confirmDelivery already settled this one (DriverJobService's own trigger) —
+    // the refused release must not touch that either.
+    expect(after.payment!.status).toBe('SETTLED');
+  });
+
+  it('REFUSES the release once a PICKUP order has been collected — the customer already has the goods, same guard as the DELIVERY side (ADMIN-RELEASE-ON-PICKEDUP)', async () => {
+    const vendor = await makeVendor();
+    const { orderId } = await checkout(vendor, 'PICKUP');
+    const vo = await vendorOrderOf(orderId);
+    expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/ready`)).status).toBe(201);
+    const ready = await vendorOrderOf(orderId);
+    expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/confirm-pickup`, { pin: ready.pickupPin! })).status).toBe(201);
+    expect((await vendorOrderOf(orderId)).status).toBe('PICKED_UP');
+    const invAfterCollection = await inventoryOf(vendor.productId);
+
+    const res = await release(orderId);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('already been picked up');
+
+    const after = await orderRow(orderId);
+    expect(after.reservationsReleasedAt).toBeNull();
+    // SHIP-PICKUP-NO-SETTLE already settled this one — the refused release must not touch it.
+    expect(after.payment!.status).toBe('SETTLED');
+    // MDF-1023, checked rather than assumed: disabled the guard above and
+    // re-ran this test twice, once against this ordinary tracked-stock
+    // fixture and once against a separate UNLIMITED-inventory product. In
+    // BOTH cases quantity/reserved came out unchanged whether the guard
+    // fired or not — confirming there is no reachable path today where an
+    // admin release after collection moves a real inventory number.
+    // Traced why: InventoryService.finalizeReservation always reconciles
+    // `quantity`/`reserved` to their post-sale values at collection time
+    // (confirmPickup) for a tracked row, and for an UNLIMITED row checkout
+    // never calls `reserve()` at all (orders.service.ts's own
+    // `if (inv && !inv.unlimited)` guard around the reserve call) — so
+    // `reserved` is already 0 by the time PICKED_UP is reachable, for every
+    // inventory shape. `release()` only ever touches `reserved`, floored at
+    // 0, and never touches `quantity` at all. So the admin response's
+    // `itemsReleased: 1` on an unguarded call is a count of loop iterations,
+    // not evidence that a real stock number moved — reported to god as a
+    // correction rather than built into a test that would have "proven" a
+    // drift that does not exist. This assertion states the invariant
+    // (inventory untouched) correctly; it just isn't the thing that makes
+    // this guard matter — the money/escrow guard above is.
+    const invAfterRefusal = await inventoryOf(vendor.productId);
+    expect(invAfterRefusal.quantity).toBe(invAfterCollection.quantity);
+    expect(invAfterRefusal.reserved).toBe(invAfterCollection.reserved);
+  });
+
+
+  it('requires a reason — a release call with no reason is refused before anything is touched', async () => {
+    const vendor = await makeVendor();
+    const { orderId } = await checkout(vendor, 'DELIVERY');
+    const res = await post(adminCookies, `admin/orders/${orderId}/release-reservations`, {});
+    expect(res.status).toBe(400);
+    const after = await orderRow(orderId);
+    expect(after.reservationsReleasedAt).toBeNull();
   });
 });
