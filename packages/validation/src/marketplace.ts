@@ -616,6 +616,17 @@ export const cancelOrderSchema = z.object({
 });
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
 
+/**
+ * Admin releases an order's inventory reservations (operational utility; see
+ * OrdersService.releaseReservations — NOT customer cancellation). A reason is
+ * required: unlike the customer's own cancellation, this can be called on any
+ * order and has no window of its own, so the admin console must record why.
+ */
+export const releaseReservationsSchema = z.object({
+  reason: z.string().trim().min(1, 'A reason is required.').max(500),
+});
+export type ReleaseReservationsInput = z.infer<typeof releaseReservationsSchema>;
+
 // ---- Delivery & Shipping Foundation (Phase 4 · M13) -------------------------
 
 /** Vendor delivery zone: a named set of districts with a flat delivery fee. */

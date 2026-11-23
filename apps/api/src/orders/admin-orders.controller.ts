@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { pickupOverrideSchema, type PickupOverrideInput } from '@bmpl/validation';
+import { pickupOverrideSchema, releaseReservationsSchema, type PickupOverrideInput, type ReleaseReservationsInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -32,11 +32,16 @@ export class AdminOrdersController {
     return this.orders.adminGet(id);
   }
 
-  /** Release the inventory reserved for an order (operational; idempotent). */
+  /**
+   * Release the inventory reserved for an order (operational; idempotent).
+   * Reason required (ADMIN-RELEASE-ON-PICKEDUP) — this returns the buyer's
+   * money and is refused outright once any vendor-order has actually been
+   * collected or delivered.
+   */
   @RequirePermission('orders.manage')
   @Post(':id/release-reservations')
-  release(@CurrentUser() user: AuthContext, @Req() _req: Request, @Param('id') id: string) {
-    return this.orders.releaseReservations(id, user.userId);
+  release(@CurrentUser() user: AuthContext, @Req() _req: Request, @Param('id') id: string, @Body(ZodBody(releaseReservationsSchema)) b: ReleaseReservationsInput) {
+    return this.orders.releaseReservations(id, user.userId, b.reason);
   }
 
   /** Admin override to confirm a pickup collection (reason required; M18.1). */

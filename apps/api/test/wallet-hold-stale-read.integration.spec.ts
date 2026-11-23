@@ -108,7 +108,7 @@ describe('GET /admin/payments/stale-holds', () => {
     await ageHold(f.holdId, 48);
     // Release it through the real admin action, not a direct write — proves the
     // read is filtering by current status, not just age.
-    await request(ctx.server).post(`/api/admin/orders/${f.orderId}/release-reservations`).set('Cookie', adminCookies).expect(201);
+    await request(ctx.server).post(`/api/admin/orders/${f.orderId}/release-reservations`).set('Cookie', adminCookies).send({ reason: 'Release fixture.' }).expect(201);
     const releasedHold = await ctx.prisma.walletHold.findUniqueOrThrow({ where: { id: f.holdId } });
     expect(releasedHold.status).toBe('RELEASED');
 

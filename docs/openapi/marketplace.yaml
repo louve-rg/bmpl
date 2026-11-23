@@ -888,11 +888,12 @@ paths:
   /admin/orders/{id}/release-reservations:
     post:
       tags: [Orders]
-      summary: Release an order's inventory reservations (M10.1, idempotent)
-      description: "Requires orders.manage. Operational utility (not customer cancellation) — releases reserved stock; the order row is left intact. A second call is a no-op."
+      summary: Release an order's inventory reservations (M10.1, idempotent) (ADMIN-RELEASE-ON-PICKEDUP)
+      description: "Requires orders.manage. Operational utility (not customer cancellation) — releases reserved stock and refunds escrow; the order row is left intact. A second call is a no-op. Refuses with 409 once any of the order's vendor-orders has already been picked up or delivered — the customer already has the goods. `reason` is required and recorded on the audit entry."
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [], csrfToken: [] }]
-      responses: { "201": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 500 } } } } } }
+      responses: { "201": { description: OK }, "400": { description: "Missing or empty reason" }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" }, "409": { description: "A vendor-order has already been picked up or delivered" } }
   /payments:
     get:
       tags: [Payments]

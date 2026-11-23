@@ -185,7 +185,7 @@ describe('a release/cancellation on a locked wallet still succeeds', () => {
 
     await lockWallet(customer.userId);
 
-    const release = await post(admin, `admin/orders/${checkout.body.id}/release-reservations`, {});
+    const release = await post(admin, `admin/orders/${checkout.body.id}/release-reservations`, { reason: 'Release fixture.' });
     expect(release.status).toBe(201);
 
     expect(await balanceOf(wallet.id)).toBe(10_000n); // escrow returned in full, locked or not

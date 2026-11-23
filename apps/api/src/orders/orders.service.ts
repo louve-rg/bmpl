@@ -647,8 +647,8 @@ export class OrdersService {
    * never over-release another order's reservations. This is NOT customer
    * cancellation: the order row is left intact (status unchanged).
    */
-  async releaseReservations(orderId: string, actorId?: string | null) {
-    return this.prisma.$transaction(async (tx) => this.releaseReservationsInTx(tx, orderId, actorId ?? null));
+  async releaseReservations(orderId: string, actorId?: string | null, reason?: string | null) {
+    return this.prisma.$transaction(async (tx) => this.releaseReservationsInTx(tx, orderId, actorId ?? null, reason ?? null));
   }
 
   /**
@@ -667,15 +667,35 @@ export class OrdersService {
    * a refusal there (an in-flight delivery that already has the parcel) rolls
    * back the whole release rather than leaving it half-applied.
    */
-  private async releaseReservationsInTx(tx: Prisma.TransactionClient, orderId: string, actorId: string | null) {
+  private async releaseReservationsInTx(tx: Prisma.TransactionClient, orderId: string, actorId: string | null, reason: string | null = null) {
     {
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        include: { vendorOrders: { include: { items: true } } },
+        include: { vendorOrders: { include: { items: true, delivery: { select: { status: true } } } } },
       });
       if (!order) throw new NotFoundException('Order not found.');
       if (order.reservationsReleasedAt) {
         return { orderId, orderNumber: order.orderNumber, released: false, alreadyReleased: true, itemsReleased: 0 };
+      }
+      // ADMIN-RELEASE-ON-PICKEDUP: this guard REFUSES, it never moves money
+      // itself, so it carries none of the standing prohibitions on
+      // forfeiture/sweep/transfer — but releasing past this point returns
+      // the buyer's money AND leaves them holding goods they already
+      // received, while the vendor is never paid. cancelOwn can never reach
+      // here with a collected vendor-order — its own window (every
+      // vendor-order still PENDING) closes this off by construction — so
+      // this only ever fires for the admin utility below, which had no
+      // completion check of its own at all. A delivery order's own
+      // completion signal lives on OrderDelivery.status, not
+      // VendorOrder.status (which never moves past READY_FOR_PICKUP for a
+      // DELIVERY order) — mirrors the same dual check
+      // SettlementService.settleVendorOrder uses to tell a pickup order's
+      // completion from a delivery order's.
+      const collected = order.vendorOrders.find((vo) => vo.status === 'PICKED_UP' || vo.delivery?.status === 'DELIVERED');
+      if (collected) {
+        throw new ConflictException(
+          `Cannot release this order's reservations: vendor-order ${collected.id} has already been ${collected.status === 'PICKED_UP' ? 'picked up' : 'delivered'} — the customer already has the goods.`,
+        );
       }
       await this.dispatch.cancelForReleasedOrder(tx, orderId, actorId);
       let itemsReleased = 0;
@@ -707,6 +727,7 @@ export class OrdersService {
         {
           action: 'ORDER_RESERVATION_RELEASED',
           actorId: actorId ?? null,
+          reason: reason ?? undefined,
           newValue: { orderId, orderNumber: order.orderNumber, itemsReleased, holdsReleased: payment.holdsReleased },
         },
         tx,
@@ -781,7 +802,7 @@ export class OrdersService {
 
       // Stock back, holds released, escrow returned if authorized, payment
       // CANCELLED — the existing release, composed atomically.
-      const released = await this.releaseReservationsInTx(tx, orderId, actor.userId);
+      const released = await this.releaseReservationsInTx(tx, orderId, actor.userId, dto.reason ?? null);
 
       await this.audit.record(
         {

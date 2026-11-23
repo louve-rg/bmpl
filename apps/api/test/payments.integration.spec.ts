@@ -154,7 +154,7 @@ describe('wallet hold release + payment cancel (via order reservation release)',
     const order = (await checkout(customer).expect(201)).body;
     const paymentId = (await request(ctx.server).get('/api/payments').set('Cookie', customer)).body[0].id;
 
-    await request(ctx.server).post(`/api/admin/orders/${order.id}/release-reservations`).set('Cookie', adminCookies).expect(201);
+    await request(ctx.server).post(`/api/admin/orders/${order.id}/release-reservations`).set('Cookie', adminCookies).send({ reason: 'Release fixture.' }).expect(201);
 
     const detail = await request(ctx.server).get(`/api/payments/${paymentId}`).set('Cookie', customer).expect(200);
     expect(detail.body.status).toBe('CANCELLED');
