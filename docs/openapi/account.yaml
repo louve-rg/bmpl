@@ -82,9 +82,14 @@ paths:
         (sole active manager of a terminal company, an open vendor order, an
         in-progress delivery/shipment/passenger-trip job, an in-flight order
         or shipment as the customer, a non-zero wallet balance or an open
-        wallet hold, the platform's only SUPER_ADMIN, or an operator/employer
-        with open bookings/applicants). This is NOT a full erasure: the
-        `users` row and related personal-data tables are ANONYMIZED in place
+        wallet hold, the platform's only SUPER_ADMIN, a passenger transport
+        operator with an open booking, a scheduled/in-progress departure, or
+        an affiliated active fleet driver (ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL,
+        2026-11-23 — the trip/fleet-driver pair were real gaps until this
+        fix; only the open-booking reason existed before), or an employer
+        with an applicant still awaiting a decision). This is NOT a full
+        erasure: the `users` row and related personal-data tables are
+        ANONYMIZED in place
         (name, contact details, identity documents, saved addresses — see
         `UsersService.anonymizePersonalData`'s own doc comment for the exact,
         table-by-table survey), but a COMPLETED order or shipment keeps its

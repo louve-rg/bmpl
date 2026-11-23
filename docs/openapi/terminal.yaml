@@ -33,12 +33,24 @@ info:
     `20261118180000_terminal_company_member_role_changed_audit`, additive
     only), records the one operation this card adds that admin's own door
     never needed — promoting/demoting an already-ACTIVE member between
-    MANAGER and OPERATOR. Three of the eight guard a company-wide floor no
-    admin-facing door enforces: a write may not leave a company with zero
-    ACTIVE MANAGERs, surfaced as 409, with one of them (revoking a sole
-    manager's last location) carrying its own distinct message rather than
-    the other two's shared one — see each operation below for the exact
-    text. Also added: a `locations` array on `GET /terminal/staff`'s own
+    MANAGER and OPERATOR. Three of the eight guard the same company-wide
+    floor: a write may not leave a company with zero ACTIVE MANAGERs,
+    surfaced as 409, with one of them (revoking a sole manager's last
+    location) carrying its own distinct message rather than the other two's
+    shared one — see each operation below for the exact text.
+
+    UPDATED 2026-11-23 (TERMINAL-ENDMEMBER-NO-MANAGER-FLOOR, #877): the admin
+    console's own `DELETE /admin/terminal/companies/{id}/members/{userId}`
+    had no floor check of any kind until this fix — an administrator could
+    end a company's sole ACTIVE MANAGER outright, something no self-serve
+    door here has ever allowed. It now enforces the identical floor, same
+    409 and same shared message as the self-serve doors below; see that
+    operation for detail. The sentence this replaced ("no admin-facing door
+    enforces" the floor) was true when first written and is not anymore —
+    MDF-920 had also recorded the gap as absent "by design," which was
+    wrong, not a design decision, per god's 2026-11-23 closure of that card.
+
+    Also added: a `locations` array on `GET /terminal/staff`'s own
     response (Oscar's finding — a MANAGER with partial location coverage
     could not otherwise grant a colleague, or invite a new hire to, a
     location the company holds but the manager does not personally hold).
@@ -280,6 +292,14 @@ paths:
     delete:
       tags: [AdminTerminal]
       summary: End a membership
+      description: >-
+        TERMINAL-ENDMEMBER-NO-MANAGER-FLOOR (2026-11-23): refused with 409
+        when the target is the company's sole ACTIVE MANAGER — same floor,
+        same shared message as the self-serve `/terminal/staff/{userId}/deactivate`
+        mirror. No self-action guard here: an administrator acting on a
+        member is never "acting on themselves" in the sense that guard
+        exists for on the self-serve door, so only the company-wide floor
+        applies.
       parameters:
         - { $ref: "#/components/parameters/companyId" }
         - { name: userId, in: path, required: true, schema: { type: string } }
@@ -289,6 +309,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: '"This company must always have at least one active manager."'
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
   /admin/terminal/companies/{id}/members/{userId}/reactivate:
     post:
       tags: [AdminTerminal]
