@@ -105,6 +105,33 @@ describe('MDF-925/MDF-924 -- the account-anonymized notice', () => {
   });
 });
 
+describe('MDF-PWCONFIRM -- the notice survives React 18 Strict Mode double-invoking the mount effect', () => {
+  it('still shows the confirmation under StrictMode, where the effect runs twice', async () => {
+    // Root cause: the mount effect both READ window.location.search and
+    // STRIPPED it (history.replaceState) in one invocation. React 18 Strict
+    // Mode calls a mount effect twice in dev (effect, cleanup, effect again)
+    // -- without StrictMode this repo's other tests above never exercised
+    // that path, which is exactly why this regressed unnoticed. The second
+    // invocation sees the already-stripped URL; an unconditional
+    // setNotice(reason ? msg : null) would clobber the first invocation's
+    // correct value back to null. This reproduces that on the unfixed code.
+    window.history.replaceState(null, '', '/login?reason=password-changed');
+    document.body.innerHTML = '<div id="root"></div>';
+    container = document.getElementById('root') as HTMLDivElement;
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <React.StrictMode>
+          <LoginPage />
+        </React.StrictMode>,
+      );
+    });
+
+    expect(container.textContent).toContain('Your password was changed. Please sign in again.');
+    expect(window.location.search).toBe('');
+  });
+});
+
 describe('SEC-LOGIN-PASSWORD-IN-URL', () => {
   it('the form defaults to POST, not GET, before React ever attaches a submit handler', async () => {
     // The defect: before hydration completes, a click on "Sign in" has no
