@@ -12,6 +12,7 @@ import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, seedLimitedAdmi
 
 let ctx: TestContext;
 let adminCookies: string[];
+let adminUserId: string;
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
@@ -185,6 +186,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const admin = await seedSuperAdmin(ctx.prisma);
   adminCookies = await login(admin.email, admin.password);
+  adminUserId = admin.id;
   const cat = await ctx.prisma.category.create({ data: { name: 'General', slug: `gen-${uniq()}` } });
   categoryId = cat.id;
 });
@@ -814,6 +816,38 @@ describe('visibility, proof, permissions', () => {
     const drv = await makeDriver();
     expect((await post(roCookies, `admin/deliveries/${order.deliveryId}/reassign`, { driverProfileId: drv.driverProfileId, vehicleId: drv.vehicleId, reason: 'x' })).status).toBe(403);
     expect((await get(roCookies, `admin/deliveries/${order.deliveryId}/pins`)).status).toBe(403);
+  });
+
+  it('a PIN reveal writes an audit row naming the actor and the delivery — never the PIN itself (ADMIN-PINS-NO-AUDIT)', async () => {
+    const { order } = await assignedDelivery();
+    const before = await ctx.prisma.auditLog.count({ where: { action: 'DELIVERY_PINS_REVEALED' } });
+
+    const res = await get(adminCookies, `admin/deliveries/${order.deliveryId}/pins`);
+    expect(res.status).toBe(200);
+    expect(res.body.pickupPin).toBeTruthy(); // the reveal itself is unchanged
+
+    const rows = await ctx.prisma.auditLog.findMany({ where: { action: 'DELIVERY_PINS_REVEALED' }, orderBy: { createdAt: 'desc' } });
+    expect(rows).toHaveLength(before + 1);
+    const row = rows[0]!;
+    expect(row.actorId).toBe(adminUserId);
+    expect(row.newValue).toEqual({ deliveryId: order.deliveryId });
+    expect(row.previousValue).toBeNull();
+    expect(row.reason).toBeNull();
+
+    // THE NON-NEGOTIABLE: no PIN-shaped value anywhere in the row, in any field.
+    const serialized = JSON.stringify(row);
+    expect(serialized).not.toContain(res.body.pickupPin);
+    if (res.body.deliveryPin) expect(serialized).not.toContain(res.body.deliveryPin);
+  });
+
+  it('a second PIN reveal writes a second audit row — each read is its own record, not deduplicated', async () => {
+    const { order } = await assignedDelivery();
+    await get(adminCookies, `admin/deliveries/${order.deliveryId}/pins`).expect(200);
+    await get(adminCookies, `admin/deliveries/${order.deliveryId}/pins`).expect(200);
+    const rows = (await ctx.prisma.auditLog.findMany({ where: { action: 'DELIVERY_PINS_REVEALED' } })).filter(
+      (row) => (row.newValue as { deliveryId?: string } | null)?.deliveryId === order.deliveryId,
+    );
+    expect(rows).toHaveLength(2);
   });
 
   it('a non-driver (customer) cannot reach the driver job feed', async () => {

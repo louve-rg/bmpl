@@ -352,6 +352,11 @@ export const AUDIT_ACTIONS = [
   // session ends in one call — unlike LOGOUT (one device, unaudited) or
   // revoking a single named session (one device, by id).
   'SESSIONS_REVOKED_OTHERS',
+  // ---- Dispatch (ADMIN-PINS-NO-AUDIT) ----
+  // GET admin/deliveries/:id/pins previously wrote no audit row at all.
+  // Mirrors the shipment side's SHIPMENT_HANDOFF_PIN_REVEALED — records the
+  // actor, the delivery, and the fact of the reveal, never the PIN itself.
+  'DELIVERY_PINS_REVEALED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -5,6 +5,7 @@ import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { DriverService } from '../driver/driver.service';
 import { MessagingService } from '../messaging/messaging.service';
+import { AuditService } from '../audit/audit.service';
 import { DeliveryCoreService } from './delivery-core.service';
 
 interface Actor {
@@ -39,6 +40,7 @@ export class DispatchService {
     private readonly drivers: DriverService,
     private readonly core: DeliveryCoreService,
     private readonly messaging: MessagingService,
+    private readonly audit: AuditService,
   ) {}
 
   // ---- reads -------------------------------------------------------------
@@ -493,10 +495,19 @@ export class DispatchService {
 
   // ---- PIN reveal (deliveries.verify) -----------------------------------
 
-  /** Admin PIN reveal (override visibility). Never returned in general payloads. */
-  async revealPins(deliveryId: string) {
+  /**
+   * Admin PIN reveal (override visibility). Never returned in general
+   * payloads. ADMIN-PINS-NO-AUDIT: every reveal writes an audit row — the
+   * shipment side's equivalent (ShipmentService.revealHandoffPin) already
+   * holds itself to this standard, and this was the one place on the admin
+   * surface where WHO looked at a PIN went unrecorded. The row records the
+   * actor and the delivery, and nothing else — never the PIN value itself,
+   * in this field or any other.
+   */
+  async revealPins(deliveryId: string, actor: { userId: string }) {
     const d = await this.prisma.orderDelivery.findUnique({ where: { id: deliveryId }, select: { pickupPin: true, deliveryPin: true, pickupVerificationStatus: true, deliveryVerificationStatus: true } });
     if (!d) throw new NotFoundException('Delivery not found.');
+    await this.audit.record({ action: 'DELIVERY_PINS_REVEALED', actorId: actor.userId, newValue: { deliveryId } });
     return { pickupPin: d.pickupPin, deliveryPin: d.deliveryPin, pickupVerificationStatus: d.pickupVerificationStatus, deliveryVerificationStatus: d.deliveryVerificationStatus };
   }
 
