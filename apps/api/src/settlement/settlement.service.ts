@@ -259,8 +259,23 @@ export class SettlementService {
       return { settled: false, reason: 'delivery not complete' };
     }
     if (!hasDelivery) {
-      // PICKUP vendor-orders have no completion signal in the current system.
-      return { settled: false, reason: 'pickup fulfilment settlement is not supported yet' };
+      // SHIP-PICKUP-NO-SETTLE: PICKUP vendor-orders now have a real completion
+      // signal of their own — PickupService.finalize() setting status
+      // PICKED_UP, the pickup analogue of a delivery reaching DELIVERED
+      // (reached by the customer's own PIN via confirmPickup, or the admin
+      // override; both funnel through finalize()). DeliveryMethod has
+      // exactly two members (PICKUP, DELIVERY — packages/database/prisma/
+      // schema.prisma), so a VendorOrder with no delivery row is a PICKUP
+      // order by construction here: this is the pickup mirror of the
+      // hasDelivery branch above, not a new kind of rejection. "Not complete
+      // yet" is expected and recoverable — like the delivery case above, it
+      // never alerts on its own. A VendorOrder whose deliveryMethod matches
+      // neither known shape (a future third method) must raise here rather
+      // than fall through to a quiet, permanent settled:false — that was
+      // this exact bug's original shape, just for pickup specifically.
+      if (vo.status !== 'PICKED_UP') {
+        return { settled: false, reason: 'pickup not complete' };
+      }
     }
 
     const { config, currency } = await this.ensureConfigRow();

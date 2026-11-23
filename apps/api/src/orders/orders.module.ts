@@ -6,6 +6,7 @@ import { OrdersController } from './orders.controller';
 import { VendorOrdersController } from './vendor-orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { DispatchModule } from '../dispatch/dispatch.module';
+import { SettlementModule } from '../settlement/settlement.module';
 import { OrdersService } from './orders.service';
 import { PickupService } from './pickup.service';
 import { VendorFulfilmentService } from './vendor-fulfilment.service';
@@ -14,7 +15,7 @@ import { VendorFulfilmentService } from './vendor-fulfilment.service';
 // (thumbnails), and OwnershipService (vendor scoping) from ProductsModule, and
 // PaymentsService from PaymentsModule. Prisma/Audit/Notifications come from @Global().
 @Module({
-  imports: [ProductsModule, PaymentsModule, DeliveryModule, DispatchModule],
+  imports: [ProductsModule, PaymentsModule, DeliveryModule, DispatchModule, SettlementModule],
   controllers: [OrdersController, VendorOrdersController, AdminOrdersController],
   providers: [OrdersService, PickupService, VendorFulfilmentService],
   exports: [OrdersService, PickupService, VendorFulfilmentService],
