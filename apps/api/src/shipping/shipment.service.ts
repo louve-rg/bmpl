@@ -2002,6 +2002,20 @@ export class ShipmentService {
       if (leg.arrivedAt) {
         throw new BadRequestException('This leg has already arrived at its destination and cannot depart again.');
       }
+      // S2-DEPART-IDEMPOTENT: the status check above accepts IN_PROGRESS —
+      // necessary so a leg that has already departed but not yet arrived
+      // still reads as eligible for the checks below — but that same
+      // acceptance left a repeat depart call on that exact leg unguarded:
+      // `arrivedAt` is still null at this point, so the check above does
+      // not catch it either. Same class of gap `arriveLeg` already closed
+      // on itself below (MDF-907) — a repeat call silently re-stamped
+      // `departedAt` with `new Date()` and wrote a SECOND HUB -> CARRIER
+      // custody row and a SECOND SHIPMENT_LEG_DEPARTED audit row, reachable
+      // by a stale second tab or a second device, not by the UI's own
+      // double-tap (which sends exactly one request).
+      if (leg.departedAt) {
+        throw new BadRequestException('This leg has already departed.');
+      }
       // ShipmentLeg.routeId is nullable on the column, but a LINE_HAUL leg is
       // only ever created by the route planner (route-planner.ts), which
       // unconditionally sets it to the real route it planned — so this branch

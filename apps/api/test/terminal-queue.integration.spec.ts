@@ -393,6 +393,46 @@ describe('MDF-907: a repeated depart/arrive must not rewrite an already-recorded
     const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
     expect(after.arrivedAt?.getTime()).toBe(afterArrival.arrivedAt!.getTime());
   });
+
+  /**
+   * S2-DEPART-IDEMPOTENT: the gap the two tests above do NOT cover. Both of
+   * them repeat the call only AFTER the leg has moved further along
+   * (arrived), where `arrivedAt` already catches it. Here the repeat lands
+   * BEFORE arrival, while the leg is simply `IN_PROGRESS` and `arrivedAt`
+   * is still null — the status check alone accepts that state (it has to,
+   * so the leg stays checkable in between depart and arrive), and nothing
+   * else refused it. Found by Stanley on a terminal acceptance run and
+   * confirmed on main: the UI's own double-tap cannot reach this (exactly
+   * one request per tap), but a stale second tab or a second device can.
+   */
+  it('refuses a second depart made BEFORE the leg has arrived, writes exactly one custody row and one DEPARTED audit row', async () => {
+    const net = await makeNetwork();
+    const originStaff = await makeTerminalStaff([net.originHubId]);
+    const { lineHaul } = await bookedReadyToDepart(await fundedSender(), net);
+
+    const first = await post(originStaff.cookies, `terminal/legs/${lineHaul.id}/depart`, {});
+    expect(first.status).toBe(201);
+    const afterFirst = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(afterFirst.departedAt).not.toBeNull();
+    expect(afterFirst.arrivedAt).toBeNull();
+
+    const repeat = await post(originStaff.cookies, `terminal/legs/${lineHaul.id}/depart`, {});
+    expect(repeat.status).toBe(400);
+    expect(repeat.body.message).toMatch(/already departed/i);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.departedAt?.getTime()).toBe(afterFirst.departedAt!.getTime());
+
+    const custodyRows = await ctx.prisma.custodyEvent.findMany({ where: { shipmentLegId: lineHaul.id } });
+    expect(custodyRows).toHaveLength(1);
+    expect(custodyRows[0]!.fromHolder).toBe('HUB');
+    expect(custodyRows[0]!.toHolder).toBe('CARRIER');
+
+    const departedAudits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_DEPARTED' } })
+    ).filter((row) => (row.newValue as { legId?: string } | null)?.legId === lineHaul.id);
+    expect(departedAudits).toHaveLength(1);
+  });
 });
 
 describe('TERM-8: the existing handoff door still agrees with the queue', () => {
