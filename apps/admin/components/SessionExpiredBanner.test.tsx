@@ -20,7 +20,10 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 afterEach(() => {
@@ -42,15 +45,35 @@ async function mount() {
   return container;
 }
 
-/** Stubs fetch so the original call AND the silent refresh both 401 --
- *  exactly the condition lib/api.ts's 401 handler notifies on. */
+/** Stubs fetch so the original call AND the silent refresh both 401, for a
+ *  GENUINELY dead session -- exactly the condition lib/api.ts's 401 handler
+ *  notifies on (ADMIN-FALSE-SESSION-EXPIRED: the refresh failure message
+ *  must be the real-expiry one, not 'No refresh token provided.', which
+ *  means "never had a session" and must NOT notify -- see
+ *  stubNeverHadASession below). */
 function stubExpiredSession() {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith('/auth/refresh')) return jsonResponse(401, { message: 'No refresh token provided.' });
+      if (url.endsWith('/auth/refresh'))
+        return jsonResponse(401, { message: 'Session expired. Please sign in again.' });
       return jsonResponse(401, { message: 'Session is no longer valid.' });
+    }),
+  );
+}
+
+/** Stubs fetch so the refresh fails because there was never a session to
+ *  begin with (no refresh cookie at all) -- the case the banner must stay
+ *  silent for. */
+function stubNeverHadASession() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/auth/refresh'))
+        return jsonResponse(401, { message: 'No refresh token provided.' });
+      return jsonResponse(401, { message: 'Unauthorized' });
     }),
   );
 }
@@ -89,4 +112,14 @@ describe('SessionExpiredBanner', () => {
     expect(window.location.pathname).toBe(before);
   });
 
+  it('stays empty for a staff member opening the admin login page cold, whose 401 has no session to have expired', async () => {
+    const el = await mount();
+    stubNeverHadASession();
+
+    await act(async () => {
+      await api.get('/admin/wallet/accounts/u1').catch(() => {});
+    });
+
+    expect(el.textContent).toBe('');
+  });
 });

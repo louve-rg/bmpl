@@ -29,7 +29,9 @@ function render(): Map<string, string> {
   root = createRoot(container);
   act(() => root!.render(<Footer />));
   const links = new Map<string, string>();
-  container.querySelectorAll('a').forEach((a) => links.set(a.textContent ?? '', a.getAttribute('href') ?? ''));
+  container
+    .querySelectorAll('a')
+    .forEach((a) => links.set(a.textContent ?? '', a.getAttribute('href') ?? ''));
   return links;
 }
 
@@ -54,7 +56,18 @@ describe('Footer links', () => {
   it('removes the Company, Resources and legal-bar links that have no BMPL page behind them', () => {
     const links = render();
     expect(links.get('Marketplace')).toBe('/products');
-    for (const gap of ['About', 'Careers', 'Press', 'Blog', 'Developers', 'API', 'Status', 'Accessibility', 'Security', 'Sitemap']) {
+    for (const gap of [
+      'About',
+      'Careers',
+      'Press',
+      'Blog',
+      'Developers',
+      'API',
+      'Status',
+      'Accessibility',
+      'Security',
+      'Sitemap',
+    ]) {
       expect(links.has(gap), gap).toBe(false);
     }
   });
@@ -74,6 +87,10 @@ describe('Footer links', () => {
 
   it('shows no social icons, because no BMPL account is verified in the repo', () => {
     render();
-    expect(container!.querySelector('a[aria-label="LinkedIn"], a[aria-label="Facebook"], a[aria-label="Instagram"], a[aria-label="YouTube"]')).toBeNull();
+    expect(
+      container!.querySelector(
+        'a[aria-label="LinkedIn"], a[aria-label="Facebook"], a[aria-label="Instagram"], a[aria-label="YouTube"]',
+      ),
+    ).toBeNull();
   });
 });

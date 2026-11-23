@@ -23,9 +23,7 @@ const COLUMNS: Array<{ heading: string; links: LinkItem[] }> = [
     // mailto link, same styling, just no longer a bare "Contact" behind
     // which the actual address was invisible.
     heading: 'Company',
-    links: [
-      { label: PUBLIC_CONTACT_EMAIL, href: contactMailto() },
-    ],
+    links: [{ label: PUBLIC_CONTACT_EMAIL, href: contactMailto() }],
   },
   {
     heading: 'Resources',
@@ -58,11 +56,16 @@ export function Footer() {
           {/* Link columns */}
           {COLUMNS.map((col) => (
             <div key={col.heading}>
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-belize-light">{col.heading}</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-belize-light">
+                {col.heading}
+              </h3>
               <ul className="mt-4 space-y-2.5">
                 {col.links.map((link) => (
                   <li key={link.label}>
-                    <Link href={link.href} className="text-sm text-blue-100/70 transition hover:text-white">
+                    <Link
+                      href={link.href}
+                      className="text-sm text-blue-100/70 transition hover:text-white"
+                    >
                       {link.label}
                     </Link>
                   </li>
@@ -77,7 +80,10 @@ export function Footer() {
       <div className="border-t border-white/10">
         <div className="mx-auto flex w-full max-w-[1200px] flex-col items-center justify-between gap-4 px-4 py-6 text-sm text-blue-100/60 sm:flex-row sm:px-6 lg:px-8">
           <p>© 2026 Belize Marketplace &amp; Logistics</p>
-          <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+          <nav
+            aria-label="Legal"
+            className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2"
+          >
             {LEGAL.map((l) => (
               <Link key={l.label} href={l.href} className="transition hover:text-white">
                 {l.label}

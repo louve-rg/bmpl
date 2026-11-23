@@ -16,7 +16,10 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * (BMPL-141/9cc2028): fold the per-field detail into the message once, here,
  * rather than hunting every call site (BMPL-224).
  */
-function withFieldErrors(raw: string, errors: Array<{ path: string; message: string }> | undefined): string {
+function withFieldErrors(
+  raw: string,
+  errors: Array<{ path: string; message: string }> | undefined,
+): string {
   if (!errors || errors.length === 0) return raw;
   return `${raw}: ${errors.map((e) => (e.path ? `${e.path} — ${e.message}` : e.message)).join('; ')}`;
 }
@@ -74,17 +77,32 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   if (res.status === 401 && retry && path !== '/auth/refresh') {
     const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
     if (refreshed.ok) return request<T>(path, init, false);
-    // Refresh itself failed, not just the original call -- a real expiry, not
-    // a guess. Never for an `/auth/*` call itself (login/register/etc. 401
-    // for their own reasons; there was no session there to have expired).
-    if (!path.startsWith('/auth/')) sessionExpiredListener?.();
+    // ADMIN-FALSE-SESSION-EXPIRED (identical fix to apps/web/lib/api.ts,
+    // WEB-FALSE-SESSION-EXPIRED, #855): a failed refresh does not by itself
+    // mean a session died -- it also fails, with a DIFFERENT message, for a
+    // visitor who never had a refresh cookie to begin with (no login yet).
+    // apps/api/src/auth/auth.controller.ts throws exactly
+    // 'No refresh token provided.' for that case (no cookie sent at all);
+    // a genuinely dead session throws a different message
+    // (session.service.ts, e.g. 'Session expired. Please sign in again.').
+    // Notify only for the latter -- never for a visitor who was never
+    // signed in. Never for an `/auth/*` call itself either (login/register
+    // 401 for their own reasons; there was no session there to have expired).
+    const refreshBody = await refreshed.json().catch(() => null);
+    const neverHadASession = refreshBody?.message === 'No refresh token provided.';
+    if (!path.startsWith('/auth/') && !neverHadASession) sessionExpiredListener?.();
   }
 
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const raw = (data?.message as string) ?? 'Request failed';
-    const err: ApiError = { status: res.status, message: withFieldErrors(raw, data?.errors), errors: data?.errors, detail: raw };
+    const err: ApiError = {
+      status: res.status,
+      message: withFieldErrors(raw, data?.errors),
+      errors: data?.errors,
+      detail: raw,
+    };
     throw err;
   }
   return data as T;
