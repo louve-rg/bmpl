@@ -4284,30 +4284,27 @@ export class ShipmentService {
       if (this.isDelivered(s.status)) {
         throw new BadRequestException('This shipment has already been delivered and cannot be cancelled.');
       }
-      // An exception on a leg that had STARTED is a moving shipment with a
-      // problem, not a stationary one: the parcel is in somebody's hands and a
-      // self-service cancellation would release the full escrow while it is.
-      // Same rule as IN_PROGRESS, because it is the same fact — the flag
-      // changed the leg's status, not where the parcel physically is.
-      const moving = s.legs.some(
-        (l) => l.status === 'IN_PROGRESS' || (l.status === 'EXCEPTION' && l.startedAt != null),
-      );
-      if (moving && !actor.isStaff) {
-        throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
-      }
-
-      // BMPL-183: has anyone ACTUALLY taken the parcel — not merely accepted
-      // the job. Read from the custody trail itself rather than derived from
-      // `moving` above: `moving` only sees a leg that is IN_PROGRESS *right
-      // now*, so it misses a shipment sitting at a hub between two legs (the
-      // first already COMPLETED, the next not yet started) — custody has
-      // already passed to BML in that gap even though nothing is currently
-      // "moving". A real transfer is any custody row with a non-null
-      // `fromHolder`; the one row every shipment starts with (`null` ->
-      // `SENDER`, written at booking) is not a transfer, just the parcel's
-      // starting point.
+      // SHIP-CANCEL-AT-ORIGIN-HUB-INCONSISTENT: the up-front refusal used to
+      // be computed from leg STATUS ("is any leg IN_PROGRESS, or EXCEPTION
+      // while started") — a snapshot that reads false in the gap between two
+      // legs (the first already COMPLETED and handed off to a hub, the next
+      // not yet started), even though custody plainly already left the
+      // sender. That gap let a self-service cancel through at AT_ORIGIN_HUB
+      // specifically — the one custody-transferred stage every other such
+      // stage already refuses — with no refund path to match, orphaning the
+      // held fee. BMPL-183: read from the custody trail itself instead, the
+      // same ledger `custodyTransferred` below already uses for the refund
+      // decision. One signal, not two sources for one fact that can
+      // disagree — exactly the lesson the class comment on
+      // `isDelivered`/BMPL-300 already draws for a different guard. A real
+      // transfer is any custody row with a non-null `fromHolder`; the one
+      // row every shipment starts with (`null` -> `SENDER`, written at
+      // booking) is not a transfer, just the parcel's starting point.
       const custodyTransferred =
         (await tx.custodyEvent.count({ where: { shipmentId: id, fromHolder: { not: null } } })) > 0;
+      if (custodyTransferred && !actor.isStaff) {
+        throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
+      }
 
       // Who is being released. Read BEFORE the rows are rewritten — afterwards
       // there is nobody left on the leg to notify. Covers a driver who merely
