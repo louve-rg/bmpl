@@ -369,7 +369,7 @@ pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter 
 Do not "fix" any of these as a side effect of unrelated work. Each is tracked
 and each needs its own scoped change.
 
-### `pnpm --filter <pkg> typecheck` skips a guarantee `pnpm turbo run typecheck` has
+### `pnpm --filter <pkg> typecheck` (or `build`) skips a guarantee `pnpm turbo run <task>` has
 
 **`typecheck` and `test` both declare `"dependsOn": ["^build"]` in
 `turbo.json`** — running either *through turbo* rebuilds every workspace
@@ -389,6 +389,27 @@ per-package form whenever a shared package might have changed** — a branch
 switch, a schema edit, someone else's merge. The per-package form is fine
 once you already know every dependency is current; it just cannot tell you
 that on its own.
+
+**The same bypass applies to `build` itself, not just `typecheck`/`test` —
+and it is the more basic case, with no turbo-cache nuance involved.**
+`turbo.json`'s `build` task also declares `"dependsOn": ["^build"]`, but that
+only fires when the task runs *through turbo* (`pnpm turbo run build`). A
+plain `pnpm --filter <pkg> build` runs that package's own `build` script
+directly and never asks turbo anything, so it never checks whether the
+packages it depends on are current — it just compiles against whatever
+already sits in their `dist` folders. This cost real debugging time
+(2026-11-23): `apps/api/src/terminal/terminal.service.ts` calls
+`templates.terminalInvite(...)`, a method `packages/notifications/src/index.ts`
+had gained, but the API had been built with `pnpm --filter @bmpl/api build`
+and `packages/notifications/dist` was never rebuilt — the running API still
+held the OLD compiled `templates` object without that method, so a real
+endpoint failed at runtime with `templates.terminalInvite is not a function`.
+The precursor was there and was dismissed: an earlier watch-mode TypeScript
+build had already flagged `Property 'terminalInvite' does not exist on
+type`, and that was read as a type-only mismatch to fix in the types, not as
+evidence the compiled JS being run was itself stale. Fix: `pnpm turbo run
+build --filter=@bmpl/api` (add `--force` per below if a cache hit is ever
+suspected on top of this).
 
 **This section used to end there, blessing `pnpm turbo run <task>
 --filter=<pkg>` as the fix. It is not reliably one.** FLOOR-STALEDIST
