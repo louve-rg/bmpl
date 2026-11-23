@@ -54,4 +54,11 @@ describe('WalletSection claims', () => {
     expect(text).not.toMatch(/top.?up/i);
     expect(text).not.toMatch(/\bqr\b/i);
   });
+
+  it('does not show a masked card number -- there is no card product behind this balance', () => {
+    const text = render();
+    expect(text).toContain('Escrow protected');
+    expect(text).not.toMatch(/\d{4}\D*\d{4}\D*\d{4}\D*\d{4}/);
+    expect(text).not.toMatch(/card/i);
+  });
 });

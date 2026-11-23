@@ -130,8 +130,19 @@ function WalletDashboard() {
         </div>
         <p className="relative mt-4 text-[11px] text-white/60">Available balance</p>
         <p className="relative text-3xl font-bold tracking-tight">BZ$1,250.00</p>
+        {/* S2-WALLET-CLAIMS: a masked "•••• •••• •••• 4821" number used to sit
+            here. A card number is a stronger claim than any sentence this file
+            removed -- it reads as a funded instrument behind the balance, and
+            PaymentMethodType.CREDIT_CARD is an enum value with nothing behind
+            it, same shape as TRANSFER/WITHDRAWAL. Replaced with what the
+            wallet actually is: a platform balance, escrow-protected. */}
         <div className="relative mt-5 flex items-center justify-between">
-          <span className="font-mono text-sm tracking-widest text-white/80">•••• •••• •••• 4821</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-white/80">
+            <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden>
+              <path d="M10 2.5l5.5 2v4.2c0 3.4-2.3 6-5.5 7-3.2-1-5.5-3.6-5.5-7V4.5L10 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            </svg>
+            Escrow protected
+          </span>
           <span className="text-xs font-semibold text-white/70">BZD</span>
         </div>
       </div>
