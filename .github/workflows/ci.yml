@@ -640,10 +640,24 @@ jobs:
       - name: Install Playwright's Chromium (admin)
         run: pnpm --filter @bmpl/admin exec playwright install --with-deps chromium
 
+      # apps/admin/e2e/visual/ holds only a README in Phase 1 (infra only --
+      # Priority 6, owner directive 2026-10-16, PR #460): Phase 2 baselines
+      # admin's wallet-lock and moderation UI first, not the nav/shell
+      # surface still being redesigned. Until then "playwright test" finds
+      # zero specs and errors out on every single run -- not a rendering
+      # defect, just a Phase-1-empty suite reporting failure for having
+      # nothing to check. Skip the real run (and its guaranteed error) only
+      # when there is truly nothing to run; the moment Phase 2 adds even one
+      # spec file this check runs for real again and reports its own result.
       - name: Visual regression baseline (admin)
         id: visual-admin
         continue-on-error: true
-        run: pnpm --filter @bmpl/admin test:visual
+        run: |
+          if [ -z "$(find apps/admin/e2e/visual -name '*.spec.ts' -print -quit)" ]; then
+            echo "apps/admin/e2e/visual has no spec files yet -- Phase 1 is infra only (owner directive 2026-10-16, PR #460); Phase 2 adds baselines first. Nothing to run."
+            exit 0
+          fi
+          pnpm --filter @bmpl/admin test:visual
 
       - name: Upload visual diff report (admin, only when it failed)
         if: steps.visual-admin.outcome == 'failure'
