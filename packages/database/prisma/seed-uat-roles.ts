@@ -62,8 +62,18 @@ function assertDevelopmentEnvironment(): void {
   if (dbName === 'bmpl_test') {
     fail('DATABASE_URL points at bmpl_test — that database belongs to the integration suite.');
   }
-  if (dbName !== 'bmpl') {
-    fail(`database "${dbName}" is not the local development database "bmpl".`);
+  // FLOOR-UAT-SEED-DB-GUARD-TOO-NARROW: see seed-uat-logistics.ts's copy of
+  // this guard for the full rationale (duplicated, not imported, for the
+  // reason given at the top of this file) — an explicit allowlist of the
+  // known per-agent databases, not a bmpl_* prefix, so a name nobody
+  // actually allocated still gets refused. Widen by one literal per new
+  // agent; the roster lives outside this repo and can't be derived.
+  const KNOWN_AGENT_DATABASES = ['bmpl_stanley', 'bmpl_jim', 'bmpl_dwight', 'bmpl_pam', 'bmpl_oscar'];
+  if (dbName !== 'bmpl' && !KNOWN_AGENT_DATABASES.includes(dbName)) {
+    fail(
+      `database "${dbName}" is not the local development database "bmpl" or a known per-agent database ` +
+        `(${KNOWN_AGENT_DATABASES.join(', ')}). If this is a newly provisioned agent, add its database name here.`,
+    );
   }
   // FLOOR-SEEDTARGET: deliberately NO default here — see seed-uat-logistics.ts's
   // copy of this guard for the full rationale (duplicated, not imported, for
