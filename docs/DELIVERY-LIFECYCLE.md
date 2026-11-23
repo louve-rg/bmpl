@@ -249,6 +249,50 @@ Three rules govern every leg transition
 3. **Custody is append-only** (`CustodyEvent`): SENDER → DRIVER/CARRIER → HUB
    → … → RECIPIENT, one row per handover, never rewritten.
 
+### Status tracks physical arrival; custody tracks formal handoff — these are two different facts, deliberately not in step
+
+MEASURED (Stanley, 2026-11-23) across a full door-to-terminal parcel, reading
+the same shipment from the customer, admin, recipient-tracking, driver and
+both terminal views at eleven checkpoints: `deriveShipmentStatus` recomputes
+the customer/admin-facing status off `arrivedAt`/`courierStatus` (rule 2
+above) — a record of where the parcel physically **is**. `CustodyEvent` (rule
+3) records who formally **holds** it. Nothing keeps these two in step, and
+nothing should — they answer different questions.
+
+Two concrete instances from that walk:
+
+1. A driver marking **arriving** on a courier leg
+   (`POST /driver/shipping-jobs/:id/arriving` →
+   `ShipmentDriverService.markArriving`, `shipment-driver.service.ts:411-413`)
+   only stamps `courierStatus: 'ARRIVING'`/`arrivingAt` — "a simple stamp"
+   per the section above, no custody write. The terminal queue's own `arrived` flag
+   already reads `true` from this stamp alone
+   (`arrivedAt != null || courierStatus === 'ARRIVING'`,
+   `shipment.service.ts:1815`), before the parcel has been formally handed to
+   anyone at the terminal — custody is still `SENDER → DRIVER`. Only the
+   terminal staff's own handoff (`ShipmentService.completeLeg`) appends the
+   `DRIVER → HUB` row.
+2. A carrier marking **arrive** on a `LINE_HAUL` leg
+   (`AdminLogisticsController`/`ShipmentService.arriveLeg`,
+   `shipment.service.ts:2127-2148`) stamps `arrivedAt` and nothing else —
+   the comment there is explicit: "No custody row is appended here — arrival
+   is a hub-side event, not a custody transfer." `deriveShipmentStatus` reads
+   that stamp and reports `AT_DESTINATION_HUB` on every customer and admin
+   view (`packages/shared/src/shipping.ts:314`) while custody is still
+   `HUB → CARRIER`. Only the terminal's own handoff appends `CARRIER → HUB`.
+
+**`AT_DESTINATION_HUB` does not mean the terminal holds the parcel.** It means
+the parcel has physically arrived; the terminal's own handoff is what
+transfers custody, separately. This lag is intentional, not a bug: physical
+arrival and legal custody are different events, and collapsing the status
+into a mirror of custody (or vice versa) would make the customer-facing
+status lie about where the parcel physically is the moment the two diverge.
+Full chain from the same walk, for the shape of a normal journey — append-only,
+no duplicate, no gap: `(none)→SENDER` (booking) → `SENDER→DRIVER` (pickup) →
+`DRIVER→HUB` (terminal handoff) → `HUB→CARRIER` (carrier departs) →
+`CARRIER→HUB` (carrier arrives + terminal handoff) → `HUB→RECIPIENT`
+(collection/delivery).
+
 ### A driver working a courier leg
 
 `ShipmentDriverService` (`apps/api/src/shipping/shipment-driver.service.ts`)
