@@ -3724,6 +3724,16 @@ export class ShipmentService {
       if (shipment.legs.some((l) => l.status === 'CANCELLED') && leg.status === 'CANCELLED') {
         throw new BadRequestException('That leg was cancelled.');
       }
+      // MDF-1111: EXCEPTION is a second, unrelated reason isLegActionable
+      // also refuses on, so checking sequence first would blame "hasn't
+      // reached this leg yet" on a leg the parcel has in fact reached — it
+      // is flagged, not early. Checked here, ahead of the sequence check,
+      // with its own message that does not repeat the staff-entered
+      // exceptionReason (that stays staff/audit-only, same as elsewhere in
+      // this file).
+      if (leg.status === 'EXCEPTION') {
+        throw new BadRequestException('This leg has been flagged with an exception and cannot proceed until it is resolved.');
+      }
       // Sequence is authority. Nothing may jump the queue.
       if (!isLegActionable(shipment.legs as LegView[], leg.sequence)) {
         throw new BadRequestException(

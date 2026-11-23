@@ -525,6 +525,109 @@ describe('SHIP-CARRIER-PORTAL-ACCEPT-ON-MOVING-LEG — a departed leg is no long
   });
 });
 
+/**
+ * MDF-1111: the block on a flagged leg was already correct (see
+ * SHIP-CARRIER-FLAGGED-LEG-BLOCKS-CARRIER-MOVEMENT) — only the message was
+ * wrong. Before this fix, a carrier refused on an EXCEPTION leg was told
+ * "The parcel has not reached this leg yet", the SEQUENCE message, which is
+ * false here: the leg has nothing earlier in its sequence, so only the
+ * exception could have refused it. Mirrors Stanley's manual walk: an
+ * unflagged control that genuinely moves, a leg flagged before departure,
+ * and a leg flagged after departure but before arrival.
+ */
+describe('MDF-1111 — a flagged leg names the exception as the cause, not the sequence', () => {
+  it('control: an unflagged leg with nothing earlier in sequence departs and arrives normally', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {})).status).toBe(201);
+  });
+
+  it('flagged before departure: both depart and arrive are refused, naming the exception, not the sequence', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/exception`, { reason: 'Customs hold.' })).status).toBe(201);
+
+    const depart = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    expect(depart.status).toBe(400);
+    expect(depart.body.message).toMatch(/exception/i);
+    expect(depart.body.message).not.toContain('has not reached this leg yet');
+    // The standing constraint: the carrier's own words never reach a counterparty.
+    expect(depart.body.message).not.toContain('Customs hold');
+
+    const arrive = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {});
+    expect(arrive.status).toBe(400);
+    expect(arrive.body.message).toMatch(/exception/i);
+    expect(arrive.body.message).not.toContain('has not reached this leg yet');
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(after.departedAt).toBeNull();
+    expect(after.arrivedAt).toBeNull();
+  });
+
+  it('flagged after departure: arrive is refused, naming the exception, not the sequence', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/exception`, { reason: 'Vessel engine trouble.' })).status).toBe(201);
+
+    const arrive = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {});
+    expect(arrive.status).toBe(400);
+    expect(arrive.body.message).toMatch(/exception/i);
+    expect(arrive.body.message).not.toContain('has not reached this leg yet');
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(after.arrivedAt).toBeNull();
+  });
+
+  it('the refusal lifts exactly when staff resolve the exception', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/exception`, { reason: 'Customs hold.' })).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(400);
+
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/resolve-exception`, { resolution: 'RESUME', note: 'Cleared.' })).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+  });
+
+  it('a genuinely out-of-sequence leg (never flagged) still gets the SEQUENCE message, not the exception one', async () => {
+    // Two-hop journey so the second leg genuinely has not been reached yet —
+    // the regression control proving this fix did not touch that path.
+    const r = await post(admin, 'admin/logistics/hubs', {
+      code: 'LMW', name: 'Lifecycle Mid Dock', city: 'Belize City',
+      modes: ['LAND', 'SEA'], district: 'BELIZE', type: 'WATER_TAXI_TERMINAL', courierFeeMinor: 1000,
+    });
+    expect(r.status).toBe(201);
+    const midHubId = r.body.id as string;
+    const r2 = await post(admin, 'admin/logistics/routes', {
+      originHubId: hub.LBW!, destinationHubId: midHubId, mode: 'SEA', durationMinutes: 45, priceMinor: 2500, carrierName: 'Lifecycle Second Hop',
+    });
+    expect(r2.status).toBe(201);
+
+    const s = await post(customer, 'shipping', {
+      service: 'HUB_TO_HUB',
+      origin: { hubId: hub.LSW!, name: 'Sender Sentinelname', phone: '501-2223333' },
+      destination: { hubId: midHubId, name: 'Recipient Sentinelname', phone: '501-4445555' },
+      preferredMode: 'SEA',
+      description: 'One box',
+      payWithWallet: true,
+    });
+    expect(s.status).toBe(201);
+    const legs = await legsOf(s.body.id);
+    expect(legs.length).toBe(2);
+    const secondLeg = legs[1]!;
+
+    const early = await post(admin, `admin/logistics/legs/${secondLeg.id}/depart`, {});
+    expect(early.status).toBe(400);
+    expect(early.body.message).toContain('has not reached this leg yet');
+    expect(early.body.message).not.toMatch(/exception/i);
+  });
+});
+
 describe('self-service scope — own membership and route claim/release', () => {
   it("the org's OWNER manages its own membership; a non-owner STAFF member cannot", async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
