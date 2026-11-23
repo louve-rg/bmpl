@@ -102,6 +102,46 @@ function shortfallSentence(totalMinor: number, availableMinor: number): string {
   return `This shipment costs ${shippingMoney(totalMinor)}, your available balance is ${bzd(availableMinor)}, so you are ${bzd(totalMinor - availableMinor)} short.`;
 }
 
+/**
+ * WEB-BOOKING-NO-IDEMPOTENCY-KEY (Case 3, god 2026-11-23): `attemptKey` alone
+ * is a `useRef` -- it lives in React memory only, so a page reload mid-submit
+ * wipes it, the next attempt mints a FRESH key, and the server books (and
+ * charges) a second time underneath the reload. `sessionStorage` is the one
+ * piece of client storage that survives a reload but still dies with the tab
+ * -- `localStorage` would outlive the booking entirely and could resurrect a
+ * key days later.
+ *
+ * The stored entry carries the key TOGETHER WITH this fingerprint of the
+ * `request` it was minted for, so restoring it on mount can reuse the exact
+ * same invalidation rule the in-memory `useEffect` on `request` already
+ * applies across a render: a reload only replays the key if the booking it
+ * belongs to is still the one on screen. `JSON.stringify` is sufficient as
+ * the fingerprint -- `toRequest()` below always builds the object the same
+ * way, so two calls with the same inputs serialize identically.
+ */
+const ATTEMPT_STORAGE_KEY = 'bmpl:shipment-booking-attempt';
+
+function fingerprint(request: unknown): string {
+  return JSON.stringify(request);
+}
+
+/**
+ * Every read/write is wrapped by the caller in try/catch, never here --
+ * private browsing, blocked site data and a quota error all throw on
+ * `sessionStorage` itself, and a booking form must still work with storage
+ * dead (degrading to the current in-memory-only behaviour, i.e. Case 2 still
+ * fixed, Case 3 not). These two are thin enough not to need their own
+ * try/catch; call sites decide what "degrade" means for them.
+ */
+function readStoredAttempt(): { key: string; fingerprint: string } | null {
+  const raw = sessionStorage.getItem(ATTEMPT_STORAGE_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as { key?: unknown; fingerprint?: unknown };
+  return typeof parsed.key === 'string' && typeof parsed.fingerprint === 'string'
+    ? { key: parsed.key, fingerprint: parsed.fingerprint }
+    : null;
+}
+
 /** The request body both quoting and booking use, so they cannot disagree. */
 function toRequest(
   service: ShippingService,
@@ -188,7 +228,10 @@ export default function NewShipmentPage() {
   // one. Reset below whenever `request` changes -- a materially different
   // booking (a different route, parcel, or date) must never share a key
   // with whatever was attempted before it, or a genuine second booking
-  // would silently 409 instead of succeeding.
+  // would silently 409 instead of succeeding. Mirrored into sessionStorage
+  // alongside a fingerprint of `request` (see ATTEMPT_STORAGE_KEY above) so
+  // a page reload mid-submit restores the SAME key instead of minting a new
+  // one -- a bare useRef does not survive that (Case 3).
   const attemptKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -220,9 +263,33 @@ export default function NewShipmentPage() {
   );
   // A new `request` is a new booking by definition (see attemptKey above) --
   // whatever attempt key existed for the PREVIOUS request must not leak into
-  // this one.
+  // this one. Also runs on mount (effects always do), which is what lets a
+  // post-reload remount restore a key: if sessionStorage holds one whose
+  // stored fingerprint still matches the CURRENT request, reuse it; anything
+  // else (no entry, a mismatched fingerprint, or storage throwing at all) is
+  // treated as "no attempt in flight" and falls back to today's in-memory-only
+  // behaviour, same as before this change.
+  //
+  // A mismatch is never deleted here, only skipped -- this effect also fires
+  // on every INTERMEDIATE render while a form is being refilled (e.g. one
+  // endpoint filled, the other still blank), and those partial shapes are not
+  // the request the stored entry belongs to either. Deleting on every one of
+  // those transient mismatches would destroy a just-reloaded entry before the
+  // form ever finishes being refilled back to the shape it matches. There is
+  // only ever one stored entry (one fixed storage key): `book()` overwrites
+  // it the moment a real new attempt is made, and clears it outright on
+  // success, so a stale mismatch left sitting here is harmless.
   useEffect(() => {
-    attemptKey.current = null;
+    let restored: string | null = null;
+    try {
+      const stored = readStoredAttempt();
+      if (stored && stored.fingerprint === fingerprint(request)) {
+        restored = stored.key;
+      }
+    } catch {
+      // Private mode, blocked site data, etc. -- no persisted key to restore.
+    }
+    attemptKey.current = restored;
   }, [request]);
   const ready = quotable(service, origin, destination);
 
@@ -266,7 +333,25 @@ export default function NewShipmentPage() {
     setErr(null);
     if (!attemptKey.current) attemptKey.current = crypto.randomUUID();
     try {
+      // Written BEFORE the request goes out, not after -- a reload can land
+      // at any point while the request is in flight, including before any
+      // response (Case 3), so the key must already be durable the moment the
+      // attempt starts. Storage failing here must not block booking: it just
+      // leaves this attempt's key living only in the ref, i.e. today's
+      // behaviour (Case 2 still fixed; a reload mid-submit is not).
+      try {
+        sessionStorage.setItem(ATTEMPT_STORAGE_KEY, JSON.stringify({ key: attemptKey.current, fingerprint: fingerprint(request) }));
+      } catch {
+        // Degrade to in-memory-only; see comment above.
+      }
       const created = await shippingApi.create({ ...request, payWithWallet: true }, attemptKey.current);
+      // A completed booking's key must never be available to restore into a
+      // later, unrelated attempt -- clear it before navigating away, not after.
+      try {
+        sessionStorage.removeItem(ATTEMPT_STORAGE_KEY);
+      } catch {
+        // Nothing to degrade to here -- we are leaving the page regardless.
+      }
       router.push(`/dashboard/shipments/${encodeURIComponent(created.reference)}`);
     } catch (e) {
       // DO NOT auto-retry and DO NOT try to infer success from the failure
