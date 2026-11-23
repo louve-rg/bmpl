@@ -522,6 +522,27 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     expect(call?.body).toEqual({ code: '4821', collectedByName: 'Ana Cruz' });
   });
 
+  /**
+   * S2-TERM-MOBILE: these three code-presented inputs shared the global
+   * `.bmpl-input` text-sm (14px) with no override. iOS Safari zooms the
+   * whole page in on focusing a <16px input -- known iOS behaviour, not
+   * something jsdom can observe directly -- so a staff member tapping the
+   * code field at a terminal counter got the page jump under them. Locks
+   * in the text-base (16px) override on all three; jsdom cannot assert the
+   * zoom itself doesn't fire, only that the class causing it is gone.
+   */
+  it('renders the handoff, release and collect code inputs at a 16px (text-base) minimum, not the 14px default', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW, RELEASE_ROW, COLLECT_ROW] });
+    await mount();
+
+    const handoffPin = container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement;
+    const releasePin = container!.querySelector('#release-pin-leg_r') as HTMLInputElement;
+    const collectCode = container!.querySelector('#collect-code-ship_1') as HTMLInputElement;
+    for (const input of [handoffPin, releasePin, collectCode]) {
+      expect(input.className).toContain('text-base');
+    }
+  });
+
   it('refuses to submit a collection with no code, without calling the API', async () => {
     const calls = stubFetch({ queueRows: [COLLECT_ROW] });
     await mount();
@@ -1532,6 +1553,26 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(removeBtn.className).not.toContain('--bmpl-text-muted');
       expect(removeBtn.className).toContain('min-h-[24px]');
       expect(removeBtn.className).toContain('min-w-[24px]');
+    });
+
+    /**
+     * S2-TERM-MOBILE: Stanley measured this native checkbox's own box at
+     * 13x13px at 390px. Sized to the same 24x24 WCAG 2.5.8 AA floor as the
+     * remove control above, for the same dense-inline-list reasoning.
+     */
+    it('gives the invite-location checkbox a real 24x24 touch target, not the native default', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const checkbox = Array.from(container!.querySelectorAll('#staff-invite-locations input[type="checkbox"]')).find((c) =>
+        (c as HTMLInputElement).closest('label')?.textContent?.includes('San Pedro Hub'),
+      ) as HTMLInputElement;
+      expect(checkbox.className).toContain('h-6');
+      expect(checkbox.className).toContain('w-6');
     });
 
     /**
