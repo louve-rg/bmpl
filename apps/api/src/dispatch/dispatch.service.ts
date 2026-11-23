@@ -504,10 +504,14 @@ export class DispatchService {
    * actor and the delivery, and nothing else — never the PIN value itself,
    * in this field or any other.
    */
-  async revealPins(deliveryId: string, actor: { userId: string }) {
+  async revealPins(deliveryId: string, actor: { userId: string; ipAddress?: string | null; sessionId?: string | null }) {
     const d = await this.prisma.orderDelivery.findUnique({ where: { id: deliveryId }, select: { pickupPin: true, deliveryPin: true, pickupVerificationStatus: true, deliveryVerificationStatus: true } });
     if (!d) throw new NotFoundException('Delivery not found.');
-    await this.audit.record({ action: 'DELIVERY_PINS_REVEALED', actorId: actor.userId, newValue: { deliveryId } });
+    // API-PINS-REVEAL-NO-IP: a pin reveal is a secret-disclosure event — who
+    // and from where both matter for tracing a compromised admin session
+    // after the fact, the same standing every other admin-dispatch write in
+    // this file's audit rows already has via the controller's actor().
+    await this.audit.record({ action: 'DELIVERY_PINS_REVEALED', actorId: actor.userId, ipAddress: actor.ipAddress, sessionId: actor.sessionId, newValue: { deliveryId } });
     return { pickupPin: d.pickupPin, deliveryPin: d.deliveryPin, pickupVerificationStatus: d.pickupVerificationStatus, deliveryVerificationStatus: d.deliveryVerificationStatus };
   }
 

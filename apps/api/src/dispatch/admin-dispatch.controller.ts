@@ -89,8 +89,14 @@ export class AdminDispatchController {
 
   @Get(':id/pins')
   @RequirePermission('deliveries.verify')
-  pins(@CurrentUser() u: AuthContext, @Param('id') id: string) {
-    return this.dispatch.revealPins(id, { userId: u.userId });
+  pins(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    // API-PINS-REVEAL-NO-IP: this controller already builds {userId,
+    // ipAddress, sessionId} via actor() for every other write below — this
+    // route dropped ipAddress and sessionId on the floor instead of reusing
+    // it, so a pin-reveal (a secret-disclosure event) recorded WHO without
+    // WHERE FROM, the one thing that makes a compromised admin session
+    // traceable afterward.
+    return this.dispatch.revealPins(id, this.actor(u, req));
   }
 
   @Post(':id/assign')
