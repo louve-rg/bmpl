@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InventoryService } from '../products/inventory.service';
 import { OwnershipService } from '../products/ownership.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { assertReservationsNotReleased } from './order-release-guard';
 
 interface Actor {
@@ -33,6 +34,7 @@ export class PickupService {
     private readonly notifications: NotificationsService,
     private readonly inventory: InventoryService,
     private readonly ownership: OwnershipService,
+    private readonly settlement: SettlementService,
   ) {}
 
   private genPin(): string {
@@ -163,6 +165,15 @@ export class PickupService {
       if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId, newValue: { vendorOrderId } }, tx);
       await this.notifications.notifyUsers([vo.order.userId, vo.vendorProfile.userId], { type: 'MARKETPLACE', category: 'ORDER', event: 'ORDER_PLACED', title: 'Order collected', body: `Order ${vo.orderNumber} was collected.`, data: { vendorOrderId } }, tx);
     });
+    // SHIP-PICKUP-NO-SETTLE: collection triggers internal settlement (M18),
+    // mirroring DriverJobService.confirmDelivery's own trigger immediately
+    // after its delivery transition commits — its own atomic, idempotent
+    // transaction, outside this one. Never blocks/reverts the pickup; a
+    // failure records a settlement exception + alerts admins and preserves
+    // escrow. Shared by both callers of finalize() (the customer's own PIN
+    // via confirmPickup, and the admin override) so neither leaves this
+    // vendor-order's escrow stuck the way both did before this fix.
+    await this.settlement.settleVendorOrder(vendorOrderId, actorId);
     return this.serialize(await this.load(vendorOrderId), { forVendor: true });
   }
 

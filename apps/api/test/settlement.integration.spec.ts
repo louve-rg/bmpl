@@ -295,6 +295,106 @@ describe('single-vendor settlement (balanced escrow release)', () => {
   });
 });
 
+/**
+ * SHIP-PICKUP-NO-SETTLE: PICKUP vendor-orders had no completion signal
+ * settleVendorOrder recognized — confirmPickup never called it, and the guard
+ * returned a permanent, silent `settled: false` ("not supported yet") for
+ * every pickup order, forever. Default checkout is PICKUP (delivery is
+ * disabled by default), so this was the path a brand-new vendor's customer
+ * took without changing a single setting: the buyer's hold never released,
+ * the vendor was never paid, and the payment stayed AUTHORIZED permanently.
+ * Fix: PickupService.finalize() (shared by both confirmPickup and the admin
+ * override) now triggers settlement exactly as DriverJobService.confirmDelivery
+ * already does for the delivery path, and settleVendorOrder's guard checks
+ * VendorOrder.status === 'PICKED_UP' instead of rejecting every no-delivery
+ * order outright. computeSettlement's own pickup branch (hasDelivery: false —
+ * no driver allocation, gross = merchandise) was already written and tested;
+ * only the trigger and the guard were missing.
+ */
+describe('pickup settlement (SHIP-PICKUP-NO-SETTLE)', () => {
+  it('a confirmed pickup settles exactly like a delivered order: hold released, vendor credited, payment no longer authorized', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`pk${s}`, 7000, 500); // delivery fee is irrelevant to a pickup order — never charged, never allocated
+    const cust = await register(`pkcust_${s}@example.bz`);
+    expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: 7000, reason: 'Pickup settlement fixture.' })).status).toBe(201);
+    expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBe(201);
+    const co = await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'PICKUP' }], payWithWallet: true });
+    expect(co.status).toBe(201);
+
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: cust.userId }, orderBy: { createdAt: 'desc' } });
+    const vo = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id } });
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(Number(payment.amountMinor)).toBe(7000);
+    expect(payment.status).toBe('AUTHORIZED');
+    const hold = await ctx.prisma.walletHold.findFirstOrThrow({ where: { paymentId: payment.id } });
+    expect(hold.status).toBe('AUTHORIZED');
+
+    expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/ready`)).status).toBe(201);
+    const ready = await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vo.id } });
+    expect(ready.status).toBe('READY_FOR_PICKUP');
+    expect(ready.pickupPin).not.toBeNull();
+    const confirm = await post(vendor.vendorCookies, `vendor/orders/${vo.id}/confirm-pickup`, { pin: ready.pickupPin });
+    expect(confirm.status).toBe(201);
+
+    // completion signal itself (already worked before this fix)
+    expect((await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vo.id } })).status).toBe('PICKED_UP');
+
+    // fact 1: buyer's hold released
+    const holdAfter = await ctx.prisma.walletHold.findUniqueOrThrow({ where: { id: hold.id } });
+    expect(holdAfter.status).toBe('RELEASED');
+    // fact 2: vendor wallet credited (10% commission on 7000 → 6300 net; no driver allocation, no delivery fee charged)
+    expect(await acctBalance((await userAcct(vendor.vendorUserId))!.id)).toBe(6300n);
+    // fact 3: payment no longer AUTHORIZED
+    const paymentAfter = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(paymentAfter.status).toBe('SETTLED');
+    // fact 4: a real VendorSettlement was posted, not merely a response shape
+    const settlement = await ctx.prisma.vendorSettlement.findUniqueOrThrow({ where: { vendorOrderId: vo.id } });
+    expect(settlement.status).toBe('POSTED');
+    expect(Number(settlement.driverAllocationMinor)).toBe(0);
+    expect(Number(settlement.grossMinor)).toBe(7000); // merchandise only — no delivery fee on a pickup order
+    expect(await ctx.prisma.driverEarning.count({ where: { vendorOrderId: vo.id } })).toBe(0);
+    expect(await globalNet()).toBe(0n);
+  });
+
+  it('the admin override path settles too, not just the customer PIN path', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`pkadm${s}`, 4000, 0);
+    const cust = await register(`pkadmcust_${s}@example.bz`);
+    expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: 4000, reason: 'Pickup admin-override fixture.' })).status).toBe(201);
+    expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBe(201);
+    expect((await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'PICKUP' }], payWithWallet: true })).status).toBe(201);
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: cust.userId }, orderBy: { createdAt: 'desc' } });
+    const vo = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id } });
+
+    const admin = await post(adminCookies, `admin/orders/vendor-orders/${vo.id}/confirm-pickup`, { reason: 'Customer lost the PIN; identity confirmed in person.' });
+    expect(admin.status).toBe(201);
+
+    expect((await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vo.id } })).status).toBe('PICKED_UP');
+    expect((await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } })).status).toBe('SETTLED');
+    expect((await ctx.prisma.vendorSettlement.findUniqueOrThrow({ where: { vendorOrderId: vo.id } })).status).toBe('POSTED');
+  });
+
+  it('rejects settlement when the pickup is not complete yet (no ledger movement, no permanent-failure wording)', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`pkrej${s}`, 3000, 0);
+    const cust = await register(`pkrejcust_${s}@example.bz`);
+    expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: 3000, reason: 'Pickup rejection fixture.' })).status).toBe(201);
+    expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBe(201);
+    expect((await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'PICKUP' }], payWithWallet: true })).status).toBe(201);
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: cust.userId }, orderBy: { createdAt: 'desc' } });
+    const vo = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id } });
+
+    // never marked ready, never collected — still PENDING
+    const before = await globalNet();
+    const res = await settle(vo.id);
+    expect(res.body.settled).toBe(false);
+    expect(res.body.reason).toMatch(/not complete/i);
+    expect(res.body.reason).not.toMatch(/not supported/i);
+    expect(await ctx.prisma.vendorSettlement.findUnique({ where: { vendorOrderId: vo.id } })).toBeNull();
+    expect(await globalNet()).toBe(before);
+  });
+});
+
 describe('rejections + exceptions', () => {
   it('rejects settlement when the delivery is not complete (no ledger movement)', async () => {
     const o = await seedDelivered({ subtotal: 5000, deliveryFee: 400 });
