@@ -623,7 +623,11 @@ export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
  * order and has no window of its own, so the admin console must record why.
  */
 export const releaseReservationsSchema = z.object({
-  reason: z.string().trim().min(1, 'A reason is required.').max(500),
+  // 4, not 1: consistent with the other admin reasons on money-adjacent
+  // actions that already require more than a single character — shipping.ts's
+  // cancel/return-note schemas — so the mandatory field can't be satisfied
+  // with e.g. "x" and still read as explaining nothing (API-ADMIN-REASON-MIN-LENGTH).
+  reason: z.string().trim().min(4, 'Say why these reservations are being released.').max(500),
 });
 export type ReleaseReservationsInput = z.infer<typeof releaseReservationsSchema>;
 

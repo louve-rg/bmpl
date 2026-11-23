@@ -21,6 +21,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { OrdersService } from '../src/orders/orders.service';
 
 let ctx: TestContext;
 let adminCookies: string[];
@@ -37,11 +38,11 @@ async function login(email: string, password: string): Promise<string[]> {
   expect(res.status).toBe(201);
   return cookiesOf(res);
 }
-async function registerCustomer(email: string): Promise<{ cookies: string[]; userId: string }> {
+async function registerCustomer(email: string): Promise<{ cookies: string[]; userId: string; email: string }> {
   const reg = await request(ctx.server).post('/api/auth/register').send({ email, password: 'CustomerPass123', firstName: 'C', lastName: 'U', acceptedTerms: true });
   expect(reg.status).toBe(201);
   const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
-  return { cookies: cookiesOf(reg), userId: user.id };
+  return { cookies: cookiesOf(reg), userId: user.id, email };
 }
 
 /** Vendor + published product with stock, both delivery methods enabled. */
@@ -438,5 +439,34 @@ describe('ORD-RELEASE-AFTER-READY: releasing after an OrderDelivery already exis
     expect(res.status).toBe(400);
     const after = await orderRow(orderId);
     expect(after.reservationsReleasedAt).toBeNull();
+  });
+
+  it('requires a reason of real substance — a single character is refused the same as no reason at all (API-ADMIN-REASON-MIN-LENGTH)', async () => {
+    const vendor = await makeVendor();
+    const { orderId } = await checkout(vendor, 'DELIVERY');
+    const res = await post(adminCookies, `admin/orders/${orderId}/release-reservations`, { reason: 'x' });
+    expect(res.status).toBe(400);
+    const after = await orderRow(orderId);
+    expect(after.reservationsReleasedAt).toBeNull();
+  });
+
+  it('the boot-time verification-account cleanup records an explicit system reason, not null (API-ADMIN-REASON-MIN-LENGTH)', async () => {
+    const vendor = await makeVendor();
+    const { customer, orderId } = await checkout(vendor, 'DELIVERY');
+    const orders = ctx.app.get(OrdersService);
+
+    const result = await orders.releaseVerificationReservations(customer.email);
+    expect(result.orders).toBe(1);
+
+    const after = await orderRow(orderId);
+    expect(after.reservationsReleasedAt).not.toBeNull();
+    const auditRow = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ORDER_RESERVATION_RELEASED', newValue: { path: ['orderId'], equals: orderId } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(auditRow.reason).toBe(
+      'System: boot-time cleanup of reservations held by the production verification account (MaintenanceService.onApplicationBootstrap).',
+    );
+    expect(auditRow.actorId).toBeNull();
   });
 });
