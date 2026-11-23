@@ -3,14 +3,17 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LaunchAnnouncement } from './LaunchAnnouncement';
+import { contactMailto } from '../../lib/contact';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
  * S2-ANNOUNCE homepage block. Pins the owner's required content (company
  * name, "Coming February 2027", the exact tagline) and the hard constraints:
- * no countdown, and the contact CTA is a real, working address (Footer.tsx's
- * own mailto:), never a form posting nowhere.
+ * no countdown, and the contact CTA is the one shared `contactMailto()`
+ * constant (S2-EMAIL, lib/contact.ts) -- never a hardcoded second copy of
+ * the address, and never a link to a Contact/About/FAQ page, none of which
+ * exist in this app (god's own verified ruling on main).
  */
 
 let root: Root | null = null;
@@ -48,7 +51,7 @@ describe('LaunchAnnouncement', () => {
     const el = render();
     expect(el.querySelector('form')).toBeNull();
     const links = Array.from(el.querySelectorAll('a')).map((a) => a.getAttribute('href'));
-    expect(links).toContain('mailto:support@bzemarketplace.com');
+    expect(links).toContain(contactMailto('Belize Marketplace & Logistics launch'));
   });
 
   it('renders no countdown timer', () => {

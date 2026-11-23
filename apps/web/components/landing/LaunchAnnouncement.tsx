@@ -1,13 +1,17 @@
 import Link from 'next/link';
 import { Logo } from '../Logo';
 import { ButtonLink } from '../ui';
+import { contactMailto } from '../../lib/contact';
 
 /**
  * S2-ANNOUNCE homepage block. Deliberately NOT a "Coming Soon" template: no
  * countdown (the owner confirmed February 2027, not a day — a countdown
  * needs a day we don't have), no email-capture form (nothing exists to post
- * it to; the working CTA below is the same mailto: address Footer.tsx
- * already uses), no overlay/popup.
+ * it to -- god's own ruling: this app has no Contact/About/FAQ page at all,
+ * so the working CTA is `contactMailto()`, the one shared public-contact
+ * constant (`lib/contact.ts`, S2-EMAIL) Footer.tsx/DeliveryTracker.tsx/
+ * CollectionHoldMessage.tsx all use -- not a second hardcoded copy of the
+ * address, and not a link to a page that doesn't exist), no overlay/popup.
  *
  * Concept: a shipping manifest, not a hype card. The left column is laid out
  * like a waybill — sender (the brand mark), the one fact that matters (the
@@ -61,7 +65,7 @@ export function LaunchAnnouncement() {
           </p>
 
           <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:gap-4">
-            <ButtonLink href="mailto:support@bzemarketplace.com" variant="accent" size="lg">
+            <ButtonLink href={contactMailto('Belize Marketplace & Logistics launch')} variant="accent" size="lg">
               Get in touch
             </ButtonLink>
             <Link

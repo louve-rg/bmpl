@@ -13,7 +13,6 @@ vi.mock('../../lib/api', () => ({ api: { get: (...a: unknown[]) => apiGet(...a),
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), usePathname: () => window.location.pathname }));
 vi.mock('../cart/CartButton', () => ({ CartButton: () => null }));
 vi.mock('../saved/SavedNavButton', () => ({ SavedNavButton: () => null }));
-vi.mock('../AnnouncementBanner', () => ({ AnnouncementBanner: () => null }));
 
 import { Header } from './Header';
 

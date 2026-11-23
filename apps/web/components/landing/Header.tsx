@@ -7,7 +7,6 @@ import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 import { CartButton } from '../cart/CartButton';
 import { SavedNavButton } from '../saved/SavedNavButton';
-import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
 import { PUBLIC_NAV_GROUPS, PUBLIC_NAV_HOME, isGroupCurrent, isItemCurrent } from '../../lib/public-nav';
 import { AccountMenu } from '../account/AccountMenu';
@@ -102,7 +101,10 @@ export function Header() {
 
   return (
     <>
-      <AnnouncementBanner />
+      {/* AnnouncementBanner (maintenance/ops notices + the S2-ANNOUNCE launch
+          strip) moved to the root layout (app/layout.tsx) so it reaches
+          every apps/web route, not just pages that render this public
+          Header -- see AnnouncementBanner.tsx's own comment. */}
       {/* The blurred branch used to drop to 80% navy specifically to let more of
           the page glass through -- but this header has no opaque backing of its
           own, so BrandLockup's subtitle (text-belize-light, designed for solid
