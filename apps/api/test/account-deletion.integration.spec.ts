@@ -903,4 +903,91 @@ describe('account deletion — refusals', () => {
     expect(shippingProviderAfter.operatingLicenceNumber).toBeNull();
     expect(shippingProviderAfter.businessName).toBe('Full Sweep Carrier');
   });
+
+  it('scrubs free text this account wrote and network identifiers it left behind — without deleting the counterparty\'s words or any audit row (ACCT-DELETE-PII-REMNANTS)', async () => {
+    const email = 'delete-pii-remnants@example.bz';
+    const password = 'PiiRemnantsPass1';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    // Defect 1: free text the person wrote themselves, not caught by any
+    // prior round. headline/summary on the SAME jobSeekerProfile row whose
+    // other fields are already cleared elsewhere.
+    const jobSeeker = await ctx.prisma.jobSeekerProfile.create({
+      data: { userId, preferredName: 'Real Seeker', headline: 'Senior Real Headline', summary: 'My phone is 6650099, call anytime.' },
+    });
+
+    // A support case: subject + opening message are both this account's own
+    // free text, and god's exact finding — CONVERSATION_CREATED's own audit
+    // payload carries a second copy of the subject.
+    const opened = await request(ctx.server)
+      .post('/api/conversations/support')
+      .set('Cookie', cookies)
+      .send({ subject: 'My number is 6650099, please call', message: 'Hi, this is my own message, call 6650099.' });
+    expect(opened.status).toBe(201);
+    const conversationId = opened.body.id as string;
+    const ownMessage = await ctx.prisma.message.findFirstOrThrow({ where: { conversationId, senderId: userId } });
+
+    // The OTHER side of the same thread — a different account's own words,
+    // seeded directly (no staff-join endpoint needed to prove the point):
+    // must survive this account's own deletion untouched.
+    const other = await registerAndLogin('delete-pii-remnants-other@example.bz', 'OtherPartyPass1');
+    await ctx.prisma.conversationParticipant.create({ data: { conversationId, userId: other.userId, role: 'SUPPORT' } });
+    const otherMessage = await ctx.prisma.message.create({
+      data: { conversationId, senderId: other.userId, type: 'USER', body: 'Staff reply: noted, thanks.' },
+    });
+
+    // Defect 2: a real session with a real IP/user-agent, and a non-deletion
+    // audit row (the login that produced it) also carrying that IP.
+    const loggedIn = await request(ctx.server)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '203.0.113.9')
+      .set('User-Agent', 'PiiRemnantsTestAgent/1.0')
+      .send({ email, password });
+    expect(loggedIn.status).toBe(201);
+    const sessionBefore = await ctx.prisma.session.findFirstOrThrow({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    expect(sessionBefore.ipAddress).not.toBeNull();
+    const loginAuditBefore = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'USER_LOGGED_IN', actorId: userId }, orderBy: { createdAt: 'desc' } });
+    expect(loginAuditBefore.ipAddress).not.toBeNull();
+
+    const del = await request(ctx.server).delete('/api/me').set('Cookie', cookies).send({ currentPassword: password });
+    expect(del.status).toBe(200);
+
+    // Defect 1, resolved.
+    const jobSeekerAfter = await ctx.prisma.jobSeekerProfile.findUniqueOrThrow({ where: { id: jobSeeker.id } });
+    expect(jobSeekerAfter.headline).toBeNull();
+    expect(jobSeekerAfter.summary).toBeNull();
+
+    const conversationAfter = await ctx.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    expect(conversationAfter.subject).toBeNull();
+    const ownMessageAfter = await ctx.prisma.message.findUniqueOrThrow({ where: { id: ownMessage.id } });
+    expect(ownMessageAfter.body).toBe('[removed]');
+    // The counterparty's own words, in the SAME conversation, are untouched.
+    const otherMessageAfter = await ctx.prisma.message.findUniqueOrThrow({ where: { id: otherMessage.id } });
+    expect(otherMessageAfter.body).toBe('Staff reply: noted, thanks.');
+
+    // The audit row IS kept (never deleted) — only the one PII-bearing key
+    // inside its payload is redacted.
+    const createdAudit = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'CONVERSATION_CREATED', actorId: userId } });
+    expect(createdAudit).toBeTruthy();
+    expect((createdAudit.newValue as Record<string, unknown>).subject).toBeNull();
+    expect((createdAudit.newValue as Record<string, unknown>).conversationId).toBe(conversationId); // the rest of the payload survives
+
+    // Defect 2, resolved: the row stays, the IP/user-agent do not.
+    const sessionAfter = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionBefore.id } });
+    expect(sessionAfter.ipAddress).toBeNull();
+    expect(sessionAfter.userAgent).toBeNull();
+    expect(sessionAfter.revokedAt).not.toBeNull(); // still revoked, exactly as before this card
+    const loginAuditAfter = await ctx.prisma.auditLog.findUniqueOrThrow({ where: { id: loginAuditBefore.id } });
+    expect(loginAuditAfter.ipAddress).toBeNull();
+    expect(loginAuditAfter.action).toBe('USER_LOGGED_IN'); // the row itself is untouched otherwise
+
+    // The USER_ACCOUNT_DELETED row this very call just wrote is caught too —
+    // not left as the one exception standing.
+    const deletionAudit = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'USER_ACCOUNT_DELETED', targetUserId: userId } });
+    expect(deletionAudit.ipAddress).toBeNull();
+
+    // The still-active other party's own account is entirely untouched.
+    const otherUser = await ctx.prisma.user.findUniqueOrThrow({ where: { id: other.userId } });
+    expect(otherUser.status).toBe('ACTIVE');
+  });
 });

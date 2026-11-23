@@ -569,6 +569,20 @@ export class UsersService {
         { action: 'USER_ACCOUNT_DELETED', actorId: userId, targetUserId: userId, ipAddress: meta.ipAddress },
         tx,
       );
+      // ACCT-DELETE-PII-REMNANTS: a revoked session, and a historical audit
+      // row this account appears in as actor or target, have no remaining
+      // reason to keep saying where the person connected from. Run LAST, not
+      // inside anonymizePersonalData, specifically so it also catches the
+      // ipAddress just written onto the USER_ACCOUNT_DELETED row above —
+      // otherwise that row would be the one exception left standing.
+      // `revokeAllForUser` below still flips every session's revokedAt; this
+      // only strips the two network identifiers, on every one of this
+      // user's sessions regardless of revoked state at this instant. The
+      // audit ROW is never deleted or rewritten wholesale (apps/api/
+      // CLAUDE.md section 7) — only the one ipAddress field inside it.
+      await tx.session.updateMany({ where: { userId }, data: { ipAddress: null, userAgent: null } });
+      await tx.auditLog.updateMany({ where: { actorId: userId }, data: { ipAddress: null } });
+      await tx.auditLog.updateMany({ where: { targetUserId: userId }, data: { ipAddress: null } });
       return { avatarKey: before.avatarKey, avatarPendingKey: before.avatarPendingKey, orphanedKeys };
     });
     // Storage deletes are best-effort and not transactional — same pattern
@@ -685,17 +699,24 @@ export class UsersService {
    *
    * Deliberately left alone, stated rather than silently skipped:
    *
-   * - `JobSeekerProfile.headline`/`summary`, `RealEstateAgentProfile.bio` —
-   *   free text the person wrote themselves, which may itself contain a
-   *   name or other personal detail no sweep can reliably find and which a
-   *   blanket overwrite would just as easily destroy a harmless sentence.
-   * - `Message.body` / `MessageAttachment` — free text and files this
-   *   account sent INTO a conversation with another party. The thread
-   *   belongs to both sides, not solely to the account being deleted — the
-   *   same reasoning the PR body gives for leaving `OrderDelivery.
-   *   recipientName`/`ShipmentLeg.handoffReceivedByName` alone: it is a
-   *   dated record of what was actually said, and rewriting half of a
-   *   two-sided conversation after the fact is worse than leaving it.
+   * - `RealEstateAgentProfile.bio` — free text the person wrote themselves,
+   *   which may itself contain a name or other personal detail no sweep can
+   *   reliably find and which a blanket overwrite would just as easily
+   *   destroy a harmless sentence. (`JobSeekerProfile.headline`/`summary`
+   *   used to be grouped here under the identical reasoning — Stanley's
+   *   full-database walk (ACCT-DELETE-PII-REMNANTS) found it was an
+   *   oversight, not a considered policy, because `preferredName`/
+   *   `contactPhone` on that SAME row were already cleared a few lines
+   *   above. Reviews text — `Review`/`ReviewMedia`/`ReviewResponse`,
+   *   `ReviewReport.note` — is explicitly NOT part of that ruling and stays
+   *   out of scope here; that one goes to the owner.)
+   * - `MessageAttachment` — files this account sent INTO a conversation
+   *   with another party. (`Message.body` used to be grouped here too —
+   *   ACCT-DELETE-PII-REMNANTS scrubs it now, scoped to `senderId: userId`
+   *   only: this account's OWN words, never the counterparty's half of the
+   *   same thread. A dated record of what the OTHER party said is still
+   *   left exactly as it was — the thread still belongs to both sides,
+   *   just no longer carries this account's own verbatim text once gone.)
    *
    * MDF-949 — full re-trace against `schema.prisma` (not this method) as the
    * source of truth, prompted by two families the delivery report recorded
@@ -734,7 +755,7 @@ export class UsersService {
    * similarly-shaped field, not re-explained per table: `RoleApplication.
    * message`, `JobApplication.coverLetter`/`employerNotes`,
    * `JobApplicationAnswer`, `JobInterview.notes`/`location`,
-   * `PassengerFleetAffiliation.message`, `Conversation.subject`,
+   * `PassengerFleetAffiliation.message`,
    * `ReviewReport.note` (free text / bilateral record, the
    * headline-or-Message reasoning above). `PropertyEnquiry.message`/
    * `contactPhone` and `PropertyViewingRequest.message` (a message sent TO a
@@ -745,13 +766,34 @@ export class UsersService {
    * deleting user the way `VendorProfile` is). `Review`/`ReviewMedia`/
    * `ReviewResponse` (the author's name/face is a live join to the already-
    * anonymized `User` row, never a separately stored copy; `title`/`body`
-   * are the same free-text judgment call as `JobSeekerProfile.headline`).
-   * `Session.userAgent`/`ipAddress` on an already-revoked row (security/
-   * audit retention, the same standing as `AuditLog`). `PassengerBooking`'s
-   * pickup/dropoff snapshot (the `OrderAddress`/`OrderDelivery` owner-ruling
-   * precedent — a completed trip record, and any live display of who the
-   * rider was already resolves through the anonymized `User` row, same as
-   * `Review`).
+   * are the same free-text judgment call as `RealEstateAgentProfile.bio`,
+   * and explicitly out of this card per the owner — see above).
+   * `PassengerBooking`'s pickup/dropoff snapshot (the `OrderAddress`/
+   * `OrderDelivery` owner-ruling precedent — a completed trip record, and
+   * any live display of who the rider was already resolves through the
+   * anonymized `User` row, same as `Review`).
+   *
+   * `Conversation.subject` is NO LONGER on this list — see
+   * ACCT-DELETE-PII-REMNANTS below: scrubbed, but only for conversations
+   * this account itself created (`createdById`), never for one it merely
+   * participates in, which would rewrite the subject line the still-active
+   * counterparty sees for their own open thread.
+   *
+   * `Session.userAgent`/`ipAddress` is ALSO no longer on this list, and
+   * neither is `AuditLog.ipAddress` on a row this account appears in as
+   * actor or target — both used to be treated as security/audit retention
+   * with "the same standing as AuditLog" justifying leaving them. Stanley's
+   * walk found 5/5 revoked sessions and 9/23 of this account's own audit
+   * rows still carrying a real IP after deletion, and the owner ruled it a
+   * defect: a revoked session or a historical audit row has no remaining
+   * reason to say where the deleted person connected from. See
+   * ACCT-DELETE-PII-REMNANTS in {@link deleteAccount} for where this is
+   * actually scrubbed — AFTER `USER_ACCOUNT_DELETED` itself is written, so
+   * that row's own `ipAddress` is caught too, not left as the one
+   * exception. The audit ROW is never deleted or rewritten wholesale
+   * (apps/api/CLAUDE.md section 7) — only the one `ipAddress` field inside
+   * it is nulled, the same scoped exception this method makes for
+   * `Conversation.subject`'s copy inside `CONVERSATION_CREATED`'s payload.
    *
    * Returns every storage key this pass orphaned, so the caller deletes the
    * actual objects AFTER the transaction commits — best-effort, same
@@ -870,7 +912,15 @@ export class UsersService {
       if (jobSeeker.photoKey) orphanedKeys.push(jobSeeker.photoKey);
       await tx.jobSeekerProfile.update({
         where: { id: jobSeeker.id },
-        data: { preferredName: 'Deleted', legalName: null, contactEmail: null, contactPhone: null, photoKey: null },
+        // ACCT-DELETE-PII-REMNANTS: headline/summary were left on purpose in
+        // every prior round (free text that might contain a harmless
+        // sentence, not obviously PII) — Stanley's full-database walk found
+        // preferredName/contactPhone cleared on this SAME row while these
+        // two were not, which is the tell this was an oversight on the exact
+        // table this method already knows, not a considered policy. Owner
+        // ruling: "do not unnecessarily retain personally identifying
+        // information" — free text the person wrote is exactly that.
+        data: { preferredName: 'Deleted', legalName: null, contactEmail: null, contactPhone: null, photoKey: null, headline: null, summary: null },
       });
     }
 
@@ -986,6 +1036,47 @@ export class UsersService {
         for (const doc of propertyDocs) {
           orphanedKeys.push(doc.storageKey);
           await tx.propertyDocument.update({ where: { id: doc.id }, data: { storageKey: `deleted-${doc.id}`, label: null } });
+        }
+      }
+    }
+
+    // ACCT-DELETE-PII-REMNANTS: free text THIS account itself authored, not
+    // the counterparty's half of a shared record — the same line the
+    // existing doc comment already draws for Message/Conversation, just
+    // drawn on the right side of it. A support message this account sent
+    // (including one containing a phone number the person typed into it)
+    // is this account's own words, not the other party's — scoped by
+    // senderId, never a whole conversation's worth of the OTHER side's
+    // messages. `type: 'USER'` only: a SYSTEM message has no senderId and is
+    // not this account's free text to begin with.
+    await tx.message.updateMany({
+      where: { senderId: userId, type: 'USER' },
+      data: { body: '[removed]' },
+    });
+    // Conversation.subject is typically authored by whoever OPENED the
+    // conversation (createdById) — scoped the same way, not swept for every
+    // conversation this account merely participates in, which would also
+    // rewrite the subject line as the counterparty sees it for a thread they
+    // are still an active party to.
+    const ownConversations = await tx.conversation.findMany({ where: { createdById: userId }, select: { id: true } });
+    if (ownConversations.length > 0) {
+      const ownConversationIds = ownConversations.map((c) => c.id);
+      await tx.conversation.updateMany({ where: { id: { in: ownConversationIds } }, data: { subject: null } });
+      // The subject was also copied into CONVERSATION_CREATED's own audit
+      // payload at the time — clearing the conversation row alone leaves
+      // that copy behind. The audit ROW stays (never delete/rewrite an audit
+      // record, apps/api/CLAUDE.md section 7) — only the one PII-bearing key
+      // inside its newValue is redacted, same exception this method already
+      // makes for ipAddress below, for the same owner ruling.
+      const ownConversationIdSet = new Set(ownConversationIds);
+      const createdAudits = await tx.auditLog.findMany({
+        where: { action: 'CONVERSATION_CREATED', actorId: userId },
+        select: { id: true, newValue: true },
+      });
+      for (const row of createdAudits) {
+        const nv = row.newValue as Record<string, unknown> | null;
+        if (nv && 'subject' in nv && typeof nv.conversationId === 'string' && ownConversationIdSet.has(nv.conversationId)) {
+          await tx.auditLog.update({ where: { id: row.id }, data: { newValue: { ...nv, subject: null } } });
         }
       }
     }
