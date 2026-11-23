@@ -1107,7 +1107,7 @@ export class UsersService {
     // conversation this account merely participates in, which would also
     // rewrite the subject line as the counterparty sees it for a thread they
     // are still an active party to.
-    const ownConversations = await tx.conversation.findMany({ where: { createdById: userId }, select: { id: true } });
+    const ownConversations = await tx.conversation.findMany({ where: { createdById: userId }, select: { id: true, subject: true } });
     if (ownConversations.length > 0) {
       const ownConversationIds = ownConversations.map((c) => c.id);
       await tx.conversation.updateMany({ where: { id: { in: ownConversationIds } }, data: { subject: null } });
@@ -1126,6 +1126,31 @@ export class UsersService {
         const nv = row.newValue as Record<string, unknown> | null;
         if (nv && 'subject' in nv && typeof nv.conversationId === 'string' && ownConversationIdSet.has(nv.conversationId)) {
           await tx.auditLog.update({ where: { id: row.id }, data: { newValue: { ...nv, subject: null } } });
+        }
+      }
+
+      // ACCT-DELETE-SYSTEM-MESSAGE-SUBJECT: the subject above is also copied,
+      // verbatim, into the conversation-start SYSTEM message's own body
+      // (`ensureConversation`'s `Conversation started — ${label}.`, seeded
+      // atomically with the conversation row — always that conversation's
+      // very first message). The USER-message sweep above is correctly
+      // scoped by `senderId` so it never touches a counterparty's replies —
+      // but a SYSTEM message has no senderId, so that same scoping is
+      // exactly what let this copy of the subject through untouched.
+      // Narrowed the same way the owner drew the line for the subject
+      // itself: only conversations this account created, only the one that
+      // actually had a subject to leak, only that conversation's first
+      // message, and only if it still literally carries that subject text —
+      // never a second SYSTEM message, never anything from the counterparty.
+      for (const conv of ownConversations) {
+        if (!conv.subject) continue;
+        const first = await tx.message.findFirst({
+          where: { conversationId: conv.id },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true, type: true, body: true },
+        });
+        if (first && first.type === 'SYSTEM' && first.body.includes(conv.subject)) {
+          await tx.message.update({ where: { id: first.id }, data: { body: first.body.replaceAll(conv.subject, '[removed]') } });
         }
       }
     }

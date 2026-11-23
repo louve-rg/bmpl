@@ -1107,6 +1107,16 @@ describe('account deletion — refusals', () => {
     const otherMessageAfter = await ctx.prisma.message.findUniqueOrThrow({ where: { id: otherMessage.id } });
     expect(otherMessageAfter.body).toBe('Staff reply: noted, thanks.');
 
+    // ACCT-DELETE-SYSTEM-MESSAGE-SUBJECT (Stanley's re-walk): the subject
+    // the person typed also survived, verbatim, inside the conversation-start
+    // SYSTEM message — nulling Conversation.subject never touched it, because
+    // the USER-message sweep above is scoped to type USER, and this message
+    // is type SYSTEM. It must be scrubbed the same way the subject itself was.
+    const systemMessage = await ctx.prisma.message.findFirstOrThrow({ where: { conversationId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    expect(systemMessage.type).toBe('SYSTEM');
+    expect(systemMessage.body).not.toContain('6650099');
+    expect(systemMessage.body).not.toContain('My number is 6650099, please call');
+
     // The audit row IS kept (never deleted) — only the one PII-bearing key
     // inside its payload is redacted.
     const createdAudit = await ctx.prisma.auditLog.findFirstOrThrow({ where: { action: 'CONVERSATION_CREATED', actorId: userId } });
