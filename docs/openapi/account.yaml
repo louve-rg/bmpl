@@ -87,9 +87,16 @@ paths:
         an affiliated active fleet driver (ACCT-DEL-PASSENGER-PROVIDER-NO-FLEET-REFUSAL,
         2026-11-23 — the trip/fleet-driver pair were real gaps until this
         fix; only the open-booking reason existed before), or an employer
-        with an applicant still awaiting a decision). This is NOT a full
-        erasure: the `users` row and related personal-data tables are
-        ANONYMIZED in place
+        with an applicant still awaiting a decision). "In-progress" for the
+        driver/passenger-driver job reason includes a FLAGGED (EXCEPTION)
+        delivery or shipment leg since MDF-1074 (2026-11-23) — a driver whose
+        job was flagged still physically holds the parcel, so this refusal
+        now names that case too, where it previously did not. The way out:
+        staff can CANCEL a flagged delivery (EXCEPTION is a legal `from` for
+        CANCEL, MDF-927), so the driver is not permanently locked out of
+        deleting their account by a job they can neither finish nor decline.
+        This is NOT a full erasure: the `users` row and related
+        personal-data tables are ANONYMIZED in place
         (name, contact details, identity documents, saved addresses — see
         `UsersService.anonymizePersonalData`'s own doc comment for the exact,
         table-by-table survey), but a COMPLETED order or shipment keeps its

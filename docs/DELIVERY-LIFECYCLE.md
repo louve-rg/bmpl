@@ -293,6 +293,26 @@ no duplicate, no gap: `(none)→SENDER` (booking) → `SENDER→DRIVER` (pickup)
 `CARRIER→HUB` (carrier arrives + terminal handoff) → `HUB→RECIPIENT`
 (collection/delivery).
 
+**Not every custody row is a transfer — MDF-1074 added the one that isn't.**
+`ShipmentService.recoverStrandedLeg`
+(`POST admin/logistics/legs/:id/recover-stranded`, `logistics.operate`) is
+the one way out of a leg stranded because its own shipment was already
+resolved another way (`RETURNED`/`REROUTED`) while the leg itself still
+reads `EXCEPTION` and still holds a driver assignment nothing will ever
+dispatch again. Releasing that driver appends a `CustodyEvent` with
+`fromHolder` equal to `toHolder` — repeating the last real holder on file,
+since nothing physically moved — and `verification: OVERRIDDEN`, never
+`VERIFIED`: this row is the administrative closure of a dead leg, not a
+handoff anyone performed. It never touches `status`, `exceptionAt` or
+`exceptionReason` — same rule as everywhere else in this section, the leg
+stays the honest historical record of what actually happened; only the
+driver-assignment columns move, gated by a new `strandedRecoveredAt` column
+so a repeat call is a documented no-op, not a second release. This is a
+narrower dead end than the "stranded mid-carry" one `resolve-exception`
+already describes (where the leg itself is still unresolved) — this one
+fires only once the SHIPMENT has already been resolved out from under a
+leg that is still flagged.
+
 ### A driver working a courier leg
 
 `ShipmentDriverService` (`apps/api/src/shipping/shipment-driver.service.ts`)
