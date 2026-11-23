@@ -2327,6 +2327,45 @@ export class ShipmentService {
         const profile = await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } });
         presentedCourierUserId = profile.userId;
       }
+    } else if (leg.kind !== 'LINE_HAUL' && leg.assignedDriverProfileId != null) {
+      // SHIP-COLLECTION-FAILED-NONATTEMPT-BURNS-LOCKOUT (god's ruling,
+      // option d — touches the rate limiter not at all). Before this, a
+      // staff submission on an assigned courier-kind leg that named NEITHER
+      // field skipped the whole identity-derivation branch above entirely,
+      // so `presentedCourierUserId` stayed undefined and
+      // `verifyLegPinOrThrow` fell back to `actor.userId` — the SIGNED-IN
+      // STAFF MEMBER, who is never the assigned courier. That mismatch then
+      // burned one of the shared PIN counter's five tries exactly like a
+      // wrong-code guess, even when the code itself was correct: a clerk who
+      // simply forgot to assert an identity could lock out a legitimate
+      // recipient/sender through no fault of their own code entry.
+      //
+      // The fix extends TERM-7's own existing refusal (three lines above —
+      // a flag WAS supplied against an unassigned leg) to the case it never
+      // routed through that same door: supplying NEITHER flag at all,
+      // against a leg that DOES have an assignee. Refused HERE, before
+      // `verifyLegPinOrThrow` is ever reached, so no counter is spent on a
+      // request that was never a genuine code attempt by anyone. This does
+      // NOT reopen BMPL-174: a WRONG claim (a real `presentedCourierUserId`
+      // that fails the assignment check) still flows through
+      // `verifyLegPinOrThrow` and still burns an attempt exactly as before
+      // — only the "nothing was asserted at all" shape is refused earlier.
+      //
+      // Scoped to `assignedDriverProfileId != null` on purpose: an
+      // unassigned courier-kind leg has no entitled party to assert at all
+      // (staff may still complete it by code alone — the existing,
+      // deliberate "no driver was ever assigned" path this must not
+      // break), and LINE_HAUL has no assignee by construction (TERM-7's own
+      // words) and stays exactly the code-only check it always was.
+      //
+      // The courier's own self-submission (ShipmentDriverService.
+      // completeHandoff) now always supplies `presentedCourierUserId`
+      // explicitly — a genuine identity assertion, since the courier IS the
+      // actor there — so this branch can never fire on a real driver call,
+      // only on a staff submission that asserted nothing.
+      throw new BadRequestException(
+        'Say who presented this code before submitting a handoff for this leg: supply presentedCourierUserId or presentedByAssignedCourier.',
+      );
     }
     // The code is checked BEFORE the transition transaction, in its own write.
     // A failed attempt recorded inside the transaction is rolled back when that
