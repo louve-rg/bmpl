@@ -276,9 +276,16 @@ function PassengerCard() {
           <span>Belize City</span>
           <span>San Pedro</span>
         </div>
+        {/* S2-READINESS: this row used to read "Next departure · 45 min ·
+            from BZ$30" -- a scheduled-departure time for a product with no
+            timetable (CLAUDE.md s5) stacked on a fare for a vertical that
+            charges none at all (passenger-operations.service.ts: no wallet,
+            escrow or payment code; fareQuotedMinor stays null). Replaced
+            with the flow that actually exists: a rider requests seats, a
+            provider confirms them, no money moves and nothing is timed. */}
         <div className="mt-3 flex items-center justify-between rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
-          <span className="text-[11px] font-semibold text-belize-navy">Next departure</span>
-          <span className="text-[11px] font-bold text-emerald-600">45 min · from BZ$30</span>
+          <span className="text-[11px] font-semibold text-belize-navy">Request seats</span>
+          <span className="text-[11px] font-bold text-emerald-600">Confirmed by provider</span>
         </div>
       </div>
 
