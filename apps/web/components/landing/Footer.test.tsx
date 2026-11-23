@@ -59,9 +59,10 @@ describe('Footer links', () => {
     }
   });
 
-  it('keeps Contact, pointed at the support address the product already publishes', () => {
+  it('shows the contact address as the link\'s own visible text, not hidden behind a bare "Contact" label (WEB-FALSE-SESSION-EXPIRED follow-up, owner deliverable 1)', () => {
     const links = render();
-    expect(links.get('Contact')).toBe('mailto:info@bzemarketplace.com');
+    expect(links.get('info@bzemarketplace.com')).toBe('mailto:info@bzemarketplace.com');
+    expect(links.has('Contact')).toBe(false);
   });
 
   it('leaves Privacy and Terms as the only "#" links, both owner-gated', () => {
