@@ -56,6 +56,43 @@ export function onSessionExpired(listener: SessionExpiredListener | null) {
   sessionExpiredListener = listener;
 }
 
+/**
+ * WEB-FALSE-SESSION-EXPIRED-BURST (2026-11-23): the deployed build was still
+ * showing "Your session expired" to anonymous visitors -- not on a cold load
+ * (the #855/#859 fix above holds for that), but after scrolling triggered a
+ * second wave of nav-level components (cart, saved, me, recommendations) that
+ * ALL fire their own auth-gated call at once. Every one of those 401s used to
+ * open its own independent POST /api/auth/refresh -- six or seven in the same
+ * instant on a single page, observed directly on the live site -- and
+ * /auth/refresh carries `@StrictThrottle()` (10/60s per IP). The caller unlucky
+ * enough to land past that limit got back a 429 `ThrottlerException`, not the
+ * API's own 401 "No refresh token provided." -- so the exact-message check
+ * below didn't recognize it, and the visitor was told their session had
+ * expired when nothing had even been attempted on their behalf yet.
+ *
+ * Single-flight de-dupes the common case (one page load's burst becomes ONE
+ * real refresh attempt, not N), and the 429 carve-out below covers what
+ * de-duping can't: several page loads in the same minute each making their
+ * own single refresh call can still add up past the limit. A throttled
+ * response is not evidence of anything about the session -- showing the
+ * banner on it would be guessing, not stating a confirmed fact, which is the
+ * one thing this listener is supposed to never do.
+ */
+let refreshInFlight: Promise<{ ok: boolean; status: number; body: unknown }> | null = null;
+
+function refreshSession(): Promise<{ ok: boolean; status: number; body: unknown }> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+      const body = await res.json().catch(() => null);
+      return { ok: res.ok, status: res.status, body };
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 function readCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
@@ -93,10 +130,7 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
   });
 
   if (res.status === 401 && retry && path !== '/auth/refresh') {
-    const refreshed = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-    });
+    const refreshed = await refreshSession();
     if (refreshed.ok) return requestWithResponse(path, init, false);
     // Refresh itself failed, not just the original call. That is NOT the
     // same thing as a real expiry: a visitor with no refresh cookie at all
@@ -112,11 +146,14 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
     // "No refresh token provided." (auth.controller.ts:117), while a real,
     // dead session throws a different message (session.service.ts:89/92,
     // e.g. "Session expired. Please sign in again."). Suppress the listener
-    // only for the former -- never widen this into a per-endpoint allowlist,
+    // for the former -- never widen this into a per-endpoint allowlist,
     // which would leave the next auth-gated nav call to re-create this bug.
-    const refreshBody = await refreshed.json().catch(() => null);
-    const neverHadASession = refreshBody?.message === 'No refresh token provided.';
-    if (!path.startsWith('/auth/') && !neverHadASession) sessionExpiredListener?.();
+    // Also suppress on a 429 (WEB-FALSE-SESSION-EXPIRED-BURST above): a
+    // throttled refresh call was never actually attempted, so it proves
+    // nothing about whether the session is real or dead either way.
+    const refreshBody = refreshed.body as { message?: string } | null;
+    const cannotConfirmExpiry = refreshed.status === 429 || refreshBody?.message === 'No refresh token provided.';
+    if (!path.startsWith('/auth/') && !cannotConfirmExpiry) sessionExpiredListener?.();
   }
 
   const text = await res.text();
@@ -183,12 +220,12 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   });
 
   if (res.status === 401 && retry) {
-    const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    const refreshed = await refreshSession();
     if (refreshed.ok) return uploadBinary<T>(path, body, false);
     // Same distinction as `requestWithResponse` above -- see its comment.
-    const refreshBody = await refreshed.json().catch(() => null);
-    const neverHadASession = refreshBody?.message === 'No refresh token provided.';
-    if (!neverHadASession) sessionExpiredListener?.();
+    const refreshBody = refreshed.body as { message?: string } | null;
+    const cannotConfirmExpiry = refreshed.status === 429 || refreshBody?.message === 'No refresh token provided.';
+    if (!cannotConfirmExpiry) sessionExpiredListener?.();
   }
 
   const text = await res.text();

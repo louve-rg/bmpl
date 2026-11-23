@@ -239,6 +239,65 @@ describe('web api session-expiry notification', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * WEB-FALSE-SESSION-EXPIRED-BURST (2026-11-23): reproduced on the deployed
+   * site by scrolling the homepage -- several nav-level components fire
+   * their own auth-gated call at once, each independently opening its own
+   * POST /api/auth/refresh, and /auth/refresh is StrictThrottle()'d. The
+   * caller unlucky enough to land past that limit got back 429
+   * `ThrottlerException`, not the API's own 401 "No refresh token provided.",
+   * so the old exact-message check didn't recognize it and fired the false
+   * notice. A throttled response is not evidence either way -- it must not
+   * fire the listener.
+   */
+  it('does NOT notify when the refresh attempt itself is throttled (429), since that proves nothing about the session', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        return url.endsWith('/auth/refresh')
+          ? jsonResponse(429, { statusCode: 429, message: 'ThrottlerException: Too Many Requests' })
+          : jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    await expect(api.get('/cart')).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The actual trigger on the live site: several auth-gated calls fire in
+   * the same instant (cart, saved/count, saved/ids, me, recommendations),
+   * each hitting its own 401 and each trying to refresh at once. Before the
+   * fix, that was N independent POSTs to /auth/refresh; this proves it is
+   * now exactly one, regardless of how many callers are waiting on it.
+   */
+  it('de-dupes a burst of concurrent refresh attempts into a single network call', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    let refreshCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/auth/refresh')) {
+          refreshCalls += 1;
+          return jsonResponse(401, { message: 'No refresh token provided.' });
+        }
+        return jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    await Promise.all(
+      [api.get('/cart'), api.get('/me'), api.get('/saved/count'), api.get('/saved/ids')].map((p) => p.catch(() => {})),
+    );
+
+    expect(refreshCalls).toBe(1);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('does NOT notify an upload attempt that never had a session either', async () => {
     const listener = vi.fn();
     onSessionExpired(listener);
