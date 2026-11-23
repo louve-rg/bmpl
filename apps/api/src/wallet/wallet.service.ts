@@ -628,6 +628,25 @@ export class WalletService {
           true,
           isTest,
         );
+
+        // Recipient only — the sender already gets a 2xx receipt for the
+        // action they just took, and notifying them of their own transfer
+        // would be noise. In-tx: a notification for a post that then rolls
+        // back (caught by the P2002 replay branch below) must never exist.
+        const sender = await tx.user.findUniqueOrThrow({ where: { id: senderUserId }, select: { firstName: true, lastName: true } });
+        await this.notifications.notifyUsers(
+          [dto.recipientUserId],
+          {
+            type: 'SYSTEM',
+            category: 'PAYMENT',
+            event: 'WALLET_TRANSFER_RECEIVED',
+            title: 'Money received',
+            body: `${this.displayName(sender)} sent you money. It's been credited to your wallet.`,
+            data: { walletTransactionId: txn.id },
+          },
+          tx,
+        );
+
         return { transactionId: txn.id };
       })
       .catch(async (err: unknown) => {
