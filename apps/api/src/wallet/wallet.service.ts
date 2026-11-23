@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { assertBalanced, assertMoneyMovementEnabled, signedAmount, type DraftTransaction } from '@bmpl/wallet';
+import { assertBalanced, assertMoneyMovementEnabled, buildTransfer, signedAmount, type DraftTransaction } from '@bmpl/wallet';
 import type { Currency, Prisma, WalletAccount, WalletAccountType } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -27,6 +27,26 @@ export const SELF_SERVICE_TEST_CREDIT = 'Self-Service Test Credit';
  * administrator may legitimately grant twice on purpose.
  */
 export const ADMIN_TEST_CREDIT_WINDOW_MS = 10_000;
+
+/**
+ * WALLET-P2P-API. Shaped from the CALLER's point of view — the sender sees
+ * SENT plus the recipient's name, the recipient sees RECEIVED plus the
+ * sender's name. `counterpartyName` is "First L." only; nothing else about
+ * the other party ever leaves the server through this shape.
+ */
+export interface TransferReceipt {
+  transactionId: string;
+  reference: string | null;
+  direction: 'SENT' | 'RECEIVED';
+  amountMinor: number;
+  currency: Currency;
+  status: string;
+  counterpartyName: string;
+  note: string | null;
+  postedAt: Date | null;
+  isTest: boolean;
+  replayed?: true;
+}
 
 /**
  * Persistence layer for the double-entry ledger — the FIRST real money movement
@@ -488,6 +508,229 @@ export class WalletService {
     return hold?.isTest ?? false;
   }
 
+  // ---- Transfers (WALLET-P2P-API) ----
+
+  /**
+   * Resolve a transfer recipient by their exact email address — the ONLY
+   * identifier this feature accepts (no partial search, no autocomplete, no
+   * phone lookup: the owner's ruling). Eligibility is a single condition,
+   * checked in one query so every reason to refuse gets the SAME answer:
+   * `status !== 'ACTIVE'` covers both a suspended account and the
+   * DEACTIVATED status a real self-service deletion (MDF-924) leaves behind,
+   * and `deletedAt` is the structural marker that same path sets. Collapsing
+   * "not found", "suspended" and "ineligible" into one message is
+   * deliberate — a sender must never be able to tell which of the three they
+   * hit for somebody else's email address.
+   *
+   * Deliberately does NOT call `ensureUserAccount`: a lookup is a read, and a
+   * read must not materialise a wallet row for someone who has never had
+   * one. Only the real movement in `transferFunds` below does that, exactly
+   * as every other funding path already only touches `WalletAccount` on an
+   * actual movement.
+   */
+  async lookupTransferRecipient(email: string): Promise<{ recipientUserId: string; displayName: string }> {
+    const recipient = await this.prisma.user.findFirst({
+      where: { email, status: 'ACTIVE', deletedAt: null },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    if (!recipient) {
+      throw new NotFoundException('No eligible BML account for that email address.');
+    }
+    return { recipientUserId: recipient.id, displayName: this.displayName(recipient) };
+  }
+
+  /**
+   * The first user-to-user ledger movement BML has ever posted. Same engine
+   * as every other wallet write — a balanced TRANSFER through
+   * `postTransaction`, no balance written directly — with three things that
+   * are specific to moving money between two PEOPLE rather than between a
+   * person and a system account:
+   *
+   *   1. Debited against AVAILABLE balance (ledger minus active HELD
+   *      reservations), never raw balance. A transfer that outran an escrow
+   *      hold would strand the payment that hold exists to protect.
+   *   2. Both account rows are locked FOR UPDATE in a DETERMINISTIC order
+   *      (sorted account ids, not call-argument order) before either
+   *      balance is read, so two opposite-direction transfers racing the
+   *      same pair of wallets serialise instead of deadlocking.
+   *   3. Idempotent on `reference = transfer:<senderUserId>:<idempotencyKey>`
+   *      — `WalletTransaction.reference`'s own unique index. A replay with
+   *      the same key collides (P2002) and gets back the ORIGINAL receipt,
+   *      never a second movement and never a raw 500 — same shape as
+   *      `adminTestCredit`'s P2002 handling above.
+   *
+   * `isTest` is read from the SENDER's funds (`isTestFunded`), never from
+   * the request and never from either party's own `User.isTest` flag — the
+   * same rule `topUp`'s own comment states: simulation money is a property
+   * of the MOVEMENT, not of whoever receives it. The recipient's `isTest`
+   * flag is never read and never written here.
+   */
+  async transferFunds(
+    senderUserId: string,
+    dto: { recipientUserId: string; amountMinor: number; idempotencyKey: string; note?: string },
+    currency: Currency = 'BZD',
+  ): Promise<TransferReceipt> {
+    const amountMinor = BigInt(dto.amountMinor);
+    if (amountMinor <= 0n) throw new BadRequestException('Enter an amount greater than zero.');
+    if (dto.recipientUserId === senderUserId) throw new BadRequestException('You cannot send money to yourself.');
+
+    // Same eligibility test as lookupTransferRecipient, under the SAME
+    // "unknown recipient" answer — a recipient id obtained from a prior
+    // lookup that has since become ineligible must not quietly still work.
+    const recipient = await this.prisma.user.findFirst({
+      where: { id: dto.recipientUserId, status: 'ACTIVE', deletedAt: null },
+      select: { id: true },
+    });
+    if (!recipient) throw new NotFoundException('Unknown recipient.');
+
+    const reference = `transfer:${senderUserId}:${dto.idempotencyKey}`;
+
+    let replay = false;
+    const result = await this.prisma
+      .$transaction(async (tx) => {
+        const senderWallet = await this.ensureUserAccount(senderUserId, currency, tx);
+        const recipientWallet = await this.ensureUserAccount(dto.recipientUserId, currency, tx);
+
+        if (senderWallet.status !== 'ACTIVE') throw new BadRequestException('Your wallet is not active.');
+        if (recipientWallet.status !== 'ACTIVE') {
+          throw new BadRequestException("That recipient's wallet is not active.");
+        }
+
+        // Deterministic order — NOT argument order — so a simultaneous
+        // transfer running the opposite direction between this same pair of
+        // wallets takes the same two locks in the same sequence rather than
+        // deadlocking against this one.
+        const [firstId, secondId] = [senderWallet.id, recipientWallet.id].sort();
+        await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${firstId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${secondId} FOR UPDATE`;
+
+        const available = await this.transferAvailableMinor(senderWallet.id, tx);
+        if (amountMinor > available) {
+          throw new BadRequestException('You do not have enough available balance for this transfer.');
+        }
+
+        const isTest = await this.isTestFunded(senderWallet.id, tx);
+
+        const txn = await this.postTransaction(
+          tx,
+          // `reference` is always supplied above — `buildTransfer`'s own
+          // return type just doesn't know that, since it accepts an
+          // optional one for callers who post without one.
+          buildTransfer({
+            type: 'TRANSFER',
+            currency,
+            fromAccountId: senderWallet.id,
+            toAccountId: recipientWallet.id,
+            amountMinor,
+            reference,
+            description: dto.note,
+          }) as DraftTransaction & { reference: string },
+          true,
+          isTest,
+        );
+        return { transactionId: txn.id };
+      })
+      .catch(async (err: unknown) => {
+        // Same shape as adminTestCredit's own P2002 handling: a losing
+        // racer on the unique reference is an idempotent REPLAY of a
+        // transfer that already posted, not an error and not a second
+        // movement — hand back the transaction that actually won.
+        if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
+          const existing = await this.prisma.walletTransaction.findUnique({ where: { reference }, select: { id: true } });
+          if (existing) {
+            replay = true;
+            return { transactionId: existing.id };
+          }
+        }
+        throw err;
+      });
+
+    if (!replay) {
+      await this.audit.record({
+        action: 'WALLET_TRANSACTION_POSTED',
+        actorId: senderUserId,
+        newValue: { walletTransactionId: result.transactionId, type: 'TRANSFER' },
+      });
+    }
+
+    return this.shapeTransferReceipt(result.transactionId, senderUserId, replay);
+  }
+
+  /**
+   * A transfer receipt the caller is party to — sender or recipient, nothing
+   * else. Anyone else gets the SAME 404 a nonexistent id gets, never a 403:
+   * a 403 would confirm the transfer exists. Scoped to `type: 'TRANSFER'` so
+   * this route cannot be used to peek at a non-transfer transaction's detail
+   * by id.
+   */
+  async getTransferReceipt(userId: string, transactionId: string): Promise<TransferReceipt> {
+    const t = await this.prisma.walletTransaction.findUnique({ where: { id: transactionId }, select: { id: true, type: true } });
+    if (!t || t.type !== 'TRANSFER') throw new NotFoundException('Wallet transaction not found.');
+    return this.shapeTransferReceipt(transactionId, userId, false);
+  }
+
+  /**
+   * Spendable balance for a transfer debit: ledger balance minus soft HELD
+   * reservations, floored at zero — the same "available" formula `summary()`
+   * reports to the customer. Deliberately NOT a call to `summary()`, which
+   * always reads via `this.prisma` outside any transaction; this runs
+   * against the SAME transaction client that just took the row lock above,
+   * so it can never see a pre-lock, possibly-stale balance. AUTHORIZED holds
+   * need no separate subtraction here — unlike a HELD hold, an AUTHORIZED
+   * one has already left the ledger balance this reads.
+   */
+  private async transferAvailableMinor(accountId: string, tx: Tx): Promise<bigint> {
+    const ledgerBalance = await this.balanceMinor(accountId, tx);
+    const held = await tx.walletHold.aggregate({
+      where: { walletAccountId: accountId, status: 'HELD' },
+      _sum: { amountMinor: true },
+    });
+    const soft = held._sum.amountMinor ?? 0n;
+    const raw = ledgerBalance - soft;
+    return raw > 0n ? raw : 0n;
+  }
+
+  /** "First L." — first name plus last-initial only. Nothing else about a
+   *  counterparty ever leaves the server through a transfer-related response. */
+  private displayName(u: { firstName: string; lastName: string }): string {
+    return `${u.firstName} ${u.lastName.charAt(0)}.`;
+  }
+
+  /** Shared by `transferFunds` (a fresh post or a replay) and
+   *  `getTransferReceipt` (a later read) so both return identically-shaped
+   *  receipts built the same way. Throws the SAME "not found" the caller
+   *  gets for an id that does not exist at all when they are not actually
+   *  party to this transaction — see `getTransferReceipt`'s own comment on
+   *  why that must never be a 403. */
+  private async shapeTransferReceipt(transactionId: string, viewerUserId: string, replayed: boolean): Promise<TransferReceipt> {
+    const t = await this.prisma.walletTransaction.findUniqueOrThrow({
+      where: { id: transactionId },
+      include: { entries: { include: { account: { select: { userId: true } } } } },
+    });
+    const mine = t.entries.find((e) => e.account.userId === viewerUserId);
+    const theirs = t.entries.find((e) => e.account.userId !== viewerUserId);
+    if (!mine || !theirs?.account.userId) {
+      throw new NotFoundException('Wallet transaction not found.');
+    }
+    const counterparty = await this.prisma.user.findUniqueOrThrow({
+      where: { id: theirs.account.userId },
+      select: { firstName: true, lastName: true },
+    });
+    return {
+      transactionId: t.id,
+      reference: t.reference,
+      direction: mine.direction === 'CREDIT' ? 'RECEIVED' : 'SENT',
+      amountMinor: money(mine.amountMinor),
+      currency: t.currency,
+      status: t.status,
+      counterpartyName: this.displayName(counterparty),
+      note: t.description,
+      postedAt: t.postedAt,
+      isTest: t.isTest,
+      ...(replayed ? { replayed: true as const } : {}),
+    };
+  }
+
   // ---- Reads ----
 
   /**
@@ -563,6 +806,25 @@ export class WalletService {
       }),
       this.prisma.walletTransaction.count({ where }),
     ]);
+
+    // WALLET-P2P-API: the counterparty's name on a TRANSFER row, so history
+    // can read "Sent to Pamela B." / "Received from Edward B." instead of a
+    // bare "TRANSFER". Batched once for the whole page rather than one
+    // query per row. Deliberately does NOT rename or reuse the existing
+    // `direction: IN|OUT` field below — that field already carries the sign
+    // for every transaction type, not just TRANSFER, and the contract this
+    // satisfies needs only the name to go with it.
+    const counterpartyIds = new Set<string>();
+    for (const t of rows) {
+      if (t.type !== 'TRANSFER') continue;
+      const theirs = t.entries.find((e) => e.account.userId !== userId);
+      if (theirs?.account.userId) counterpartyIds.add(theirs.account.userId);
+    }
+    const counterparties = counterpartyIds.size
+      ? await this.prisma.user.findMany({ where: { id: { in: [...counterpartyIds] } }, select: { id: true, firstName: true, lastName: true } })
+      : [];
+    const counterpartyNameById = new Map(counterparties.map((u) => [u.id, this.displayName(u)]));
+
     return {
       rows: rows.map((t) => {
         const mine = t.entries.filter((e) => e.account.userId === userId);
@@ -570,6 +832,8 @@ export class WalletService {
         // money in, a debit is money out. The raw entries are symmetrical; the
         // customer only cares about their own side of them.
         const signedMinor = mine.reduce((acc, e) => acc + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+        const theirs = t.type === 'TRANSFER' ? t.entries.find((e) => e.account.userId !== userId) : undefined;
+        const counterpartyName = theirs?.account.userId ? counterpartyNameById.get(theirs.account.userId) ?? null : null;
         return {
           id: t.id,
           type: t.type,
@@ -579,6 +843,7 @@ export class WalletService {
           isTest: t.isTest,
           signedMinor: money(signedMinor),
           direction: signedMinor >= 0n ? ('IN' as const) : ('OUT' as const),
+          counterpartyName,
           postedAt: t.postedAt,
           createdAt: t.createdAt,
         };
@@ -761,10 +1026,14 @@ export class WalletService {
       postedAt: t.postedAt,
       createdAt: t.createdAt,
       // "Is this MY wallet", not merely "is this somebody's wallet". The customer
-      // detail page prints "Your wallet" for a true entry, so the weaker test would
-      // mislabel a second person's wallet the day a user-to-user movement exists.
-      // No such movement exists today - there is no transfer endpoint - so this is
-      // closing the gap before a feature can walk into it, not fixing a live bug.
+      // detail page prints "Your wallet" for a true entry, so the weaker test
+      // would mislabel a second person's wallet. WALLET-P2P-API is the
+      // user-to-user movement this was originally written ahead of — this
+      // method still isn't the one that shapes a transfer for a customer
+      // (that's `shapeTransferReceipt`, which needs a counterparty NAME, not
+      // just this boolean), but `getForUser`/`adminList` still route through
+      // here for a TRANSFER row same as any other type, so the distinction
+      // below is live now, not merely pre-emptive.
       entries: t.entries.map((e) => ({ direction: e.direction, amountMinor: money(e.amountMinor), accountType: e.account.type, isCustomer: viewerUserId ? e.account.userId === viewerUserId : !!e.account.userId })),
       balanced: t.entries.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n) === 0n,
     };
