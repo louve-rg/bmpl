@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
-import { Alert, Button, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
+import { Alert, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
 import { bzd, describeTransaction, walletApi, type TestFundingStatus, type WalletSummary, type WalletTransactionRow } from '../../lib/wallet';
 import type { ApiError } from '../../lib/api';
 
@@ -217,9 +217,17 @@ export default function WalletPage() {
               ) : (
                 <div className="mt-4">
                   {!topUpOpen ? (
-                    <Button onClick={() => setTopUpOpen(true)} className="min-h-[44px] w-full sm:w-auto">
-                      Add money
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button onClick={() => setTopUpOpen(true)} className="min-h-[44px] w-full sm:w-auto">
+                        Add money
+                      </Button>
+                      {/* WALLET-P2P-WEB: a clearly visible Send Money action,
+                          same prominence as Add money rather than tucked
+                          into a menu. */}
+                      <ButtonLink href="/wallet/send" variant="outline" className="min-h-[44px] w-full sm:w-auto">
+                        Send money
+                      </ButtonLink>
+                    </div>
                   ) : (
                     <div className="rounded-bmpl-md border border-slate-200 p-4">
                       <label htmlFor="topup" className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -282,7 +290,12 @@ export default function WalletPage() {
                     {rows.map((t) => (
                       <li key={t.id}>
                         <Link
-                          href={`/wallet/${t.id}`}
+                          // WALLET-P2P-WEB: a TRANSFER row's receipt is privacy-scoped
+                          // (reference/amount/counterparty/date/status only) -- the
+                          // generic ledger-entries detail page would expose the OTHER
+                          // customer's own account internals for a movement between
+                          // two people, which `/wallet/[id]` was never built to hide.
+                          href={t.type === 'TRANSFER' ? `/wallet/transfers/${t.id}` : `/wallet/${t.id}`}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-blue/40 hover:shadow-bmpl-md"
                         >
                           <div className="min-w-0">

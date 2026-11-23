@@ -29,6 +29,13 @@ export interface WalletTransactionRow {
   direction: 'IN' | 'OUT';
   postedAt: string | null;
   createdAt: string;
+  /**
+   * WALLET-P2P-WEB: only present on a TRANSFER row -- the API resolves it
+   * relative to the caller, same as `TransferReceipt.counterpartyName` below.
+   * Every other row type has no counterparty at all, so this stays optional
+   * rather than widening every existing row shape.
+   */
+  counterpartyName?: string | null;
 }
 
 /** The paginated shape `GET /wallet/transactions` returns — real pagination, not a raised cap. */
@@ -87,6 +94,42 @@ export interface TestFundingResult {
   wallet: WalletSummary;
 }
 
+/**
+ * WALLET-P2P-WEB: `POST /wallet/transfers/recipient-lookup`. Deliberately
+ * thin -- `displayName` is first name + last initial only ("Pamela B."),
+ * nothing else about the recipient ever leaves the server. A 404 (unknown,
+ * suspended or ineligible -- all three the SAME message, so a sender can
+ * never tell which) is a real `ApiError` from `api.post`, not a field on
+ * this type; render `e.message` verbatim, never a softened version.
+ */
+export interface RecipientLookup {
+  recipientUserId: string;
+  displayName: string;
+}
+
+/**
+ * `POST /wallet/transfers` (sending) and `GET /wallet/transfers/:id`
+ * (the privacy-scoped receipt, reachable later from a history row) share
+ * this exact shape. `direction`/`counterpartyName` are always relative to
+ * whoever is asking -- the sender sees SENT + the recipient's name, the
+ * recipient sees RECEIVED + the sender's name, from the SAME transaction.
+ * `replayed` is only ever present (and true) on the 200 idempotent-replay
+ * response to a repeated `POST /wallet/transfers`; a fresh 201 omits it.
+ */
+export interface TransferReceipt {
+  transactionId: string;
+  reference: string;
+  direction: 'SENT' | 'RECEIVED';
+  amountMinor: number;
+  currency: string;
+  status: string;
+  counterpartyName: string;
+  note: string | null;
+  postedAt: string;
+  isTest: boolean;
+  replayed?: boolean;
+}
+
 export const walletApi = {
   summary: () => api.get<WalletSummary>('/wallet'),
   transactions: (page = 1, pageSize = 20) =>
@@ -95,6 +138,11 @@ export const walletApi = {
   topUp: (amountMinor: number) => api.post<WalletSummary>('/wallet/top-up', { amountMinor }),
   testFundingStatus: () => api.get<TestFundingStatus>('/wallet/test-funding'),
   claimTestFunds: () => api.post<TestFundingResult>('/wallet/test-fund', {}),
+  recipientLookup: (email: string) => api.post<RecipientLookup>('/wallet/transfers/recipient-lookup', { email }),
+  sendMoney: (body: { recipientUserId: string; amountMinor: number; idempotencyKey: string; note?: string }) =>
+    api.post<TransferReceipt>('/wallet/transfers', body),
+  transferReceipt: (transactionId: string) =>
+    api.get<TransferReceipt>(`/wallet/transfers/${encodeURIComponent(transactionId)}`),
 };
 
 /**
@@ -115,7 +163,12 @@ export function bzd(minor: number): string {
  * looking at their own money: nobody thinks "ESCROW_HOLD", they think "held for
  * an order".
  */
-export function describeTransaction(t: { type: string; description: string | null }): string {
+export function describeTransaction(t: {
+  type: string;
+  description: string | null;
+  direction?: 'IN' | 'OUT';
+  counterpartyName?: string | null;
+}): string {
   switch (t.type) {
     case 'TOPUP':
       // The server's own words when it has them: "Self-Service Test Credit"
@@ -136,6 +189,17 @@ export function describeTransaction(t: { type: string; description: string | nul
       return 'Earnings';
     case 'WITHDRAWAL':
       return 'Withdrawal';
+    case 'TRANSFER':
+      // WALLET-P2P-WEB: `counterpartyName` only arrives on a row the history
+      // endpoint has been taught to resolve it for -- a caller still on the
+      // old shape (e.g. the ledger-entries detail page, which never asked
+      // for it) falls through to the generic line below rather than guessing
+      // a direction with no name to go with it.
+      return t.counterpartyName
+        ? t.direction === 'IN'
+          ? `Received from ${t.counterpartyName}`
+          : `Sent to ${t.counterpartyName}`
+        : t.description ?? 'Wallet transfer';
     default:
       return t.description ?? 'Wallet activity';
   }
