@@ -2890,6 +2890,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/recover-stranded:
+    post:
+      tags: [AdminLogistics]
+      summary: Release a driver stranded by a leg whose shipment was already returned or rerouted (logistics.operate)
+      description: >-
+        `resolve-exception` refuses both of its resolutions once the
+        shipment's own return or reroute already exists, because the
+        original attempt is over. This is the dead end that leaves: it
+        releases the leg's driver assignment and records why, but it NEVER
+        touches status, exceptionAt or exceptionReason — the leg stays the
+        historical record of what actually happened, never an edit target.
+        Refused with 400 when the leg is not in EXCEPTION, or when its
+        shipment has not yet been returned or rerouted. Idempotent: a
+        repeat call on an already-recovered leg returns the same success
+        and writes nothing a second time.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 4, maxLength: 500 }
+      responses:
+        "201":
+          description: The recovery result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legId: { type: string }
+                  shipmentId: { type: string }
+                  reference: { type: string }
+                  releasedDriverProfileId: { type: string, nullable: true }
+                  alreadyRecovered: { type: boolean }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/legs/{id}/return-quote:
     post:
       tags: [AdminLogistics]
