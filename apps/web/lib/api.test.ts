@@ -123,12 +123,22 @@ describe('errorMessage', () => {
  * (correct -- they are not logged in), but the refresh attempt ALSO 401s with
  * the API's own exact "No refresh token provided." (auth.controller.ts:117)
  * -- the old code notified here anyway, telling someone who never signed in
- * that their SESSION expired. A genuinely dead session fails refresh with a
- * DIFFERENT message (session.service.ts:89/92, e.g. "Session expired. Please
- * sign in again."), which is the one real distinguishing signal available.
- * The test below that used to assert on "No refresh token provided." as if
- * it were a real expiry has been corrected to use that real message instead
- * -- it was encoding the bug as the spec.
+ * that their SESSION expired.
+ *
+ * WEB-FALSE-SESSION-EXPIRED-BURST (god, 2026-11-23, same day): that fix, and
+ * #860's copy of it in the admin console, and the 429 carve-out that
+ * followed it, were all the SAME shape of mistake -- an allowlist of
+ * known-safe response shapes, each one defeated by the next shape nobody had
+ * enumerated yet (a throttled refresh, then a proxy 502/503, an unhandled
+ * 500, ...). Inverted instead: the listener fires ONLY on a POSITIVE
+ * confirmation the session is actually dead -- a 401 from refresh whose
+ * message is NOT the no-cookie one. `session.service.ts`'s `rotate()` (the
+ * only code path behind this endpoint) has exactly two throw sites and both
+ * are a real 401 (:89 "Session expired. Please sign in again.", :92 "Account
+ * is not active."); the no-cookie case throws its own distinct 401 one level
+ * up, in the controller itself (auth.controller.ts:117). Anything else this
+ * endpoint can return -- 429, 403, 5xx -- never reached `rotate()` and so is
+ * silent by construction now, not because someone remembered to name it.
  */
 describe('web api session-expiry notification', () => {
   afterEach(() => {
@@ -259,6 +269,36 @@ describe('web api session-expiry notification', () => {
         const url = String(input);
         return url.endsWith('/auth/refresh')
           ? jsonResponse(429, { statusCode: 429, message: 'ThrottlerException: Too Many Requests' })
+          : jsonResponse(401, { message: 'Unauthorized' });
+      }),
+    );
+
+    await expect(api.get('/cart')).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  /**
+   * god (2026-11-23, holding #882 for this one line): the 429 test above and
+   * the original message-match check were both still an ALLOWLIST of known-
+   * safe response shapes -- exactly the kind of thing this function's own
+   * comment already warns against doing at the endpoint level, just moved
+   * down to the response level instead. #855/#859/#860 each shipped a fix of
+   * that shape and each was defeated by the next shape nobody had
+   * enumerated. This is the test that would have caught all three: an
+   * UNEXPECTED status from refresh (a proxy 502, here) must show no banner
+   * either, without anyone having had to name 502 in advance -- the
+   * inversion only fires on a POSITIVE 401 confirmation, so an unrecognized
+   * shape is silent by construction, not by enumeration.
+   */
+  it('does NOT notify on an unexpected 5xx from refresh (e.g. a proxy 502) -- silent by construction, not by enumeration', async () => {
+    const listener = vi.fn();
+    onSessionExpired(listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        return url.endsWith('/auth/refresh')
+          ? new Response('<html>502 Bad Gateway</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })
           : jsonResponse(401, { message: 'Unauthorized' });
       }),
     );

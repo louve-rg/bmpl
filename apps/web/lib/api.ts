@@ -132,28 +132,35 @@ async function requestWithResponse(path: string, init: RequestInit = {}, retry =
   if (res.status === 401 && retry && path !== '/auth/refresh') {
     const refreshed = await refreshSession();
     if (refreshed.ok) return requestWithResponse(path, init, false);
-    // Refresh itself failed, not just the original call. That is NOT the
-    // same thing as a real expiry: a visitor with no refresh cookie at all
-    // (never signed in) hits this exact branch too, since several nav-level
-    // components call auth-gated endpoints unconditionally on every page
-    // load regardless of login state (WEB-FALSE-SESSION-EXPIRED). The old
-    // guard here only excluded `/auth/*` calls themselves, which left every
-    // one of those background calls free to tell an anonymous visitor their
-    // session expired when they never had one.
+    // Refresh itself failed, not just the original call. #855/#859/#860 each
+    // fixed this listener by recognizing one more known-SAFE response shape
+    // (first the no-cookie 401, then a throttled 429) and suppressing on it
+    // -- an allowlist of harmless shapes, each one defeated by the next shape
+    // nobody had enumerated yet (WEB-FALSE-SESSION-EXPIRED-BURST, god,
+    // 2026-11-23: "your own comment makes my argument" -- the per-endpoint
+    // allowlist this function already refuses to become, just moved one
+    // level down to the response shape instead of the endpoint).
     //
-    // auth.controller.ts's refresh endpoint already distinguishes the two
-    // cases in its own response body: no cookie sent at all throws exactly
-    // "No refresh token provided." (auth.controller.ts:117), while a real,
-    // dead session throws a different message (session.service.ts:89/92,
-    // e.g. "Session expired. Please sign in again."). Suppress the listener
-    // for the former -- never widen this into a per-endpoint allowlist,
-    // which would leave the next auth-gated nav call to re-create this bug.
-    // Also suppress on a 429 (WEB-FALSE-SESSION-EXPIRED-BURST above): a
-    // throttled refresh call was never actually attempted, so it proves
-    // nothing about whether the session is real or dead either way.
+    // Inverted instead: fire ONLY on a POSITIVE confirmation the session is
+    // actually dead, never by elimination. `session.service.ts`'s `rotate()`
+    // (the only code path behind this endpoint, auth.controller.ts:118) has
+    // exactly two throw sites and both are a genuine 401 -- "Session
+    // expired. Please sign in again." (:89, a real dead/revoked session) and
+    // "Account is not active." (:92) -- neither is the no-cookie case, which
+    // throws its own distinct 401 "No refresh token provided." one level up
+    // in the controller itself (auth.controller.ts:117). Anything else this
+    // endpoint can return -- a 429 throttle, a CSRF 403, a proxy 502/503, an
+    // unhandled 500 -- is NOT a confirmed expiry and must not fire the
+    // listener either, because none of them went through `rotate()` at all.
+    // The bias this leaves: a real dead session arriving in some shape this
+    // endpoint has never actually been observed to return would show no
+    // banner -- the visitor just hits a login wall on their next real action,
+    // a mild, self-correcting failure. The opposite bias is the one already
+    // paid for three times: telling someone who was never signed in that
+    // their session expired.
     const refreshBody = refreshed.body as { message?: string } | null;
-    const cannotConfirmExpiry = refreshed.status === 429 || refreshBody?.message === 'No refresh token provided.';
-    if (!path.startsWith('/auth/') && !cannotConfirmExpiry) sessionExpiredListener?.();
+    const confirmedExpiry = refreshed.status === 401 && refreshBody?.message !== 'No refresh token provided.';
+    if (!path.startsWith('/auth/') && confirmedExpiry) sessionExpiredListener?.();
   }
 
   const text = await res.text();
@@ -222,10 +229,10 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   if (res.status === 401 && retry) {
     const refreshed = await refreshSession();
     if (refreshed.ok) return uploadBinary<T>(path, body, false);
-    // Same distinction as `requestWithResponse` above -- see its comment.
+    // Same positive-confirmation inversion as `requestWithResponse` above -- see its comment.
     const refreshBody = refreshed.body as { message?: string } | null;
-    const cannotConfirmExpiry = refreshed.status === 429 || refreshBody?.message === 'No refresh token provided.';
-    if (!cannotConfirmExpiry) sessionExpiredListener?.();
+    const confirmedExpiry = refreshed.status === 401 && refreshBody?.message !== 'No refresh token provided.';
+    if (confirmedExpiry) sessionExpiredListener?.();
   }
 
   const text = await res.text();
