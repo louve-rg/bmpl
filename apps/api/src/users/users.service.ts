@@ -22,6 +22,7 @@ import {
   roleRequiresAvatar,
   sniffProductImageMime,
   STORAGE_PREFIX,
+  TERMINAL_DELIVERY_STATUSES,
   type AvatarStatus,
   type RoleCode,
 } from '@bmpl/shared';
@@ -40,6 +41,26 @@ const LIVE_DRIVER_STATUSES: DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFI
 /** Vendor order states still awaiting the vendor's own action — reused for
  *  both the vendor's own open orders and a CUSTOMER's in-flight orders. */
 const LIVE_VENDOR_ORDER_STATUSES: VendorOrderStatus[] = ['PENDING', 'PREPARING', 'READY_FOR_PICKUP'];
+/**
+ * A vendor order that is genuinely still open. PENDING/PREPARING always are
+ * (the vendor hasn't finished packing it). READY_FOR_PICKUP is NOT always
+ * open: VendorOrder.status never advances past it for a DELIVERY order — the
+ * real completion signal lives on OrderDelivery.status, not here (same fact
+ * `SettlementService.settleVendorOrder` and `releaseReservationsInTx`'s own
+ * guards already key off). A PICKUP order has no OrderDelivery row at all, so
+ * `NOT: { delivery: { status: { in: TERMINAL_DELIVERY_STATUSES } } }` reads
+ * true for it (nothing to match) exactly as intended — still awaiting
+ * collection. ACCT-DELETE-DELIVERY-BLOCKS: before this, a DELIVERY order that
+ * had already been delivered kept its vendor-order at READY_FOR_PICKUP
+ * forever, permanently blocking the customer (and the vendor, on the
+ * storefront-side check below) from ever deleting their account.
+ */
+const vendorOrderStillOpenWhere: Prisma.VendorOrderWhereInput = {
+  OR: [
+    { status: { in: ['PENDING', 'PREPARING'] } },
+    { status: 'READY_FOR_PICKUP', NOT: { delivery: { status: { in: [...TERMINAL_DELIVERY_STATUSES] } } } },
+  ],
+};
 /** The same "accepted but not yet finished" shape as {@link LIVE_DRIVER_STATUSES},
  *  applied to the separate PASSENGER_DRIVER vertical (PassengerTrip, not
  *  OrderDelivery/ShipmentLeg): a trip the driver has taken on but not yet
@@ -1076,7 +1097,7 @@ export class UsersService {
     });
     if (vendor) {
       const openOrders = await this.prisma.vendorOrder.count({
-        where: { vendorProfileId: vendor.id, status: { in: LIVE_VENDOR_ORDER_STATUSES } },
+        where: { vendorProfileId: vendor.id, ...vendorOrderStillOpenWhere },
       });
       if (openOrders > 0) {
         reasons.push(
@@ -1138,18 +1159,20 @@ export class UsersService {
     }
 
     // CUSTOMER with an in-flight order — checked across every order THIS
-    // account placed, not the vendor's own (already checked above). A
-    // VendorOrder still with the vendor (LIVE_VENDOR_ORDER_STATUSES) or
-    // already PICKED_UP but still moving on an OrderDelivery
-    // (LIVE_DRIVER_STATUSES) both count; a PICKUP-method order that reached
-    // PICKED_UP has no OrderDelivery row at all and is simply done.
+    // account placed, not the vendor's own (already checked above). Reuses
+    // vendorOrderStillOpenWhere (PENDING/PREPARING/not-yet-terminal
+    // READY_FOR_PICKUP) plus one more combination that doesn't occur in
+    // practice today but is kept to match the status machine's intent:
+    // VendorOrder.status itself at PICKED_UP with an OrderDelivery still
+    // moving (LIVE_DRIVER_STATUSES) would also count, if it ever happens.
+    // ACCT-DELETE-DELIVERY-BLOCKS: this comment previously said a
+    // READY_FOR_PICKUP vendor-order was always "still with the vendor" —
+    // true for PICKUP, false for DELIVERY, where it never leaves
+    // READY_FOR_PICKUP at all. See vendorOrderStillOpenWhere's own comment.
     const inFlightOrders = await this.prisma.vendorOrder.count({
       where: {
         order: { userId },
-        OR: [
-          { status: { in: LIVE_VENDOR_ORDER_STATUSES } },
-          { status: 'PICKED_UP', delivery: { status: { in: LIVE_DRIVER_STATUSES } } },
-        ],
+        OR: [vendorOrderStillOpenWhere, { status: 'PICKED_UP', delivery: { status: { in: LIVE_DRIVER_STATUSES } } }],
       },
     });
     if (inFlightOrders > 0) {

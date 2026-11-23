@@ -186,6 +186,40 @@ describe('account deletion — refusals', () => {
     expect(allowed.status).toBe(200);
   });
 
+  it('a delivered DELIVERY order never blocks the VENDOR either, even though its vendor-order stays at READY_FOR_PICKUP forever — but a still-moving one does (ACCT-DELETE-DELIVERY-BLOCKS)', async () => {
+    const email = 'delete-vendor-delivery-done@example.bz';
+    const password = 'VendorPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const vendor = await ctx.prisma.vendorProfile.create({
+      data: { userId, businessName: 'Vendor Delivery Done Store', slug: 'vendor-delivery-done-store', contactEmail: 'store5@example.bz' },
+    });
+    const customer = await registerAndLogin('delete-vendor-delivery-done-customer@example.bz', 'CustomerPass12345');
+    const order = await ctx.prisma.order.create({
+      data: { orderNumber: 'ORD-DEL-TEST-5', userId: customer.userId, itemCount: 1, subtotalMinor: 1000n, totalMinor: 1000n },
+    });
+    const vendorOrder = await ctx.prisma.vendorOrder.create({
+      data: { orderNumber: 'ORD-DEL-TEST-5-V1', orderId: order.id, vendorProfileId: vendor.id, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n, status: 'READY_FOR_PICKUP' },
+    });
+    const delivery = await ctx.prisma.orderDelivery.create({
+      data: { vendorOrderId: vendorOrder.id, status: 'ARRIVING' },
+    });
+
+    const refused = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(refused.status).toBe(409);
+    expect(refused.body.reasons.some((r: string) => r.includes('Vendor Delivery Done Store'))).toBe(true);
+
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
   it('refuses when the caller is a driver with a delivery still in progress', async () => {
     const email = 'delete-active-delivery@example.bz';
     const password = 'DriverPass12345';
@@ -351,6 +385,46 @@ describe('account deletion — refusals', () => {
     expect(res.body.reasons.some((r: string) => /still being fulfilled or delivered/.test(r))).toBe(true);
 
     await ctx.prisma.vendorOrder.update({ where: { id: vendorOrder.id }, data: { status: 'CANCELLED' } });
+    const allowed = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(allowed.status).toBe(200);
+  });
+
+  it('a delivered DELIVERY order never blocks the customer, even though its vendor-order stays at READY_FOR_PICKUP forever — but a still-moving one does (ACCT-DELETE-DELIVERY-BLOCKS)', async () => {
+    const email = 'delete-delivery-done@example.bz';
+    const password = 'CustomerPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const vendorUser = await registerAndLogin('delete-delivery-done-vendor@example.bz', 'VendorPass12345');
+    const vendor = await ctx.prisma.vendorProfile.create({
+      data: { userId: vendorUser.userId, businessName: 'Delivery Done Store', slug: 'delivery-done-store', contactEmail: 'store4@example.bz' },
+    });
+    const order = await ctx.prisma.order.create({
+      data: { orderNumber: 'ORD-DEL-TEST-4', userId, itemCount: 1, subtotalMinor: 1000n, totalMinor: 1000n },
+    });
+    // VendorOrder.status never advances past READY_FOR_PICKUP for a DELIVERY
+    // order — the real completion signal is OrderDelivery.status.
+    const vendorOrder = await ctx.prisma.vendorOrder.create({
+      data: { orderNumber: 'ORD-DEL-TEST-4-V1', orderId: order.id, vendorProfileId: vendor.id, deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n, status: 'READY_FOR_PICKUP' },
+    });
+    const delivery = await ctx.prisma.orderDelivery.create({
+      data: { vendorOrderId: vendorOrder.id, status: 'IN_TRANSIT' },
+    });
+
+    // Still moving: refused.
+    const refused = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(refused.status).toBe(409);
+    expect(refused.body.reasons.some((r: string) => /still being fulfilled or delivered/.test(r))).toBe(true);
+
+    // Delivered: allowed, even with the vendor-order unchanged at READY_FOR_PICKUP.
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+    const vo = await ctx.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrder.id } });
+    expect(vo.status).toBe('READY_FOR_PICKUP');
     const allowed = await request(ctx.server)
       .delete('/api/me')
       .set('Cookie', cookies)
