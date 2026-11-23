@@ -97,7 +97,7 @@ describe('account deletion — refusals', () => {
     expect(res.status).toBe(401);
   });
 
-  it('refuses when the caller is the sole active manager of a terminal company, and allows it once a second manager exists', async () => {
+  it('refuses when the caller is the sole active manager of a terminal company, allows it once a second manager exists, and still refuses the second manager\'s own deletion afterward (ACCT-DELETE-STALE-MANAGER-VOTE)', async () => {
     const email = 'delete-sole-manager@example.bz';
     const password = 'ManagerPass12345';
     const { cookies, userId } = await registerAndLogin(email, password);
@@ -131,6 +131,36 @@ describe('account deletion — refusals', () => {
       .set('Cookie', cookies)
       .send({ currentPassword: password });
     expect(allowed.status).toBe(200);
+
+    // ACCT-DELETE-STALE-MANAGER-VOTE (Stanley's re-walk): the FIRST
+    // manager's own membership is ended, not left ACTIVE — the load-bearing
+    // half of the fix is the count below, but this is the test that would
+    // catch a regression of the data-hygiene half too.
+    const firstMembershipAfter = await ctx.prisma.terminalCompanyMember.findFirstOrThrow({ where: { terminalCompanyId: company.id, userId } });
+    expect(firstMembershipAfter.status).toBe('ENDED');
+    expect(firstMembershipAfter.endedAt).not.toBeNull();
+
+    // The real catch: deleting manager 1 must NOT silently leave manager 2
+    // able to delete their own account next, treating manager 1's own
+    // stale-but-ACTIVE row as "someone else is still managing this
+    // company." A test that stopped at the line above would pass against
+    // the broken code — this is the second deletion Stanley's walk proved
+    // was wrongly ALLOWED.
+    const secondRefused = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', other.cookies)
+      .send({ currentPassword: 'OtherPass12345' });
+    expect(secondRefused.status).toBe(409);
+    expect(secondRefused.body.reasons.some((r: string) => r.includes('Sole Manager Terminal Co'))).toBe(true);
+
+    // The company still has a live manager at the end, and manager 2's own
+    // account was never touched by the refused attempt.
+    const otherUserAfter = await ctx.prisma.user.findUniqueOrThrow({ where: { id: other.userId } });
+    expect(otherUserAfter.status).toBe('ACTIVE');
+    const liveManagers = await ctx.prisma.terminalCompanyMember.count({
+      where: { terminalCompanyId: company.id, status: 'ACTIVE', memberRole: 'MANAGER', user: { status: { not: 'DEACTIVATED' } } },
+    });
+    expect(liveManagers).toBe(1);
   });
 
   it('refuses when the caller is a vendor with an order still awaiting fulfillment', async () => {
@@ -1106,6 +1136,16 @@ describe('account deletion — refusals', () => {
     // The counterparty's own words, in the SAME conversation, are untouched.
     const otherMessageAfter = await ctx.prisma.message.findUniqueOrThrow({ where: { id: otherMessage.id } });
     expect(otherMessageAfter.body).toBe('Staff reply: noted, thanks.');
+
+    // ACCT-DELETE-SYSTEM-MESSAGE-SUBJECT (Stanley's re-walk): the subject
+    // the person typed also survived, verbatim, inside the conversation-start
+    // SYSTEM message — nulling Conversation.subject never touched it, because
+    // the USER-message sweep above is scoped to type USER, and this message
+    // is type SYSTEM. It must be scrubbed the same way the subject itself was.
+    const systemMessage = await ctx.prisma.message.findFirstOrThrow({ where: { conversationId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    expect(systemMessage.type).toBe('SYSTEM');
+    expect(systemMessage.body).not.toContain('6650099');
+    expect(systemMessage.body).not.toContain('My number is 6650099, please call');
 
     // The audit row IS kept (never deleted) — only the one PII-bearing key
     // inside its payload is redacted.

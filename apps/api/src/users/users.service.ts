@@ -827,6 +827,22 @@ export class UsersService {
 
     await tx.savedAddress.deleteMany({ where: { userId } });
 
+    // ACCT-DELETE-STALE-MANAGER-VOTE (data hygiene half): end this account's
+    // own terminal-company membership(s) rather than leaving a deleted
+    // person sitting in a company's team list as an ACTIVE MANAGER/OPERATOR.
+    // `liveResponsibilities` already refused above if this account was the
+    // company's only active manager, so any membership still ACTIVE here is
+    // safe to end. This is NOT the load-bearing fix for the stale-vote gap
+    // (that is `liveResponsibilities`'s own `user: { status: ... }` filter,
+    // above) — it closes the same gap at the source, for any OTHER path
+    // that counts active memberships without checking the member's own
+    // user status, same convention `TerminalCompanyService.staffDeactivateMember`
+    // already uses (`status: 'ENDED', endedAt: new Date()`).
+    await tx.terminalCompanyMember.updateMany({
+      where: { userId, status: 'ACTIVE' },
+      data: { status: 'ENDED', endedAt: new Date() },
+    });
+
     const driver = await tx.driverProfile.findUnique({
       where: { userId },
       select: { id: true, profilePhotoKey: true },
@@ -1107,7 +1123,7 @@ export class UsersService {
     // conversation this account merely participates in, which would also
     // rewrite the subject line as the counterparty sees it for a thread they
     // are still an active party to.
-    const ownConversations = await tx.conversation.findMany({ where: { createdById: userId }, select: { id: true } });
+    const ownConversations = await tx.conversation.findMany({ where: { createdById: userId }, select: { id: true, subject: true } });
     if (ownConversations.length > 0) {
       const ownConversationIds = ownConversations.map((c) => c.id);
       await tx.conversation.updateMany({ where: { id: { in: ownConversationIds } }, data: { subject: null } });
@@ -1126,6 +1142,31 @@ export class UsersService {
         const nv = row.newValue as Record<string, unknown> | null;
         if (nv && 'subject' in nv && typeof nv.conversationId === 'string' && ownConversationIdSet.has(nv.conversationId)) {
           await tx.auditLog.update({ where: { id: row.id }, data: { newValue: { ...nv, subject: null } } });
+        }
+      }
+
+      // ACCT-DELETE-SYSTEM-MESSAGE-SUBJECT: the subject above is also copied,
+      // verbatim, into the conversation-start SYSTEM message's own body
+      // (`ensureConversation`'s `Conversation started — ${label}.`, seeded
+      // atomically with the conversation row — always that conversation's
+      // very first message). The USER-message sweep above is correctly
+      // scoped by `senderId` so it never touches a counterparty's replies —
+      // but a SYSTEM message has no senderId, so that same scoping is
+      // exactly what let this copy of the subject through untouched.
+      // Narrowed the same way the owner drew the line for the subject
+      // itself: only conversations this account created, only the one that
+      // actually had a subject to leak, only that conversation's first
+      // message, and only if it still literally carries that subject text —
+      // never a second SYSTEM message, never anything from the counterparty.
+      for (const conv of ownConversations) {
+        if (!conv.subject) continue;
+        const first = await tx.message.findFirst({
+          where: { conversationId: conv.id },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true, type: true, body: true },
+        });
+        if (first && first.type === 'SYSTEM' && first.body.includes(conv.subject)) {
+          await tx.message.update({ where: { id: first.id }, data: { body: first.body.replaceAll(conv.subject, '[removed]') } });
         }
       }
     }
@@ -1216,12 +1257,26 @@ export class UsersService {
       select: { terminalCompanyId: true, terminalCompany: { select: { businessName: true } } },
     });
     for (const membership of managerMemberships) {
+      // ACCT-DELETE-STALE-MANAGER-VOTE: a deleted manager's own membership
+      // row is left at status ACTIVE (see the end-membership write below) —
+      // without the `user` filter, a second deleted manager's stale row
+      // would itself count as "another active manager" and let the LAST
+      // real one through. Stanley proved this: two managers, delete one
+      // (allowed, correctly), then delete the other — also allowed, leaving
+      // the company with zero live managers. The deleted user's own row is
+      // never excluded from this count by `userId: { not: userId }` alone,
+      // because by the time a THIRD manager asks "is anyone else active",
+      // the first deleted manager is a DIFFERENT userId that still reads
+      // ACTIVE. `status: { not: 'DEACTIVATED' }`, not `'ACTIVE'`, to leave a
+      // merely SUSPENDED user's own standing exactly as ambiguous/unaffected
+      // as it already was — this fixes the deletion-specific gap only.
       const otherActiveManagers = await this.prisma.terminalCompanyMember.count({
         where: {
           terminalCompanyId: membership.terminalCompanyId,
           status: 'ACTIVE',
           memberRole: 'MANAGER',
           userId: { not: userId },
+          user: { status: { not: 'DEACTIVATED' } },
         },
       });
       if (otherActiveManagers === 0) {
@@ -1288,8 +1343,12 @@ export class UsersService {
       select: { status: true },
     });
     if (ownRole?.status === 'APPROVED') {
+      // Same sibling gap as the manager count above: a deleted super-admin's
+      // own UserRole row is left at status APPROVED (deletion never touches
+      // UserRole), so without the `user` filter a ghost admin would count
+      // as "someone else can still grant access" forever.
       const otherSuperAdmins = await this.prisma.userRole.count({
-        where: { roleCode: 'SUPER_ADMIN', status: 'APPROVED', userId: { not: userId } },
+        where: { roleCode: 'SUPER_ADMIN', status: 'APPROVED', userId: { not: userId }, user: { status: { not: 'DEACTIVATED' } } },
       });
       if (otherSuperAdmins === 0) {
         reasons.push(
