@@ -465,7 +465,18 @@ export const shippingApi = {
   /** Same scoping as `hubsMine`, for transport modes. */
   modesMine: () => api.get<Array<'LAND' | 'AIR' | 'SEA'>>('/shipping/modes/mine'),
   quote: (body: unknown) => api.post<ShipmentQuote>('/shipping/quote', body),
-  create: (body: unknown) => api.post<ShipmentView>('/shipping', body),
+  /**
+   * WEB-BOOKING-NO-IDEMPOTENCY-KEY: `idempotencyKey` is REQUIRED, not
+   * optional -- the API already supports and proves it (shipment.service.ts's
+   * `create`: same key + same body replays the original shipment, same key +
+   * a different body 409s, no key at all books a new shipment every time).
+   * Nothing enforces this at the type level beyond the caller passing one --
+   * the caller (the booking page) owns generating ONE key per booking
+   * ATTEMPT and reusing it across a retry of that same attempt; this
+   * function only has to forward it on the header the API reads.
+   */
+  create: (body: unknown, idempotencyKey: string) =>
+    api.post<ShipmentView>('/shipping', body, { 'idempotency-key': idempotencyKey }),
   mine: () => api.get<ShipmentView[]>('/shipping'),
   track: (reference: string) => api.get<ShipmentView>(`/shipping/${encodeURIComponent(reference)}`),
   cancel: (id: string, reason: string) => api.post<ShipmentView>(`/shipping/${id}/cancel`, { reason }),
