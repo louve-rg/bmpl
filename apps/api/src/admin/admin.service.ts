@@ -157,7 +157,7 @@ export class AdminService {
       where: { id: documentId },
     });
     if (!doc) throw new NotFoundException('Document not found.');
-    return this.storage.presignDownload(doc.storageKey);
+    return this.storage.presignDownload(doc.storageKey, 'private');
   }
 
   // ---- Review actions -------------------------------------------------------

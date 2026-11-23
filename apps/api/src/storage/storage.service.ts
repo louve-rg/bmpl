@@ -192,7 +192,7 @@ export class StorageService implements OnModuleInit {
     key: string,
     body: Buffer,
     contentType: string,
-    visibility: Visibility = 'private',
+    visibility: Visibility,
     // ATT-2: object metadata (S3 `x-amz-meta-*`) is the only thing that
     // survives between the upload request (where the uploader's real
     // filename is known) and whatever LATER request attaches this key to a
@@ -219,7 +219,7 @@ export class StorageService implements OnModuleInit {
   async presignUpload(
     key: string,
     contentType: string,
-    visibility: Visibility = 'private',
+    visibility: Visibility,
   ): Promise<{ uploadUrl: string; key: string; expiresIn: number }> {
     const client = this.requireClient();
     const command = new PutObjectCommand({
@@ -251,7 +251,7 @@ export class StorageService implements OnModuleInit {
    */
   async presignDownload(
     key: string,
-    visibility: Visibility = 'private',
+    visibility: Visibility,
   ): Promise<{ url: string; expiresIn: number }> {
     const ttlMs = this.env.STORAGE_SIGNED_URL_TTL * 1000;
     const marginMs = Math.min(60_000, ttlMs / 2);
@@ -299,7 +299,7 @@ export class StorageService implements OnModuleInit {
    * checkout, so a later product-image replace/delete (which removes the SOURCE
    * object) cannot leave order history pointing at nothing.
    */
-  async copyObject(srcKey: string, dstKey: string, visibility: Visibility = 'private'): Promise<void> {
+  async copyObject(srcKey: string, dstKey: string, visibility: Visibility): Promise<void> {
     const client = this.requireClient();
     const bucket = this.bucketFor(visibility);
     await client.send(
@@ -312,8 +312,17 @@ export class StorageService implements OnModuleInit {
     );
   }
 
-  /** Delete an object. Best-effort: never throws (callers delete DB rows regardless). */
-  async deleteObject(key: string, visibility: Visibility = 'private'): Promise<void> {
+  /**
+   * Delete an object. Best-effort: never throws (callers delete DB rows regardless).
+   *
+   * ACCT-DELETE-STORAGE-OBJECTS: `visibility` has no default. An S3
+   * `DeleteObject` against a key absent from the bucket it actually hits
+   * returns 200, not 404 — a delete against the WRONG bucket (the default
+   * used to silently assume 'private') looks identical to a real delete and
+   * leaves the object behind with nothing left pointing at it. Forcing every
+   * caller to state the bucket turns a silent miss into a compile error.
+   */
+  async deleteObject(key: string, visibility: Visibility): Promise<void> {
     if (!this.enabled || !this.client) return;
     // Order-history snapshots are immutable: nothing in the system deletes under
     // orders/ — a product-image edit deletes its own vendors/... key, never the
@@ -336,7 +345,7 @@ export class StorageService implements OnModuleInit {
    * null when the object does not exist. This is the source of truth for stored
    * metadata — not client-declared values.
    */
-  async headObject(key: string, visibility: Visibility = 'private'): Promise<ObjectMetadata | null> {
+  async headObject(key: string, visibility: Visibility): Promise<ObjectMetadata | null> {
     const client = this.requireClient();
     try {
       const res = await client.send(

@@ -47,13 +47,13 @@ describe('StorageService when storage is not configured', () => {
   });
 
   it('upload/download/head throw a clear 503 (ServiceUnavailable)', async () => {
-    await expect(svc.presignUpload('applications/u/VENDOR/x/a.pdf', 'application/pdf')).rejects.toBeInstanceOf(
+    await expect(
+      svc.presignUpload('applications/u/VENDOR/x/a.pdf', 'application/pdf', 'private'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(svc.presignDownload('applications/u/VENDOR/x/a.pdf', 'private')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
-    await expect(svc.presignDownload('applications/u/VENDOR/x/a.pdf')).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-    await expect(svc.headObject('applications/u/VENDOR/x/a.pdf')).rejects.toBeInstanceOf(
+    await expect(svc.headObject('applications/u/VENDOR/x/a.pdf', 'private')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
   });

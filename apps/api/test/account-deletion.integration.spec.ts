@@ -8,13 +8,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, cookieValue, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { StorageService } from '../src/storage/storage.service';
 
 let ctx: TestContext;
+let storage: StorageService;
 
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
   await seedRoles(ctx.prisma);
+  storage = ctx.app.get(StorageService);
 });
 afterAll(async () => {
   await ctx.app.close();
@@ -902,6 +905,145 @@ describe('account deletion — refusals', () => {
     expect(shippingProviderAfter.addressLine1).toBeNull();
     expect(shippingProviderAfter.operatingLicenceNumber).toBeNull();
     expect(shippingProviderAfter.businessName).toBe('Full Sweep Carrier');
+  });
+
+  /**
+   * ACCT-DELETE-STORAGE-OBJECTS. The prior test only ever checked that a
+   * storage KEY was nulled out of the database row — it never checked
+   * whether the actual OBJECT was deleted from the bucket it really lives
+   * in. That matters because an S3 `DeleteObject` against a key absent
+   * from the bucket you hit returns 200, not 404: a delete issued against
+   * the WRONG bucket looks exactly like a real delete and leaves the file
+   * sitting there forever. This test uploads real objects to the REAL
+   * bucket each key actually belongs to (mixing public and private on
+   * purpose) and, after deletion, re-heads every one of them in that same
+   * real bucket — proving the object is actually gone, not just that the
+   * column is null. Also covers the four logo/banner keys
+   * (VendorProfile, EmployerProfile, AgencyProfile,
+   * PassengerProviderProfile) that `anonymizePersonalData` never
+   * referenced at all before this card.
+   */
+  it('deletes every orphaned storage object from the bucket it was actually uploaded to — public logos/banners/photos AND private documents/photos alike', async () => {
+    const email = 'delete-storage-objects@example.bz';
+    const password = 'StorageObjPass12345';
+    const { cookies, userId } = await registerAndLogin(email, password);
+
+    const driver = await ctx.prisma.driverProfile.create({
+      data: {
+        userId,
+        legalName: 'Storage Test Driver',
+        displayName: 'Storage Test Driver',
+        phone: '6650030',
+        homeDistrict: 'BELIZE',
+        licenceNumber: 'STORAGE-LICENCE-1',
+        licenceExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const vendor = await ctx.prisma.vendorProfile.create({
+      data: { userId, businessName: 'Storage Test Store', slug: 'storage-test-store', contactEmail: 'storagevendor@example.bz' },
+    });
+    const employer = await ctx.prisma.employerProfile.create({
+      data: { userId, companyName: 'Storage Test Employer', slug: 'storage-test-employer', contactEmail: 'storageemployer@example.bz' },
+    });
+    const agency = await ctx.prisma.agencyProfile.create({
+      data: { managerUserId: userId, name: 'Storage Test Agency', slug: 'storage-test-agency', contactEmail: 'storageagency@example.bz' },
+    });
+    const agent = await ctx.prisma.realEstateAgentProfile.create({
+      data: { userId, displayName: 'Storage Test Agent', slug: 'storage-test-agent' },
+    });
+    const passengerProvider = await ctx.prisma.passengerProviderProfile.create({
+      data: { userId, businessName: 'Storage Test Transport', contactEmail: 'storagepax@example.bz' },
+    });
+    const roleApplication = await ctx.prisma.roleApplication.create({
+      data: { userId, roleCode: 'DELIVERY_DRIVER', status: 'PENDING' },
+    });
+
+    // Real objects, each in the REAL bucket that key type actually lives
+    // in — public and private on purpose, in the same fixture.
+    const png = Buffer.from('storage-test-object');
+    const vendorLogoKey = 'vendors/storage-test/logo.png';
+    const vendorBannerKey = 'vendors/storage-test/banner.png';
+    const employerLogoKey = 'employers/storage-test/logo.png';
+    const employerBannerKey = 'employers/storage-test/banner.png';
+    const agencyLogoKey = 'agencies/storage-test/logo.png';
+    const agencyBannerKey = 'agencies/storage-test/banner.png';
+    const agentPhotoKey = 'agents/storage-test/photo.png';
+    const passengerProviderLogoKey = 'passenger-providers/storage-test/logo.png';
+    for (const key of [
+      vendorLogoKey,
+      vendorBannerKey,
+      employerLogoKey,
+      employerBannerKey,
+      agencyLogoKey,
+      agencyBannerKey,
+      agentPhotoKey,
+      passengerProviderLogoKey,
+    ]) {
+      await storage.putObject(key, png, 'image/png', 'public');
+    }
+
+    const driverPhotoKey = 'drivers/storage-test/photo.png';
+    const roleDocKey = 'applications/storage-test/licence.png';
+    for (const key of [driverPhotoKey, roleDocKey]) {
+      await storage.putObject(key, png, 'image/png', 'private');
+    }
+
+    await ctx.prisma.driverProfile.update({ where: { id: driver.id }, data: { profilePhotoKey: driverPhotoKey } });
+    await ctx.prisma.vendorProfile.update({ where: { id: vendor.id }, data: { logoKey: vendorLogoKey, bannerKey: vendorBannerKey } });
+    await ctx.prisma.employerProfile.update({ where: { id: employer.id }, data: { logoKey: employerLogoKey, bannerKey: employerBannerKey } });
+    await ctx.prisma.agencyProfile.update({ where: { id: agency.id }, data: { logoKey: agencyLogoKey, bannerKey: agencyBannerKey } });
+    await ctx.prisma.realEstateAgentProfile.update({ where: { id: agent.id }, data: { photoKey: agentPhotoKey } });
+    await ctx.prisma.passengerProviderProfile.update({ where: { id: passengerProvider.id }, data: { logoKey: passengerProviderLogoKey } });
+    const roleDocument = await ctx.prisma.roleApplicationDocument.create({
+      data: { applicationId: roleApplication.id, label: 'Licence', storageKey: roleDocKey, contentType: 'image/png', sizeBytes: png.length },
+    });
+
+    // Sanity: every object is really there before deletion, in the bucket
+    // the fixture just put it in.
+    for (const key of [vendorLogoKey, vendorBannerKey, employerLogoKey, employerBannerKey, agencyLogoKey, agencyBannerKey, agentPhotoKey, passengerProviderLogoKey]) {
+      expect(await storage.headObject(key, 'public')).not.toBeNull();
+    }
+    for (const key of [driverPhotoKey, roleDocKey]) {
+      expect(await storage.headObject(key, 'private')).not.toBeNull();
+    }
+
+    const res = await request(ctx.server)
+      .delete('/api/me')
+      .set('Cookie', cookies)
+      .send({ currentPassword: password });
+    expect(res.status).toBe(200);
+
+    // The DB columns are nulled — the gap this card closes.
+    const vendorAfter = await ctx.prisma.vendorProfile.findUniqueOrThrow({ where: { id: vendor.id } });
+    expect(vendorAfter.logoKey).toBeNull();
+    expect(vendorAfter.bannerKey).toBeNull();
+    const employerAfter = await ctx.prisma.employerProfile.findUniqueOrThrow({ where: { id: employer.id } });
+    expect(employerAfter.logoKey).toBeNull();
+    expect(employerAfter.bannerKey).toBeNull();
+    const agencyAfter = await ctx.prisma.agencyProfile.findUniqueOrThrow({ where: { id: agency.id } });
+    expect(agencyAfter.logoKey).toBeNull();
+    expect(agencyAfter.bannerKey).toBeNull();
+    const passengerProviderAfter = await ctx.prisma.passengerProviderProfile.findUniqueOrThrow({ where: { id: passengerProvider.id } });
+    expect(passengerProviderAfter.logoKey).toBeNull();
+    const agentAfter = await ctx.prisma.realEstateAgentProfile.findUniqueOrThrow({ where: { id: agent.id } });
+    expect(agentAfter.photoKey).toBeNull();
+
+    // The actual objects are gone from the REAL bucket they lived in — not
+    // merely "DeleteObject returned 200 against the wrong bucket while the
+    // object survives." This is the assertion the old default-to-private
+    // code would have failed: every one of these eight keys only ever
+    // existed in the PUBLIC bucket, and the old deleteQuietly/deleteObject
+    // default silently issued every delete against the PRIVATE bucket,
+    // which would have returned 200 and deleted nothing.
+    for (const key of [vendorLogoKey, vendorBannerKey, employerLogoKey, employerBannerKey, agencyLogoKey, agencyBannerKey, agentPhotoKey, passengerProviderLogoKey]) {
+      expect(await storage.headObject(key, 'public')).toBeNull();
+    }
+    // And the private-bucket objects are also really gone, in their own bucket.
+    for (const key of [driverPhotoKey, roleDocKey]) {
+      expect(await storage.headObject(key, 'private')).toBeNull();
+    }
+    const roleDocumentAfter = await ctx.prisma.roleApplicationDocument.findUniqueOrThrow({ where: { id: roleDocument.id } });
+    expect(roleDocumentAfter.storageKey).toBe(`deleted-${roleDocument.id}`);
   });
 
   it('scrubs free text this account wrote and network identifiers it left behind — without deleting the counterparty\'s words or any audit row (ACCT-DELETE-PII-REMNANTS)', async () => {
