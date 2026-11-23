@@ -500,7 +500,16 @@ function legScope(scope: DriverDeliveryView | 'open' | 'all'): Prisma.ShipmentLe
     case 'assigned':
       return { OR: [{ courierStatus: 'ASSIGNED', acceptedAt: { not: null } }, { courierStatus: 'DRIVER_ACCEPTED' }] };
     case 'active':
-      return { courierStatus: { in: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] as never } };
+      // MDF-1074: this had drifted from deliveryScope('active') below, which
+      // already includes EXCEPTION (MDF-927) — this one did not. The result
+      // was dishonest in exactly the owner's complaint's shape: counts()
+      // (grouped over DRIVER_OPEN_STATUSES, which has always included
+      // EXCEPTION) told a driver they had one active job, while tapping the
+      // Active tab — this filter — returned no rows for it at all. Not a
+      // cosmetic mismatch: DRIVER_VIEW_STATUSES.active in driver-queue.ts
+      // already names EXCEPTION as belonging here; this filter just never
+      // matched what that shared mapping already said.
+      return { courierStatus: { in: ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING', 'EXCEPTION'] as never } };
     case 'completed':
       return { courierStatus: 'DELIVERED' };
     case 'open':

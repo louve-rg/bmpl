@@ -284,3 +284,42 @@ describe('DISPATCH-6 (3): the driver\'s own tab badge must not show a phantom jo
     expect(res.body.active).toBe(0);
   });
 });
+
+describe('MDF-1074 (feed classification): a flagged shipment leg must actually appear in the tab its own count badge says it is in', () => {
+  it('GET driver/jobs?scope=active includes a flagged courier leg, matching driver/jobs/counts\' own active figure — legScope had drifted from deliveryScope (MDF-927), which already includes EXCEPTION', async () => {
+    await setDispatch(3);
+    const district = 'COROZAL';
+    const { driverProfileId } = await makeDriver(district);
+    const { cookies: customerCookies } = await fundedCustomer();
+    const shipmentId = await bookDirect(customerCookies, district, 'Corozal Town');
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId } });
+    await dispatch.dispatchLeg(leg.id);
+
+    const driverCookies = await cookiesForDriver(driverProfileId);
+    expect((await post(driverCookies, `driver/shipping-jobs/${leg.id}/accept`)).status).toBe(201);
+
+    const flagged = await post(admin, `admin/logistics/legs/${leg.id}/exception`, { reason: 'Road washed out; vehicle cannot pass.' });
+    expect(flagged.status).toBe(201);
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(row.courierStatus).toBe('EXCEPTION');
+
+    const counts = await get(driverCookies, 'driver/jobs/counts');
+    expect(counts.status).toBe(200);
+    expect(counts.body.active).toBe(1);
+
+    // Before the fix, this returned zero rows while the count above still
+    // said 1 — the exact "a job I'm told I have but cannot find" shape the
+    // owner's complaint describes.
+    const activeTab = await get(driverCookies, 'driver/jobs?scope=active');
+    expect(activeTab.status).toBe(200);
+    expect(activeTab.body).toHaveLength(1);
+    expect(activeTab.body[0].id).toBe(leg.id);
+    expect(activeTab.body[0].status).toBe('EXCEPTION');
+    expect(activeTab.body[0].view).toBe('active');
+
+    // And it must not ALSO double-count into `open`, which already included
+    // EXCEPTION before this fix and is unaffected by it.
+    const openTab = await get(driverCookies, 'driver/jobs?scope=open');
+    expect(openTab.body).toHaveLength(1);
+  });
+});

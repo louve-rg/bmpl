@@ -278,6 +278,12 @@ export const AUDIT_ACTIONS = [
   // carried in newValue — the PASSENGER_AFFILIATION_CHANGED precedent of one
   // code per lifecycle rather than one per verb.
   'SHIPMENT_LEG_EXCEPTION_RESOLVED',
+  // MDF-1074: a leg stranded because its OWN shipment was already resolved
+  // another way (returned/rerouted) -- resolveException refuses both of its
+  // resolutions here by design, so this is a deliberately separate, narrower
+  // action: release the driver assignment nothing will ever dispatch again,
+  // never touch status/exceptionAt/exceptionReason.
+  'SHIPMENT_LEG_STRANDED_RECOVERED',
   // A recipient account deliberately claimed a shipment via its tracking
   // token. Holding the token only ever authorised reading trackPublic(); this
   // is the one action that turns that into an actual account link.

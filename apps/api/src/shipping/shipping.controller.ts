@@ -22,6 +22,7 @@ import {
   previewRerouteSchema,
   providerStatusOptionalNoteSchema,
   providerStatusRequiredReasonSchema,
+  recoverStrandedLegSchema,
   rerouteSchema,
   resolveLegExceptionSchema,
   returnToSenderSchema,
@@ -60,6 +61,7 @@ import {
   type PreviewRerouteInput,
   type ProviderStatusOptionalNoteInput,
   type ProviderStatusRequiredReasonInput,
+  type RecoverStrandedLegInput,
   type RerouteInput,
   type ResolveLegExceptionInput,
   type ReturnToSenderInput,
@@ -899,6 +901,25 @@ export class AdminLogisticsController {
     @Body(ZodBody(resolveLegExceptionSchema)) dto: ResolveLegExceptionInput,
   ) {
     return this.shipments.resolveException(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * MDF-1074: the one way out of a leg stranded because its OWN shipment was
+   * already resolved another way (returned/rerouted) — `resolve-exception`
+   * above refuses both of its resolutions for exactly this leg, by design
+   * (the original attempt is over), so this is a deliberately separate,
+   * narrower action. `logistics.operate`, same tier as flagging/resolving
+   * the exception itself: it releases a driver assignment and records why,
+   * it never charges anyone.
+   */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/recover-stranded')
+  recoverStranded(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(recoverStrandedLegSchema)) dto: RecoverStrandedLegInput,
+  ) {
+    return this.shipments.recoverStrandedLeg(id, dto, { userId: u.userId });
   }
 
   /**
