@@ -205,6 +205,23 @@ describe('login, refresh rotation, reuse rejection, logout', () => {
     expect(reuse.status).toBe(401);
   });
 
+  /**
+   * WEB-FALSE-SESSION-EXPIRED (god, 2026-11-23): apps/web/lib/api.ts keys on
+   * this EXACT message to tell "this visitor never had a session" apart from
+   * "a real session just died" -- the only distinguishing signal available to
+   * a client holding nothing but httpOnly cookies. Rewording this string (a
+   * typo fix, a friendlier tone, a translation) silently reintroduces the
+   * production bug it fixed: every anonymous visitor shown "Your session
+   * expired" on a page they never signed into. The web-side tests stub this
+   * same string themselves, so they cannot catch a server-side rename --
+   * this is the one test that actually guards the real contract.
+   */
+  it('a refresh call with no cookie at all fails with the exact message apps/web/lib/api.ts keys on', async () => {
+    const res = await request(ctx.server).post('/api/auth/refresh').send({});
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe('No refresh token provided.');
+  });
+
   it('logs out and revokes the session (access token no longer works)', async () => {
     const login = await request(ctx.server).post('/api/auth/login').send({ email, password });
     const cookies = cookiesOf(login);
