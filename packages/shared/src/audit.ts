@@ -46,6 +46,7 @@ export const AUDIT_ACTIONS = [
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   'ORDER_CREATED',
   'ORDER_RESERVATION_RELEASED', // admin/maintenance release of an order's inventory reservations (M10.1)
+  'ORDER_RESERVATION_RELEASE_FAILED', // refused: a vendor-order was already picked up/delivered (API-AUDIT-REFUSED-ACTIONS)
   // Customer-initiated whole-order cancellation (owner-approved scope): who
   // cancelled travels in actorId, reason + escrow return in newValue.
   'ORDER_CANCELLED',

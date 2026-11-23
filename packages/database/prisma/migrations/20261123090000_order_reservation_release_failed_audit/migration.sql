@@ -1,0 +1,29 @@
+-- API-AUDIT-REFUSED-ACTIONS: an admin attempting admin/orders/:id/
+-- release-reservations on an order whose vendor-order was already picked up
+-- or delivered was refused (409) but left no trace at all — an attempted
+-- financial action on goods the customer already holds is exactly what an
+-- audit trail is for, and it is also the signal that tells anyone watching
+-- that someone is trying it repeatedly. This is the refusal counterpart to
+-- the existing ORDER_RESERVATION_RELEASED action.
+--
+-- Precedent: this codebase already audits refused actions in several
+-- places (WALLET_VALIDATION_FAILED, PAYMENT_AUTHORIZATION_FAILED, the
+-- *_PIN_FAILED family) — auditing a refusal is an established pattern here,
+-- not a new category introduced for this one case.
+--
+-- Written by OrdersService.releaseReservationsInTx OUTSIDE the enclosing
+-- transaction (via the default Prisma client, not `tx`) — the guard throws
+-- a ConflictException immediately after, and writing the audit row through
+-- the same transaction that is about to roll back would discard the record
+-- along with everything else.
+--
+-- ADD ONLY: nothing in this migration references the new value — Postgres
+-- refuses a transaction that both adds an enum member and uses it (see
+-- packages/database/CLAUDE.md §2). The code that writes this value ships in
+-- the same PR but runs only after this migration has committed.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'ORDER_RESERVATION_RELEASE_FAILED';

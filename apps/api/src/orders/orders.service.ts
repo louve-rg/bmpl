@@ -693,8 +693,30 @@ export class OrdersService {
       // completion from a delivery order's.
       const collected = order.vendorOrders.find((vo) => vo.status === 'PICKED_UP' || vo.delivery?.status === 'DELIVERED');
       if (collected) {
+        // API-AUDIT-REFUSED-ACTIONS: the refusal itself is recorded, not just
+        // the attempt's eventual rejection — same precedent as
+        // pickup.service.ts's verifyPin (VENDOR_ORDER_PICKUP_PIN_FAILED,
+        // written before the throw), so a repeated attempt to return money
+        // on goods the customer already has is visible, not silent. `reason`
+        // inside newValue means WHY WE REFUSED (the established *_FAILED
+        // convention — WALLET_VALIDATION_FAILED/PAYMENT_AUTHORIZATION_FAILED
+        // both key it the same way); `submittedReason` is the admin's own
+        // typed justification for the attempt (dto's mandatory `reason`,
+        // required since #854) — a distinct key because the two meanings
+        // would otherwise collide under the same name.
+        // Written via `this.prisma`, NOT `tx` — writing it through the
+        // enclosing transaction and then throwing would roll the audit row
+        // back along with everything else, the opposite of the point. Same
+        // reasoning as pickup.service.ts's verifyPin, which writes its own
+        // failure row outside any transaction for the identical reason.
+        const collectedReason = collected.status === 'PICKED_UP' ? 'picked up' : 'delivered';
+        await this.audit.record({
+          action: 'ORDER_RESERVATION_RELEASE_FAILED',
+          actorId,
+          newValue: { orderId, collectedVendorOrderId: collected.id, reason: collectedReason, submittedReason: reason },
+        });
         throw new ConflictException(
-          `Cannot release this order's reservations: vendor-order ${collected.id} has already been ${collected.status === 'PICKED_UP' ? 'picked up' : 'delivered'} — the customer already has the goods.`,
+          `Cannot release this order's reservations: vendor-order ${collected.id} has already been ${collectedReason} — the customer already has the goods.`,
         );
       }
       await this.dispatch.cancelForReleasedOrder(tx, orderId, actorId);
