@@ -70,13 +70,36 @@ function assertDevelopmentEnvironment(): void {
   if (dbName === 'bmpl_test') {
     fail('DATABASE_URL points at bmpl_test — that database belongs to the integration suite.');
   }
-  if (dbName !== 'bmpl') {
-    fail(`database "${dbName}" is not the local development database "bmpl".`);
+  // FLOOR-UAT-SEED-DB-GUARD-TOO-NARROW: this guard exists to stop someone
+  // seeding UAT fixtures into a real database by accident — "local
+  // development database" is the thing it protects, not the literal string
+  // "bmpl". The hive floor allocates each agent its OWN local development
+  // database (one per agent, named bmpl_<agentId>) so concurrent agents
+  // don't truncate or seed over each other; this guard predated that and
+  // only ever recognised the single shared name "bmpl", so every agent
+  // using their own allocated database hit a false refusal here.
+  //
+  // An explicit allowlist, not a `bmpl_*` prefix rule: a prefix accepts any
+  // name anyone ever types, including a typo that happens to start with
+  // "bmpl_" — the whole point of this guard is refusing names nobody
+  // actually allocated. The agent roster itself lives outside this repo
+  // (the hive floor's own config, not tracked here), so this list cannot be
+  // derived automatically: widen it by one literal when a new agent is
+  // provisioned, the same way the guard was designed to be widened for a
+  // single run (see the FLOOR-SEEDTARGET comment below) — a permanent
+  // allowlist entry, not a per-run bypass.
+  const KNOWN_AGENT_DATABASES = ['bmpl_stanley', 'bmpl_jim', 'bmpl_dwight', 'bmpl_pam', 'bmpl_oscar'];
+  if (dbName !== 'bmpl' && !KNOWN_AGENT_DATABASES.includes(dbName)) {
+    fail(
+      `database "${dbName}" is not the local development database "bmpl" or a known per-agent database ` +
+        `(${KNOWN_AGENT_DATABASES.join(', ')}). If this is a newly provisioned agent, add its database name here.`,
+    );
   }
-  // FLOOR-SEEDTARGET: deliberately NO default here. Every isolated stack on
-  // this machine uses a database literally named "bmpl" (docker-compose's
-  // own default), so the DATABASE_URL check above cannot tell "my stack"
-  // from "someone else's" — and a missing API target used to fall through
+  // FLOOR-SEEDTARGET: deliberately NO default here. Multiple isolated
+  // stacks on this machine can legitimately pass the DATABASE_URL check
+  // above — the shared "bmpl" (docker-compose's own default) and every
+  // allocated per-agent database both do — so that check alone cannot tell
+  // "my stack" from "someone else's" — and a missing API target used to fall through
   // to localhost:4000, which is wherever a long-lived process on this shared
   // machine happens to be listening, not necessarily this run's own API.
   // Failing loudly here costs the operator one environment variable; the
