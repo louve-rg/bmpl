@@ -747,6 +747,29 @@ describe('driver claim fallback (MDF-18)', () => {
     await post(driver.cookies, `driver/jobs/${ownDeliveryId}/claim`).expect(404);
   });
 
+  it('refuses 404, never a status-naming 400, for a delivery already assigned to someone else (SHIP-CLAIM-ROUTE-EXISTENCE-LEAK)', async () => {
+    const vendor = await makeVendor();
+    const offered = await makeDriver();
+    const deliveryId = await exhaustedDelivery(vendor, offered);
+    const winner = await makeDriver();
+    expect((await post(winner.cookies, `driver/jobs/${deliveryId}/claim`)).status).toBe(201);
+
+    // A completely unrelated driver, never offered this delivery, probing
+    // an id that is now ASSIGNED — a status CLAIM is never legal from.
+    // Before this fix: 400 "Cannot claim a delivery that is \"Driver
+    // assigned\"." — confirming the id was real AND naming its exact stage,
+    // the one inconsistency with every other customer/driver/vendor route's
+    // 404-for-foreign-delivery convention.
+    const outsider = await makeDriver();
+    const res = await post(outsider.cookies, `driver/jobs/${deliveryId}/claim`);
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe('Job not found.');
+    expect(JSON.stringify(res.body)).not.toMatch(/assigned/i);
+
+    // Untouched by the refused probe.
+    expect((await deliveryOf(deliveryId)).assignedDriverProfileId).toBe(winner.driverProfileId);
+  });
+
   it('refuses an ineligible driver (wrong district) and lists nothing for them', async () => {
     const vendor = await makeVendor();
     const offered = await makeDriver();
@@ -824,18 +847,18 @@ describe('driver claim fallback (MDF-18)', () => {
     // CAS's `updateMany` matched zero rows). A racer whose read happens to
     // land after some other racer's whole pipeline has already committed
     // never reaches the transaction at all — its own read already shows the
-    // delivery assigned, so the pre-check (assertAction) rejects it first,
-    // as 400 "Cannot claim a delivery that is \"Driver assigned\".". Both are
-    // the same business event — "someone else got it first" — caught at a
-    // different point in the request lifecycle depending on scheduling, not
-    // on business logic. There is no error code for this distinction and
-    // adding one is an API-contract change, out of scope for a test fix —
-    // so this matches on the literal message. Deliberately narrow: ANY other
-    // status or message (500, a different 400 reason, 404, ...) still falls
-    // into `unexpected` below and fails the test loudly, same as before.
-    const lateRejections = responses.filter(
-      (r) => r.status === 400 && typeof r.body?.message === 'string' && r.body.message.startsWith('Cannot claim a delivery that is "Driver assigned"'),
-    );
+    // delivery ASSIGNED, a status CLAIM is never legal from, so the
+    // pre-check now refuses with 404 "Job not found." — SHIP-CLAIM-ROUTE-
+    // EXISTENCE-LEAK changed this from a status-naming 400 (which told an
+    // unrelated driver exactly what stage a delivery never offered to them
+    // was at) to the same existence-hiding shape every other customer/
+    // driver/vendor route in this system already uses. Both are the same
+    // business event — "someone else got it first" — caught at a different
+    // point in the request lifecycle depending on scheduling, not on
+    // business logic. Deliberately narrow: ANY other status or message
+    // (500, a 400 for a different reason, ...) still falls into
+    // `unexpected` below and fails the test loudly, same as before.
+    const lateRejections = responses.filter((r) => r.status === 404 && r.body?.message === 'Job not found.');
     const losses = [...conflicts, ...lateRejections];
     // Richer failure message only — what counts as a legitimate loss is the
     // only thing that changed above; a bare length mismatch here has twice
