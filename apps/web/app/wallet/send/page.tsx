@@ -25,6 +25,15 @@ import type { ApiError } from '../../../lib/api';
  */
 
 const NOTE_MAX = 140;
+/**
+ * A money amount a person actually typed: digits, an optional single
+ * decimal point, up to two decimal places. Nothing else -- `Number(...)`
+ * alone happily parses scientific notation ("1e3" -> 1000), hex ("0x10" ->
+ * 16), "Infinity" and "NaN" (the latter two already fail the finite check
+ * below, but the first two silently do not), so the raw string is checked
+ * against this shape BEFORE it is ever handed to `Number()`.
+ */
+const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
 /** Automatic retries beyond the first attempt, same key and body each time --
  *  see `postTransferWithRetry` below for why this never shows as a failure. */
 const CONFIRM_RETRY_DELAYS_MS = [500, 1500];
@@ -109,8 +118,9 @@ export default function SendMoneyPage() {
   }
 
   const availableMinor = wallet?.availableMinor ?? null;
-  const amountMinor = Math.round(Number(amount) * 100);
-  const amountValid = amount.trim() !== '' && Number.isFinite(amountMinor) && amountMinor > 0;
+  const amountShapeValid = AMOUNT_PATTERN.test(amount.trim());
+  const amountMinor = amountShapeValid ? Math.round(Number(amount.trim()) * 100) : NaN;
+  const amountValid = amountShapeValid && Number.isFinite(amountMinor) && amountMinor > 0;
   const overBalance = availableMinor != null && amountValid && amountMinor > availableMinor;
   const canReview = recipient != null && amountValid && !overBalance;
 

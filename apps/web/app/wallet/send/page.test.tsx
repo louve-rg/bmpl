@@ -229,6 +229,78 @@ describe('SendMoneyPage amount step', () => {
   });
 });
 
+/**
+ * MDF-1149 Finding D (Stanley's acceptance walk): `Number('1e3')` is 1000,
+ * so the amount field was reading scientific notation as a real quantity --
+ * typing "1e3" sent BZ$1,000. `Number()` alone is not a currency parser: it
+ * also accepts hex, and while `Infinity`/`NaN` already failed the finite
+ * check, that was incidental, not a guard. The amount string is now checked
+ * against a plain-decimal shape BEFORE `Number()` ever sees it, so none of
+ * these ever reach Review (and so can never reach Confirm/sendMoney either --
+ * there being no Confirm control before Review is the same gate the earlier
+ * "review step" tests already rely on).
+ */
+describe('SendMoneyPage amount field rejects non-currency numeric shapes (MDF-1149 Finding D)', () => {
+  async function rejectsShape(shape: string) {
+    recipientLookup.mockResolvedValue(RECIPIENT);
+    mount();
+    await flush();
+    await fillEmailAndLookup();
+    await fillAmount(shape);
+
+    expect(text()).not.toContain('Review');
+    expect(() => findButton(/^Send BZ\$/)).toThrow();
+    expect(sendMoney).not.toHaveBeenCalled();
+  }
+
+  it('rejects scientific notation ("1e3")', async () => {
+    await rejectsShape('1e3');
+  });
+
+  it('rejects scientific notation, capital E ("1E3")', async () => {
+    await rejectsShape('1E3');
+  });
+
+  it('rejects hexadecimal ("0x10")', async () => {
+    await rejectsShape('0x10');
+  });
+
+  it('rejects "Infinity"', async () => {
+    await rejectsShape('Infinity');
+  });
+
+  it('rejects "NaN"', async () => {
+    await rejectsShape('NaN');
+  });
+
+  it('rejects a numeric separator ("1_000")', async () => {
+    await rejectsShape('1_000');
+  });
+
+  it('rejects a leading "+" sign ("+5.00")', async () => {
+    await rejectsShape('+5.00');
+  });
+
+  it('rejects a negative amount ("-5.00")', async () => {
+    await rejectsShape('-5.00');
+  });
+
+  it('rejects more than two decimal places ("5.123")', async () => {
+    await rejectsShape('5.123');
+  });
+
+  it('still accepts a plain decimal amount ("12.34") -- the fix does not over-reject', async () => {
+    recipientLookup.mockResolvedValue(RECIPIENT);
+    mount();
+    await flush();
+    await fillEmailAndLookup();
+    await fillAmount('12.34');
+
+    expect(text()).toContain('Review');
+    expect(findButton(/^Send BZ\$/)).toBeTruthy();
+  });
+});
+
 describe('SendMoneyPage review step -- the Confirm control does not exist before this', () => {
   it('shows recipient, amount, "No transfer fee", and the total debit', async () => {
     await reachReview('25.00');
