@@ -158,6 +158,46 @@ export async function raceOverSeparateConnections<T>(
   return { responses, observed: peak >= 2, peakConcurrentActive: peak, samples, elapsedMs: Date.now() - start };
 }
 
+/**
+ * `raceOverSeparateConnections`, but makes the DB-level overlap proof part
+ * of the test itself rather than something each caller has to remember to
+ * check: throws if `pg_stat_activity` never caught 2+ backends `active` at
+ * once.
+ *
+ * WHAT THIS PROVES: a test built on this result can only pass by exercising
+ * a genuine race — if the calls happened to serialize (not raced at all),
+ * this throws instead of letting the test's own correctness assertions run
+ * against calls that never actually contended for anything. That closes a
+ * real failure mode: a concurrency-guard test that "assumes overlap" from
+ * `Promise.all` alone can keep passing under CI load even after its guard
+ * regresses, simply because the calls serialized by accident and never hit
+ * the code path being guarded.
+ *
+ * WHAT THIS DOES NOT PROVE: a *pass* here is not proof the guard is correct
+ * on every possible interleaving, only that this run's sampling caught two
+ * backends genuinely active at the same instant — ordinary DB-level
+ * overlap evidence, nothing stronger. And a throw here is an inconclusive
+ * run, not a defect: it means this attempt's timing didn't produce a real
+ * race, not that the code under test is broken. Treat a throw as "rerun, or
+ * loosen the setup so the calls take long enough to overlap" — never as a
+ * failing assertion about the guard itself.
+ */
+export async function raceWithRequiredOverlap<T>(
+  prisma: PrismaClient,
+  fns: Array<() => Promise<T>>,
+): Promise<ConcurrencyProbe<T>> {
+  const probe = await raceOverSeparateConnections(prisma, fns);
+  if (!probe.observed) {
+    throw new Error(
+      `raceWithRequiredOverlap: pg_stat_activity never observed 2+ concurrent active backends ` +
+        `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs}) ` +
+        `— this run's calls did not provably overlap, so it proves nothing about the guard under contention. ` +
+        `This is an inconclusive run, not a failing assertion about the code under test.`,
+    );
+  }
+  return probe;
+}
+
 /** Wipe all application data between test groups (keeps schema + migrations). */
 export async function resetDb(prisma: PrismaClient): Promise<void> {
   const rows = await prisma.$queryRaw<Array<{ tablename: string }>>`
