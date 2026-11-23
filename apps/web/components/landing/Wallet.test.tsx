@@ -38,10 +38,20 @@ describe('WalletSection claims', () => {
     // Guard: prove the section rendered its real content before asserting on what is absent.
     expect(text).toContain('Escrow Protection');
     expect(text).toContain('Secure Ledger');
+    expect(text).toContain('Recent activity');
     expect(text).not.toMatch(/payout/i);
     expect(text).not.toMatch(/withdraw/i);
     expect(text).not.toMatch(/\bbank\b/i);
     expect(text).not.toMatch(/cash.?out/i);
     expect(text).not.toMatch(/\btransfer/i);
+  });
+
+  it('does not re-introduce the removed quick-action affordances (Send/Request/Top up/QR)', () => {
+    const text = render();
+    expect(text).toContain('Recent activity');
+    expect(text).not.toMatch(/\bsend\b/i);
+    expect(text).not.toMatch(/\brequest\b/i);
+    expect(text).not.toMatch(/top.?up/i);
+    expect(text).not.toMatch(/\bqr\b/i);
   });
 });

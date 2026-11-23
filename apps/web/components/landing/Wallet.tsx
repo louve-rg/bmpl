@@ -92,17 +92,30 @@ export function WalletSection() {
 
 /* ------------------------------------------------------------- dashboard */
 
-const ACTIONS: Array<{ label: string; icon: ReactNode }> = [
-  { label: 'Send', icon: <path d="M4 12 20 5l-6 15-3-6-7-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /> },
-  { label: 'Request', icon: <path d="M12 5v14m0 0-5-5m5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /> },
-  { label: 'Top up', icon: <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /> },
-  { label: 'QR', icon: <><rect x="4" y="4" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><rect x="14" y="4" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><rect x="4" y="14" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" /><path d="M14 14h3v3m3 0v3h-6v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></> },
-];
+/**
+ * S2-WALLET-CLAIMS: the quick-actions row (Send / Request / Top up / QR) was
+ * removed entirely, not just its labels. None pass the same checkable-code
+ * rule the FEATURES list above was just held to: there is no send/request/QR
+ * transfer endpoint anywhere in apps/api/src/wallet, and "Top up" throws
+ * ForbiddenException for any non-test account ("Adding money to your wallet
+ * is not available yet. BML does not have a card or bank payment method
+ * connected." -- wallet.controller.ts) and is itself a temporary,
+ * self-service UAT-only mechanism that must be disabled before commercial
+ * launch (CLAUDE.md section 4). Four labelled affordances is a stronger claim
+ * than a sentence, so a row where none of the four check out doesn't get a
+ * lighter standard than the prose did -- the row is gone, not rebuilt smaller.
+ */
 
+/**
+ * Recent-activity sample entries, replaced for the same reason: the old
+ * "Sunrise Grocers" purchase, "Delivery earnings" and "Wallet top-up" lines
+ * each implied a payment/earning/funding capability this file's FEATURES
+ * list no longer claims. Escrow hold/release is the one real, checkable
+ * mechanism (wallet.service.ts) left to illustrate.
+ */
 const TXNS: Array<{ label: string; sub: string; amount: string; positive?: boolean; icon: ReactNode }> = [
-  { label: 'Sunrise Grocers', sub: 'Today · 9:41 AM', amount: '−BZ$84.50', icon: <><path d="M4 8h16l-1 3H5L4 8Z" stroke="currentColor" strokeWidth="1.5" /><path d="M5 11v8h14v-8" stroke="currentColor" strokeWidth="1.5" /></> },
-  { label: 'Delivery earnings', sub: 'Today · 8:12 AM', amount: '+BZ$32.00', positive: true, icon: <><path d="M3 7h11v9H3z" stroke="currentColor" strokeWidth="1.5" /><path d="M14 10h4l3 3v3h-7" stroke="currentColor" strokeWidth="1.5" /></> },
-  { label: 'Wallet top-up', sub: 'Yesterday', amount: '+BZ$500.00', positive: true, icon: <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /> },
+  { label: 'Order #BZ-4821 — escrow held', sub: 'Today · 9:41 AM', amount: '−BZ$84.50', icon: <><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" strokeWidth="1.5" /></> },
+  { label: 'Escrow released', sub: 'Yesterday', amount: '+BZ$32.00', positive: true, icon: <><path d="M12 3 5 6v5.5c0 4 3 7.4 7 8.5 4-1.1 7-4.5 7-8.5V6l-7-3Z" strokeWidth="1.5" /><path d="m9 12 2 2 4-4" strokeWidth="1.5" /></> },
 ];
 
 function WalletDashboard() {
@@ -121,18 +134,6 @@ function WalletDashboard() {
           <span className="font-mono text-sm tracking-widest text-white/80">•••• •••• •••• 4821</span>
           <span className="text-xs font-semibold text-white/70">BZD</span>
         </div>
-      </div>
-
-      {/* Quick actions */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {ACTIONS.map((a) => (
-          <div key={a.label} className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-100 bg-slate-50 py-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-belize-blue/10 text-belize-blue" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">{a.icon}</svg>
-            </span>
-            <span className="text-[10px] font-medium text-slate-600">{a.label}</span>
-          </div>
-        ))}
       </div>
 
       {/* Recent activity */}
