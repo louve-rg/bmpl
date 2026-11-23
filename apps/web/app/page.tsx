@@ -1,5 +1,6 @@
 import { Header } from '../components/landing/Header';
 import { Hero } from '../components/landing/Hero';
+import { LaunchAnnouncement } from '../components/landing/LaunchAnnouncement';
 import { Services } from '../components/landing/Services';
 import { WhyChooseUs } from '../components/landing/WhyChooseUs';
 import { WalletSection } from '../components/landing/Wallet';
@@ -20,6 +21,7 @@ export default function HomePage() {
       <Header />
       <main>
         <Hero />
+        <LaunchAnnouncement />
         <Services />
         <PromotedSections />
         <DiscoverySections />

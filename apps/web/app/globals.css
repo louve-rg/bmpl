@@ -250,6 +250,61 @@ body {
 }
 
 /*
+ * S2-ANNOUNCE: the homepage launch block's one orchestrated moment -- the
+ * dotted route line draws in, then each of the four service nodes appears in
+ * sequence along it. Plays once on mount (no scroll trigger; the section
+ * sits right after Hero, so mount and "scrolled into view" are effectively
+ * the same moment). `pathLength={100}` on the <path> in
+ * components/landing/LaunchAnnouncement.tsx makes `stroke-dasharray`/
+ * `stroke-dashoffset: 100` mean "100% of the line" regardless of its actual
+ * pixel length, so this isn't tied to one specific SVG's coordinates.
+ *
+ * REDUCED MOTION: deliberately NOT relying on the shared global override
+ * (@bmpl/ui/glass.css, a few hundred lines up) that forces every
+ * `animation-duration` near-zero -- caught live, with a screenshot, that it
+ * does NOT also zero `animation-delay`. The four nodes below are staggered
+ * via `animation-delay` (LaunchAnnouncement.tsx's inline style), so under
+ * that shared override alone a reduced-motion visitor would still wait out
+ * each node's real delay (up to ~1s) before it instantly popped in -- the
+ * two later nodes would be genuinely invisible for most of a second, which
+ * is the opposite of what reduced-motion asks for. Scoped instead: the
+ * animations only exist at all inside `prefers-reduced-motion: no-preference`;
+ * outside it, `.s2-node`/`.s2-route-draw` carry no opacity/dasharray rule, so
+ * the line and all four nodes render at their normal, fully-visible state
+ * immediately, with nothing to wait on.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .s2-route-draw {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: s2-draw 1.1s ease-out forwards;
+  }
+
+  .s2-node {
+    opacity: 0;
+    transform-origin: 30px center;
+    animation: s2-node-in 0.5s ease-out forwards;
+  }
+}
+
+@keyframes s2-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes s2-node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/*
  * Leaflet's zoom controls ship at 30px square, which is well under a thumb.
  * Bumped to 44 for the same reason every other control on the site is: the map
  * is used one-handed on a phone, and a mis-tap pans instead of zooming.
