@@ -24,6 +24,7 @@ import { bootApp, cookiesOf, findPinLeak, resetDb, seedLimitedAdmin, seedRoles, 
 
 let ctx: TestContext;
 let admin: string[];
+let adminUserId: string;
 let readOnlyAdmin: string[];
 let customer: string[];
 let seq = 0;
@@ -169,6 +170,7 @@ beforeAll(async () => {
   await resetDb(ctx.prisma);
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
+  adminUserId = a.id;
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
   // The PAIR for every permission assertion: an admin who can look but not act.
   const limited = await seedLimitedAdmin(ctx.prisma, `tro_readonly_${uniq()}@example.com`, ['logistics.read']);
@@ -674,11 +676,21 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect(await custodyCount(s.id)).toBe(2); // a rejected attempt moves nothing
 
     // (a) The right code, from someone who is NOT the assigned courier — here,
-    // the desk itself trying to complete a courier's own leg on their behalf —
-    // is ALSO refused, with the SAME message shape and the SAME shared
-    // counter (BMPL-174): wrong-courier and wrong-code are one failure path on
-    // purpose, so neither can be used to probe for the other.
-    const staffAttempt = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Desk' });
+    // the desk itself trying to complete a courier's own leg on their behalf,
+    // naming itself (an explicit, genuine, WRONG identity claim) rather than
+    // submitting with no claim at all — is ALSO refused, with the SAME message
+    // shape and the SAME shared counter (BMPL-174): wrong-courier and
+    // wrong-code are one failure path on purpose, so neither can be used to
+    // probe for the other. An explicit claim is what keeps this submission on
+    // that shared path; SHIP-COLLECTION-FAILED-NONATTEMPT-BURNS-LOCKOUT (#890)
+    // added an earlier, counter-free refusal only for the "nobody asserted
+    // anything" shape — naming presentedCourierUserId here means this
+    // submission is not that shape, so the original assertions still hold.
+    const staffAttempt = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: firstMilePin,
+      receivedByName: 'Desk',
+      presentedCourierUserId: adminUserId,
+    });
     expect(staffAttempt.status).toBe(400);
     expect(staffAttempt.body.message).toMatch(/not right/i);
     expect(await attemptsOn(firstMile.id)).toBe(2);
