@@ -698,8 +698,16 @@ export class TerminalService {
    */
   private async countActiveManagers(tx: Prisma.TransactionClient, companyId: string): Promise<number> {
     await tx.$queryRaw`SELECT id FROM terminal_company_profiles WHERE id = ${companyId} FOR UPDATE`;
+    // TERMINAL-MANAGER-FLOOR-STALE-VOTE: same gap as users.service.ts's
+    // liveResponsibilities (ACCT-DELETE-STALE-MANAGER-VOTE) — a membership
+    // row can outlive the account behind it (deletion is the one live path
+    // today, and it now ends its own membership, but this floor must not
+    // depend on that staying the only path, and a row written before that
+    // fix shipped is still ACTIVE here). Counting a DEACTIVATED user's row
+    // as "another active manager" would let this floor wrongly allow
+    // removing the last REAL one.
     return tx.terminalCompanyMember.count({
-      where: { terminalCompanyId: companyId, status: 'ACTIVE', memberRole: 'MANAGER' },
+      where: { terminalCompanyId: companyId, status: 'ACTIVE', memberRole: 'MANAGER', user: { status: { not: 'DEACTIVATED' } } },
     });
   }
 

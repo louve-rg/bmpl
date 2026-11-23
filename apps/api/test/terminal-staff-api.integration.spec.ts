@@ -29,8 +29,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { TerminalService } from '../src/terminal/terminal.service';
+import { ConflictException } from '@nestjs/common';
 
 let ctx: TestContext;
+let terminal: TerminalService;
 let admin: string[];
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
@@ -124,6 +127,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
+  terminal = ctx.app.get(TerminalService);
 });
 
 afterAll(async () => {
@@ -713,5 +717,61 @@ describe('TERM-STAFF-API: assertActiveMemberRole disambiguates a dual-company me
     const res = await get(operatorBoth.cookies, 'terminal/staff');
     expect(res.status).toBe(403);
     expect(res.body.message).toBe(ROLE_MESSAGE);
+  });
+});
+
+/**
+ * TERMINAL-MANAGER-FLOOR-STALE-VOTE: `countActiveManagers` (the floor behind
+ * `staffChangeRole`/`staffDeactivateMember`) counted ACTIVE/MANAGER rows with
+ * no check on the counted user's own `User.status` — the same shape as
+ * ACCT-DELETE-STALE-MANAGER-VOTE in `users.service.ts`'s `liveResponsibilities`.
+ * A deleted manager's membership row used to survive at ACTIVE forever
+ * (deletion now ends its own membership — see that fix — but this floor must
+ * not depend on that staying the only path a row like this can arise from,
+ * and a row written before that fix shipped is still ACTIVE today).
+ *
+ * Reached through the SERVICE directly, not through a real HTTP session: a
+ * DEACTIVATED user cannot hold a valid session at all (password unusable,
+ * every session revoked on deletion), so the live, authenticated path these
+ * two self-serve doors use already blocks a "ghost" manager from calling
+ * anything — this floor's own blind spot is not independently reachable by
+ * an authenticated caller through staffChangeRole/staffDeactivateMember
+ * today. It is still the right fix: the floor's job is to be correct about
+ * who counts as a protector, not to rely on a DIFFERENT layer (auth) to
+ * keep an already-stale row from ever being asked.
+ */
+describe('TERMINAL-MANAGER-FLOOR-STALE-VOTE: countActiveManagers ignores a deactivated member\'s own user status', () => {
+  it('a deactivated manager\'s own stale ACTIVE membership can no longer vote "someone else is still managing this company"', async () => {
+    const co = await makeCompanyWithLocation('StaleVote');
+    const real = await inviteAndAccept(co.company.id, [co.loc.id], 'MANAGER');
+    const ghost = await inviteAndAccept(co.company.id, [co.loc.id], 'MANAGER');
+
+    // Simulate the stale row this card is about: a membership left ACTIVE
+    // while the user behind it is DEACTIVATED. Direct deletion exercises
+    // this today only through the self-service path (already covered by
+    // ACCT-DELETE-STALE-MANAGER-VOTE's own test); this writes the same end
+    // state directly, since it's also what a pre-fix legacy row looks like.
+    await ctx.prisma.user.update({ where: { id: ghost.userId }, data: { status: 'DEACTIVATED' } });
+
+    // The ghost's own stale membership must not let anyone end or demote
+    // the one REAL remaining manager — called on the service directly,
+    // since a deactivated user cannot authenticate to call this as a real
+    // HTTP request (see the doc comment above).
+    await expect(terminal.staffDeactivateMember(ghost.userId, real.userId)).rejects.toThrow(ConflictException);
+    await expect(terminal.staffChangeRole(ghost.userId, real.userId, { memberRole: 'OPERATOR' })).rejects.toThrow(ConflictException);
+
+    // Both refused, and the real manager's own standing is untouched by
+    // the refused attempts.
+    const realAfter = await ctx.prisma.terminalCompanyMember.findUniqueOrThrow({
+      where: { terminalCompanyId_userId: { terminalCompanyId: co.company.id, userId: real.userId } },
+    });
+    expect(realAfter.status).toBe('ACTIVE');
+    expect(realAfter.memberRole).toBe('MANAGER');
+
+    // With a SECOND real, active manager instead of a ghost, the exact same
+    // call succeeds — proving this is the stale-vote fix, not a floor that
+    // now refuses everything.
+    const secondReal = await inviteAndAccept(co.company.id, [co.loc.id], 'MANAGER');
+    await expect(terminal.staffChangeRole(secondReal.userId, real.userId, { memberRole: 'OPERATOR' })).resolves.toMatchObject({ memberRole: 'OPERATOR' });
   });
 });
