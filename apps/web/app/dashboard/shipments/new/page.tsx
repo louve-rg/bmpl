@@ -178,6 +178,18 @@ export default function NewShipmentPage() {
   // (a fast double-click, or two taps) reaches this same handler. The ref
   // closes that gap completely instead of relying on render timing.
   const submitInFlight = useRef(false);
+  // WEB-BOOKING-NO-IDEMPOTENCY-KEY: one key per booking ATTEMPT, not per
+  // click and not per page. "Attempt" means "this quoted request, however
+  // many times the customer has to try it" -- generated lazily the first
+  // time book() actually calls the API, and deliberately NOT cleared when a
+  // call fails, so a resubmit after "we lost the connection, please do not
+  // submit again" (the one thing a customer does anyway) reuses the SAME
+  // key: the API replays the original shipment instead of booking a second
+  // one. Reset below whenever `request` changes -- a materially different
+  // booking (a different route, parcel, or date) must never share a key
+  // with whatever was attempted before it, or a genuine second booking
+  // would silently 409 instead of succeeding.
+  const attemptKey = useRef<string | null>(null);
 
   useEffect(() => {
     // Signed-in picker (TERM-SIM-NETWORK-INVISIBLE): scoped to the caller's
@@ -206,6 +218,12 @@ export default function NewShipmentPage() {
     () => toRequest(service, mode, origin, destination, parcel, travelDate),
     [service, mode, origin, destination, parcel, travelDate],
   );
+  // A new `request` is a new booking by definition (see attemptKey above) --
+  // whatever attempt key existed for the PREVIOUS request must not leak into
+  // this one.
+  useEffect(() => {
+    attemptKey.current = null;
+  }, [request]);
   const ready = quotable(service, origin, destination);
 
   const refreshQuote = useCallback(async () => {
@@ -246,8 +264,9 @@ export default function NewShipmentPage() {
     submitInFlight.current = true;
     setBooking(true);
     setErr(null);
+    if (!attemptKey.current) attemptKey.current = crypto.randomUUID();
     try {
-      const created = await shippingApi.create({ ...request, payWithWallet: true });
+      const created = await shippingApi.create({ ...request, payWithWallet: true }, attemptKey.current);
       router.push(`/dashboard/shipments/${encodeURIComponent(created.reference)}`);
     } catch (e) {
       // DO NOT auto-retry and DO NOT try to infer success from the failure

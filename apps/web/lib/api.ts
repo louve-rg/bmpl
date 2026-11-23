@@ -221,8 +221,12 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: 'GET' }),
   getWithHeaders: <T>(path: string) => getWithHeaders<T>(path),
   upload: <T>(path: string, body: Blob) => uploadBinary<T>(path, body),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  // `headers` is for the rare caller that needs a header of its own alongside
+  // the body (WEB-BOOKING-NO-IDEMPOTENCY-KEY: `Idempotency-Key`) -- merged
+  // last in `requestWithResponse`, so it can only add to the default headers,
+  // never accidentally drop `Content-Type`/CSRF/etc.
+  post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, headers }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>

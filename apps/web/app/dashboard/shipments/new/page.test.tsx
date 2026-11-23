@@ -46,9 +46,9 @@ function defaultApiGetImpl(path: string): Promise<ShippingHub[] | string[] | typ
   return Promise.resolve(null);
 }
 const apiGet = vi.fn(defaultApiGetImpl);
-const apiPost = vi.fn((path: string, body?: unknown) => {
+const apiPost = vi.fn((path: string, body?: unknown, headers?: Record<string, string>) => {
   if (path === '/shipping/quote') return quoteMock(body);
-  if (path === '/shipping') return createMock(body);
+  if (path === '/shipping') return createMock(body, headers);
   return Promise.resolve(null);
 });
 // `errorMessage` kept real via `importOriginal` -- the embedded
@@ -58,7 +58,7 @@ vi.mock('../../../../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../lib/api')>()),
   api: {
     get: (...args: [string]) => apiGet(...args),
-    post: (...args: [string, unknown?]) => apiPost(...args),
+    post: (...args: [string, unknown?, Record<string, string>?]) => apiPost(...args),
     patch: vi.fn(),
     del: vi.fn(),
     upload: vi.fn(),
@@ -258,6 +258,77 @@ describe('NewShipmentPage submit guard (BMPL, dropped-connection double-charge f
 
     expect(container!.textContent).toContain('We lost the connection before we could confirm this booking');
     expect(container!.textContent).not.toContain('We could not book that shipment.');
+  }, 10000);
+});
+
+/**
+ * WEB-BOOKING-NO-IDEMPOTENCY-KEY (god, measured by Stanley 2026-11-23): the
+ * API already proves same key + same body replays the original shipment
+ * instead of booking a second one, and the same key with a different body
+ * 409s -- but the web client sent no key at all, so a double-tap or a
+ * resubmit after a dropped connection booked (and charged) twice. These
+ * tests are the client half: the test that would FAIL on the old code is
+ * the first one below (same attempt, same key); the second proves the
+ * opposite failure mode (reusing one key forever) isn't introduced instead.
+ */
+describe('NewShipmentPage idempotency key (WEB-BOOKING-NO-IDEMPOTENCY-KEY)', () => {
+  function idempotencyKeyOf(call: unknown[]): string | undefined {
+    return (call[1] as Record<string, string> | undefined)?.['idempotency-key'];
+  }
+
+  it('reuses the SAME idempotency key when the same attempt is resubmitted after a failure', async () => {
+    createMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    createMock.mockResolvedValueOnce({ reference: 'BML-TEST0006' });
+    const book = await fillAndQuote();
+
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(container!.textContent).toContain('We lost the connection before we could confirm this booking');
+
+    // Same button, same still-displayed quote, no form field touched --
+    // exactly the "please do not submit again" resubmit the copy warns
+    // against, and exactly what must stay safe.
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(2);
+    const firstKey = idempotencyKeyOf(createMock.mock.calls[0]!);
+    const secondKey = idempotencyKeyOf(createMock.mock.calls[1]!);
+    expect(firstKey).toBeTruthy();
+    expect(secondKey).toBe(firstKey);
+  }, 10000);
+
+  it('generates a NEW idempotency key once the booking itself changes, so a genuine second booking is never silently rejected', async () => {
+    createMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    createMock.mockResolvedValueOnce({ reference: 'BML-TEST0007' });
+    const book = await fillAndQuote();
+
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // A materially different booking -- not a resubmit of the one that just
+    // failed -- must start a fresh attempt, never carry the old key forward.
+    fillTownAndDistrict(container!, 'Deliver to', 'Orange Walk Town', 'ORANGE_WALK');
+    await settleQuote();
+    const rebook = findBookButton(container!);
+    expect(rebook.disabled).toBe(false);
+    await act(async () => {
+      rebook.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(2);
+    const firstKey = idempotencyKeyOf(createMock.mock.calls[0]!);
+    const secondKey = idempotencyKeyOf(createMock.mock.calls[1]!);
+    expect(firstKey).toBeTruthy();
+    expect(secondKey).toBeTruthy();
+    expect(secondKey).not.toBe(firstKey);
   }, 10000);
 });
 
