@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { BrandLockup } from '../Logo';
-import { contactMailto } from '../../lib/contact';
+import { contactMailto, PUBLIC_CONTACT_EMAIL } from '../../lib/contact';
 
 type LinkItem = { label: string; href: string };
 
@@ -17,9 +17,14 @@ const COLUMNS: Array<{ heading: string; links: LinkItem[] }> = [
     ],
   },
   {
+    // WEB-FALSE-SESSION-EXPIRED follow-up (owner deliverable 1): the public
+    // contact address must be DISPLAYED, not just reachable through a link
+    // whose own text never shows it. The label is the address itself -- same
+    // mailto link, same styling, just no longer a bare "Contact" behind
+    // which the actual address was invisible.
     heading: 'Company',
     links: [
-      { label: 'Contact', href: contactMailto() },
+      { label: PUBLIC_CONTACT_EMAIL, href: contactMailto() },
     ],
   },
   {
