@@ -175,40 +175,45 @@ jobs:
       - name: Install Playwright's Chromium
         run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
 
-      # INFORMATIONAL ON PURPOSE, same mechanism as Format check/Lint above:
-      # `continue-on-error: true` at the STEP level means a red result here
-      # cannot fail this job, and therefore cannot fail this job's check run
-      # — which matters because "Build, typecheck & unit tests" (this job) is
-      # one of this repo's required status checks for merging to main
-      # (gh api .../branches/main/protection), so a red result here would
-      # block every open PR on pure browser-test flakiness regardless of
-      # whether it has anything to do with the change under review. A flaky
-      # browser suite is a classic source of exactly that kind of unrelated
-      # block (BMPL-217/BMPL-213).
+      # REQUIRED AS OF MDF-906's gate: eleven consecutive clean main-branch
+      # runs (zero failed AND zero flaky) through eedca0de/#855, a twelfth
+      # in flight when this landed — see this PR's body for the exact shas.
+      # `continue-on-error: true` used to sit on the step below so a red
+      # result couldn't fail this job's required check run and block every
+      # open PR on pure browser-test flakiness regardless of whether it had
+      # anything to do with the change under review (BMPL-217/BMPL-213).
+      # That reasoning no longer holds once the gate's own evidence is what
+      # decided this step may fail the build, so continue-on-error comes
+      # off.
       #
-      # CORRECTION: this comment used to justify the above by claiming
-      # "Railway's GitHub integration waits for check suites before
-      # deploying the API." That claim is unevidenced and likely wrong —
-      # see the concurrency comment above and docs/DEPLOYMENT.md §2a: a
-      # production deployment has been observed starting TWO SECONDS after
-      # a push, before any check suite here could possibly have concluded.
-      # Whether this suite's result affects the deploy at all is
-      # UNESTABLISHED. The required-status-check reason above stands on its
-      # own regardless and needs no deploy-gate claim to justify keeping
-      # this step informational.
+      # CORRECTION (kept from before the gate flip): this comment used to
+      # also justify the above by claiming "Railway's GitHub integration
+      # waits for check suites before deploying the API." That claim is
+      # unevidenced and likely wrong — see the concurrency comment above
+      # and docs/DEPLOYMENT.md §2a: a production deployment has been
+      # observed starting TWO SECONDS after a push, before any check suite
+      # here could possibly have concluded. Whether this suite's result
+      # affects the deploy at all stays UNESTABLISHED and needs no
+      # deploy-gate claim to justify the step being required now — the
+      # gate's own run history does that.
       #
       # Needs no infrastructure of its own (no services: block) — apps/web
       # never talks to Postgres/Redis/MinIO directly (root CLAUDE.md §2),
       # confirmed by this same job already building @bmpl/web above with
-      # none running. `retries` is deliberately left at the config default
-      # of 0, not raised for CI: a flake here cannot be retried past to
-      # protect a gate we have no evidence this step gates, and retrying
-      # until green would hide a real intermittent defect behind a false
-      # green — exactly the failure shape this floor spent 2026-09-26
-      # finding five separate instances of.
-      - name: Browser tests (BMPL-217, informational)
+      # none running. `retries` is 1 in CI, NOT the config default of 0 —
+      # see apps/web/playwright.config.ts's own MDF-906 comment: a test
+      # that fails then passes on retry is reported FLAKY, not silently
+      # retried-until-green and not a FAILURE either, so
+      # `steps.e2e.outcome` alone cannot distinguish a clean run from a
+      # flaky one (this is also why the FIN-BROWSER-STEP upload step below
+      # checks `always()`, not `outcome == 'failure'`, for its evidence).
+      # The gate's actual instrument is `passed + skipped + flaky == 151`
+      # (this suite's exact shape) together with zero failed AND zero
+      # flaky — a bare "0 failed" would let a flaky run through undetected,
+      # exactly the failure shape this floor spent 2026-09-26 finding five
+      # separate instances of.
+      - name: Browser tests (BMPL-217, required as of MDF-906)
         id: e2e
-        continue-on-error: true
         run: pnpm --filter @bmpl/web test:e2e
 
       # FIN-BROWSER-STEP: `steps.e2e.outcome == 'failure'` alone never fires
