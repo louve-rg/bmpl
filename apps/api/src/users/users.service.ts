@@ -843,6 +843,19 @@ export class UsersService {
       data: { status: 'ENDED', endedAt: new Date() },
     });
 
+    // TERMINAL-MANAGER-FLOOR-STALE-VOTE, hygiene fold-in: a deleted
+    // super-admin's own UserRole row otherwise stays APPROVED forever.
+    // Harmless to the anti-lockout guard above and to countActiveManagers'
+    // sibling guard in terminal.service.ts — both already filter on this
+    // user's own `status` — but the row still asserts a false "approved,
+    // active admin" fact about a deactivated account. Same convention as
+    // the terminal-membership end above and as `AdminService`'s own
+    // role-status transition (admin.service.ts): REVOKED + revokedAt.
+    await tx.userRole.updateMany({
+      where: { userId, roleCode: 'SUPER_ADMIN', status: 'APPROVED' },
+      data: { status: 'REVOKED', revokedAt: new Date(), statusReason: 'Account deleted.' },
+    });
+
     const driver = await tx.driverProfile.findUnique({
       where: { userId },
       select: { id: true, profilePhotoKey: true },

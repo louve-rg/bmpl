@@ -392,6 +392,14 @@ describe('account deletion — refusals', () => {
       .set('Cookie', cookies)
       .send({ currentPassword: password });
     expect(allowed.status).toBe(200);
+
+    // TERMINAL-MANAGER-FLOOR-STALE-VOTE hygiene fold-in: deletion must not
+    // leave the deleted admin's own UserRole row sitting at APPROVED.
+    const revokedRole = await ctx.prisma.userRole.findUniqueOrThrow({
+      where: { userId_roleCode: { userId: admin.id, roleCode: 'SUPER_ADMIN' } },
+    });
+    expect(revokedRole.status).toBe('REVOKED');
+    expect(revokedRole.revokedAt).not.toBeNull();
   });
 
   it('refuses when the caller (as customer) has an order still being fulfilled or delivered', async () => {
