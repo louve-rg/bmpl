@@ -331,6 +331,105 @@ describe('POST /wallet/transfers', () => {
     expect(senderBalance.availableMinor).toBe(3_500);
   });
 
+  // MDF-1148 finding A. Stanley's acceptance walk on main found the receipt
+  // AND the generic transaction-detail route both serialising the raw
+  // `transfer:<senderUserId>:<idempotencyKey>` reference — handing the
+  // recipient the sender's internal user id and idempotency key. This pins
+  // the fix: a short opaque code, identical on both routes and both sides,
+  // and the raw string never appearing anywhere in either response.
+  it('the reference is a short opaque code — never the sender\'s internal id or idempotency key, identical on both sides and on the transaction-detail route', async () => {
+    const { sender, recipient } = await pair('reference-leak');
+    await fund(sender.userId, 5_000);
+    const key = randomUUID();
+    const r = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 700, idempotencyKey: key });
+    expect(r.status).toBe(201);
+
+    expect(r.body.reference).toMatch(/^BML-W[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{7}$/);
+    expect(r.body.reference).not.toContain(sender.userId);
+    expect(r.body.reference).not.toContain(key);
+
+    const recipientReceipt = await get(recipient.cookies, `wallet/transfers/${r.body.transactionId}`);
+    expect(recipientReceipt.body.reference).toBe(r.body.reference);
+
+    // The generic detail route, shared by every other transaction type —
+    // Stanley found this one leaking too, not only the dedicated receipt.
+    const senderDetail = await get(sender.cookies, `wallet/transactions/${r.body.transactionId}`);
+    expect(senderDetail.status).toBe(200);
+    expect(senderDetail.body.reference).toBe(r.body.reference);
+
+    const rawInternalReference = `transfer:${sender.userId}:${key}`;
+    expect(JSON.stringify(r.body)).not.toContain(rawInternalReference);
+    expect(JSON.stringify(senderDetail.body)).not.toContain(rawInternalReference);
+  });
+
+  // MDF-1148 finding B. Stanley found that reusing a key with a DIFFERENT
+  // amount or recipient silently returned the ORIGINAL receipt (replayed:
+  // true) instead of being refused — the API confidently handing back a
+  // receipt for a transfer that was never made. Overruled upward by god as
+  // the owner's own named failure mode ("never treat a frontend success
+  // message as proof money moved") one layer down in the backend.
+  describe('the same idempotencyKey reused for a different amount or recipient', () => {
+    it('is refused (409), not silently answered with the original receipt — amount mismatch', async () => {
+      const { sender, recipient } = await pair('mismatch-amount');
+      await fund(sender.userId, 5_000);
+      const key = randomUUID();
+      const first = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 1_000, idempotencyKey: key });
+      expect(first.status).toBe(201);
+
+      const second = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 2_000, idempotencyKey: key });
+      expect(second.status).toBe(409);
+      // The caller just proved they don't know what this key actually did —
+      // the refusal must not teach them the original amount.
+      expect(second.body.message).not.toMatch(/1[,.]?000/);
+
+      // No second movement: still exactly the one transfer, for 1,000.
+      expect(await transferCountFor(sender.userId)).toBe(1);
+      const senderBalance = await balanceOf(sender.userId, sender.cookies);
+      expect(senderBalance.availableMinor).toBe(4_000);
+    });
+
+    it('is refused (409), not silently answered with the original receipt — recipient mismatch', async () => {
+      const { sender, recipient } = await pair('mismatch-recipient');
+      const other = await registerCustomer(`xfer_other_${uniq()}@example.bz`);
+      await fund(sender.userId, 5_000);
+      const key = randomUUID();
+      const first = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 1_000, idempotencyKey: key });
+      expect(first.status).toBe(201);
+
+      const second = await transfer(sender.cookies, { recipientUserId: other.userId, amountMinor: 1_000, idempotencyKey: key });
+      expect(second.status).toBe(409);
+      expect(second.body.message).not.toContain(recipient.userId);
+
+      expect(await transferCountFor(sender.userId)).toBe(1);
+    });
+
+    // The one thing that could go wrong fixing the above: a byte-equal retry
+    // — Oscar's web client retries a dropped connection with the identical
+    // key AND body on purpose — must still replay successfully. The sharpest
+    // version of that check: the sender's OWN first transfer, if it spent
+    // their entire balance, must not make their own safe retry of it look
+    // like a mismatch or get re-evaluated against a balance it already
+    // changed.
+    it('a BYTE-EQUAL retry still replays successfully even after it spent the sender\'s entire balance', async () => {
+      const { sender, recipient } = await pair('retry-after-exhausted');
+      await fund(sender.userId, 5_000);
+      const key = randomUUID();
+      const body = { recipientUserId: recipient.userId, amountMinor: 5_000, idempotencyKey: key };
+
+      const first = await transfer(sender.cookies, body);
+      expect(first.status).toBe(201);
+      const afterFirst = await balanceOf(sender.userId, sender.cookies);
+      expect(afterFirst.availableMinor).toBe(0);
+
+      const retry = await transfer(sender.cookies, body);
+      expect(retry.status).toBe(200);
+      expect(retry.body.replayed).toBe(true);
+      expect(retry.body.transactionId).toBe(first.body.transactionId);
+
+      expect(await transferCountFor(sender.userId)).toBe(1);
+    });
+  });
+
   it('refuses when the sender wallet is LOCKED', async () => {
     const { sender, recipient } = await pair('sender-locked');
     await fund(sender.userId, 5_000);

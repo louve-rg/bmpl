@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 import { assertBalanced, assertMoneyMovementEnabled, buildTransfer, signedAmount, type DraftTransaction } from '@bmpl/wallet';
 import type { Currency, Prisma, WalletAccount, WalletAccountType } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -32,7 +33,12 @@ export const ADMIN_TEST_CREDIT_WINDOW_MS = 10_000;
  * WALLET-P2P-API. Shaped from the CALLER's point of view — the sender sees
  * SENT plus the recipient's name, the recipient sees RECEIVED plus the
  * sender's name. `counterpartyName` is "First L." only; nothing else about
- * the other party ever leaves the server through this shape.
+ * the other party ever leaves the server through this shape — including
+ * `reference`, which until MDF-1148 was found to violate exactly this: it
+ * carried the OTHER party's internal user id and idempotency key, raw. It
+ * is now an opaque, generated-for-display code (`uniquePublicReference`),
+ * never derived from either party's identity or key material, so stating
+ * this invariant and having it hold are the same thing again.
  */
 export interface TransferReceipt {
   transactionId: string;
@@ -104,10 +110,17 @@ export class WalletService {
    * balances. `reference` is unique → duplicate posts collide (P2002), giving
    * ledger-level idempotency. `enabled` gates real money movement (M12 passes
    * true only for the sanctioned customer↔escrow operations).
+   *
+   * MDF-1148 (finding A): `reference` is whatever shape the caller needed for
+   * ITS OWN collision-safety (for a transfer, literally
+   * `transfer:<senderUserId>:<idempotencyKey>`) and must never be sent to a
+   * client. `publicReference`, generated here for EVERY posted transaction
+   * regardless of type, is the one that can be — see `uniquePublicReference`.
    */
   async postTransaction(tx: Tx, draft: DraftTransaction & { reference: string }, enabled: boolean, isTest = false) {
     assertMoneyMovementEnabled(enabled); // hard gate — off for foundation phases
     assertBalanced(draft); // throws LedgerError unless debits == credits, net 0
+    const publicReference = await this.uniquePublicReference(tx);
     const transaction = await tx.walletTransaction.create({
       data: {
         type: draft.type,
@@ -116,6 +129,7 @@ export class WalletService {
         // Inherited from the account owner by the caller, never from a request.
         isTest,
         reference: draft.reference,
+        publicReference,
         description: draft.description ?? null,
         postedAt: new Date(),
         entries: { create: draft.lines.map((l) => ({ accountId: l.accountId, direction: l.direction, amountMinor: l.amountMinor })) },
@@ -126,6 +140,33 @@ export class WalletService {
       await tx.walletAccount.update({ where: { id: line.accountId }, data: { cachedBalanceMinor: { increment: signedAmount(line) } } });
     }
     return transaction;
+  }
+
+  /**
+   * A short, human-quotable reference for anything this service posts — the
+   * value a customer or support agent can actually read out, as opposed to
+   * `reference` above, which is the idempotency write-guard and must never
+   * leave the server. Same alphabet and collision discipline as every other
+   * `BML-…` reference in this repo (shipment tracking codes, passenger
+   * ticket/booking codes): a reference names exactly one thing anywhere in
+   * the product, so — matching exactly how a ticket/booking reference also
+   * checks against `shipment` — this checks uniqueness against `shipment`
+   * too, not only against this table. A shipment's own reference is 8 FREE
+   * characters with no fixed sub-letter, so it could otherwise coincide with
+   * the fixed `W` this format always starts with.
+   */
+  private async uniquePublicReference(tx: Tx): Promise<string> {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const body = Array.from({ length: 7 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
+      const reference = `BML-W${body}`;
+      const [asTransaction, asShipment] = await Promise.all([
+        tx.walletTransaction.findUnique({ where: { publicReference: reference }, select: { id: true } }),
+        tx.shipment.findUnique({ where: { reference }, select: { id: true } }),
+      ]);
+      if (!asTransaction && !asShipment) return reference;
+    }
+    throw new BadRequestException('Could not allocate a transaction reference. Please try again.');
   }
 
   // ---- Funding ----
@@ -554,10 +595,13 @@ export class WalletService {
    *      balance is read, so two opposite-direction transfers racing the
    *      same pair of wallets serialise instead of deadlocking.
    *   3. Idempotent on `reference = transfer:<senderUserId>:<idempotencyKey>`
-   *      — `WalletTransaction.reference`'s own unique index. A replay with
-   *      the same key collides (P2002) and gets back the ORIGINAL receipt,
-   *      never a second movement and never a raw 500 — same shape as
-   *      `adminTestCredit`'s P2002 handling above.
+   *      — `WalletTransaction.reference`'s own unique index. A BYTE-EQUAL
+   *      retry with the same key replays the ORIGINAL receipt, never a
+   *      second movement and never a raw 500 — same shape as
+   *      `adminTestCredit`'s P2002 handling above. MDF-1148 (finding B): the
+   *      same key reused for a DIFFERENT amount or recipient is REFUSED
+   *      (409), not silently answered with the wrong receipt — see
+   *      `resolveTransferReplay`.
    *
    * `isTest` is read from the SENDER's funds (`isTestFunded`), never from
    * the request and never from either party's own `User.isTest` flag — the
@@ -584,6 +628,21 @@ export class WalletService {
     if (!recipient) throw new NotFoundException('Unknown recipient.');
 
     const reference = `transfer:${senderUserId}:${dto.idempotencyKey}`;
+
+    // MDF-1148 (finding B): resolved BEFORE taking any lock or re-checking
+    // balance. A plain sequential retry — Oscar's web client retries a
+    // dropped connection with the identical key AND body on purpose
+    // (`CONFIRM_RETRY_DELAYS_MS`, apps/web/app/wallet/send/page.tsx) — must
+    // replay successfully even if the sender's balance has since moved
+    // (including to exactly zero, the case the original transfer itself
+    // would have left it in); checking the balance again first would
+    // refuse that retry as "insufficient", which is the wrong answer to a
+    // transfer that already succeeded. A mismatched reuse is refused here
+    // too, which covers the common (non-racing) case of Stanley's finding.
+    const early = await this.resolveTransferReplay(reference, amountMinor, dto.recipientUserId);
+    if (early) {
+      return this.shapeTransferReceipt(early.transactionId, senderUserId, true);
+    }
 
     let replay = false;
     const result = await this.prisma
@@ -650,15 +709,16 @@ export class WalletService {
         return { transactionId: txn.id };
       })
       .catch(async (err: unknown) => {
-        // Same shape as adminTestCredit's own P2002 handling: a losing
-        // racer on the unique reference is an idempotent REPLAY of a
-        // transfer that already posted, not an error and not a second
-        // movement — hand back the transaction that actually won.
+        // A genuine RACE on the unique reference — two requests reached the
+        // insert concurrently and both passed the early check above before
+        // either had written anything. The loser resolves it exactly the
+        // same way the early check does (match → replay, mismatch → 409),
+        // since by the time we get here the winner has already committed.
         if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
-          const existing = await this.prisma.walletTransaction.findUnique({ where: { reference }, select: { id: true } });
+          const existing = await this.resolveTransferReplay(reference, amountMinor, dto.recipientUserId);
           if (existing) {
             replay = true;
-            return { transactionId: existing.id };
+            return existing;
           }
         }
         throw err;
@@ -710,9 +770,61 @@ export class WalletService {
   }
 
   /** "First L." — first name plus last-initial only. Nothing else about a
-   *  counterparty ever leaves the server through a transfer-related response. */
+   *  counterparty ever leaves the server through a transfer-related
+   *  response — see `TransferReceipt`'s own doc comment for the one place
+   *  this was false (MDF-1148) and what makes it true again. */
   private displayName(u: { firstName: string; lastName: string }): string {
     return `${u.firstName} ${u.lastName.charAt(0)}.`;
+  }
+
+  /**
+   * MDF-1148 (finding B). Looks up whatever already posted under this
+   * transfer `reference`, if anything, and decides what that means for THIS
+   * request:
+   *
+   *   - no row posted yet          → null, caller proceeds to post normally.
+   *   - row posted, SAME amount
+   *     and SAME recipient         → `{ transactionId }` — a byte-equal
+   *                                   retry; replay it, no new work, no
+   *                                   balance re-check.
+   *   - row posted, a DIFFERENT
+   *     amount or recipient        → throws ConflictException. The same key
+   *                                   was already used for a different
+   *                                   transfer; refused, not silently
+   *                                   answered with the wrong receipt. The
+   *                                   message never states the original
+   *                                   amount or counterparty — the caller
+   *                                   has just proven they don't know what
+   *                                   this key actually did.
+   *
+   * Deliberately compares ONLY amount and recipient, never `note` — a
+   * legitimate retry of an otherwise-identical request must never be
+   * refused over something like whitespace/trim differences in free text.
+   *
+   * Called twice from `transferFunds`: once BEFORE the posting transaction
+   * (the common case — a plain sequential retry, resolved without ever
+   * re-checking the sender's balance, which may have genuinely moved since
+   * the original post), and once from the `$transaction`'s own `.catch` for
+   * the rarer genuine concurrent race, where two requests both passed the
+   * first check before either had written anything. Same logic both times —
+   * this is the only place that logic lives.
+   */
+  private async resolveTransferReplay(
+    reference: string,
+    amountMinor: bigint,
+    recipientUserId: string,
+  ): Promise<{ transactionId: string } | null> {
+    const existing = await this.prisma.walletTransaction.findUnique({
+      where: { reference },
+      select: { id: true, entries: { select: { direction: true, amountMinor: true, account: { select: { userId: true } } } } },
+    });
+    if (!existing) return null;
+    const credit = existing.entries.find((e) => e.direction === 'CREDIT');
+    const matches = !!credit && credit.amountMinor === amountMinor && credit.account.userId === recipientUserId;
+    if (!matches) {
+      throw new ConflictException('This request key was already used for a different transfer.');
+    }
+    return { transactionId: existing.id };
   }
 
   /** Shared by `transferFunds` (a fresh post or a replay) and
@@ -737,7 +849,10 @@ export class WalletService {
     });
     return {
       transactionId: t.id,
-      reference: t.reference,
+      // MDF-1148 finding A: NEVER t.reference — that is the sender's
+      // idempotency key, raw. publicReference is the opaque, support-quotable
+      // stand-in, identical for both sides since both read the same row.
+      reference: t.publicReference,
       direction: mine.direction === 'CREDIT' ? 'RECEIVED' : 'SENT',
       amountMinor: money(mine.amountMinor),
       currency: t.currency,
@@ -1028,7 +1143,7 @@ export class WalletService {
    *   of "some user's wallet rather than a system account".
    */
   private shape(t: {
-    id: string; type: string; status: string; currency: string; isTest: boolean; reference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
+    id: string; type: string; status: string; currency: string; isTest: boolean; publicReference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
     entries: Array<{ id: string; direction: string; amountMinor: bigint; account: { type: string; userId: string | null } }>;
   }, viewerUserId?: string) {
     return {
@@ -1040,7 +1155,11 @@ export class WalletService {
       // UAT credit from a real movement at a glance, and the description alone
       // ("Self-Service Test Credit") relies on reading the words carefully.
       isTest: t.isTest,
-      reference: t.reference,
+      // MDF-1148 finding A: never the raw idempotency `reference` column —
+      // see `postTransaction`'s own comment. This is the generic detail
+      // shape `getForUser`/`adminList` both route through, same rule as
+      // `shapeTransferReceipt`.
+      reference: t.publicReference,
       description: t.description,
       postedAt: t.postedAt,
       createdAt: t.createdAt,
