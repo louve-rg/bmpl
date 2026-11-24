@@ -215,15 +215,22 @@ export default function SendMoneyPage() {
         )}
 
         {receipt ? (
-          <Card className="mt-6 p-5 sm:p-6">
+          <Card className="mt-6 p-5 sm:p-6" data-testid="send-money-receipt">
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Sent</p>
-            <p className="mt-1 break-words text-3xl font-bold tabular-nums text-belize-navy">{bzd(receipt.amountMinor)}</p>
+            <p
+              className="mt-1 break-words text-3xl font-bold tabular-nums text-belize-navy"
+              data-testid="send-money-receipt-amount"
+            >
+              {bzd(receipt.amountMinor)}
+            </p>
             <p className="mt-1 text-sm text-slate-600">to {receipt.counterpartyName}</p>
 
             <dl className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm">
               <div className="flex justify-between gap-3">
                 <dt className="text-slate-500">Reference</dt>
-                <dd className="break-all text-right font-mono text-xs text-slate-600">{receipt.reference}</dd>
+                <dd className="break-all text-right font-mono text-xs text-slate-600" data-testid="send-money-receipt-reference">
+                  {receipt.reference}
+                </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-slate-500">Status</dt>
@@ -252,13 +259,18 @@ export default function SendMoneyPage() {
             )}
 
             <div className="mt-5 flex flex-wrap gap-2">
-              <Link href="/wallet" className="min-h-[44px] inline-flex items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">
+              <Link
+                href="/wallet"
+                className="min-h-[44px] inline-flex items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700"
+                data-testid="send-money-back-to-wallet"
+              >
                 Back to wallet
               </Link>
               <button
                 type="button"
                 onClick={startNewAttempt}
                 className="min-h-[44px] inline-flex items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700"
+                data-testid="send-money-send-another"
               >
                 Send another
               </button>
@@ -275,7 +287,12 @@ export default function SendMoneyPage() {
               safe to do more than once.
             </p>
             <div className="mt-4">
-              <Button onClick={() => void confirm()} disabled={confirming} className="min-h-[44px]">
+              <Button
+                onClick={() => void confirm()}
+                disabled={confirming}
+                className="min-h-[44px]"
+                data-testid="send-money-check-again"
+              >
                 {confirming ? 'Checking…' : 'Check again'}
               </Button>
             </div>
@@ -283,11 +300,13 @@ export default function SendMoneyPage() {
         ) : (
           <>
             {/* 1. Recipient */}
-            <Card className="mt-6 p-5 sm:p-6">
+            <Card className="mt-6 p-5 sm:p-6" data-testid="send-money-recipient-card">
               <h2 className="text-sm font-semibold text-belize-navy">Who are you sending to?</h2>
               {recipient ? (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-medium text-slate-900">Sending to {recipient.displayName}</p>
+                  <p className="text-sm font-medium text-slate-900" data-testid="send-money-recipient-name">
+                    Sending to {recipient.displayName}
+                  </p>
                   <button
                     type="button"
                     onClick={() => {
@@ -295,6 +314,7 @@ export default function SendMoneyPage() {
                       setEmail('');
                     }}
                     className="text-sm font-semibold text-belize-blue hover:underline"
+                    data-testid="send-money-change-recipient"
                   >
                     Change
                   </button>
@@ -318,6 +338,7 @@ export default function SendMoneyPage() {
                     onClick={() => void lookupRecipient()}
                     disabled={lookingUp || !email.trim()}
                     className="mt-3 min-h-[44px] w-full sm:w-auto"
+                    data-testid="send-money-find-recipient"
                   >
                     {lookingUp ? <Spinner className="h-4 w-4" /> : 'Find recipient'}
                   </Button>
@@ -327,7 +348,7 @@ export default function SendMoneyPage() {
 
             {/* 2. Amount */}
             {recipient && (
-              <Card className="mt-4 p-5 sm:p-6">
+              <Card className="mt-4 p-5 sm:p-6" data-testid="send-money-amount-card">
                 <h2 className="text-sm font-semibold text-belize-navy">How much?</h2>
                 {availableMinor != null && (
                   <p className="mt-1 text-sm text-slate-600">Available to send: {bzd(availableMinor)}</p>
@@ -365,16 +386,20 @@ export default function SendMoneyPage() {
 
             {/* 3. Review */}
             {canReview && (
-              <Card className="mt-4 p-5 sm:p-6">
+              <Card className="mt-4 p-5 sm:p-6" data-testid="send-money-review-card">
                 <h2 className="text-sm font-semibold text-belize-navy">Review</h2>
                 <dl className="mt-3 space-y-1.5 text-sm">
                   <div className="flex justify-between gap-3">
                     <dt className="text-slate-500">To</dt>
-                    <dd className="break-words text-right font-medium">{recipient.displayName}</dd>
+                    <dd className="break-words text-right font-medium" data-testid="send-money-review-recipient">
+                      {recipient.displayName}
+                    </dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-slate-500">Amount</dt>
-                    <dd className="font-medium tabular-nums">{bzd(amountMinor)}</dd>
+                    <dd className="font-medium tabular-nums" data-testid="send-money-review-amount">
+                      {bzd(amountMinor)}
+                    </dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-slate-500">Transfer fee</dt>
@@ -382,7 +407,9 @@ export default function SendMoneyPage() {
                   </div>
                   <div className="flex justify-between gap-3 border-t border-slate-100 pt-1.5">
                     <dt className="font-semibold text-belize-navy">Total debit</dt>
-                    <dd className="font-bold tabular-nums text-belize-navy">{bzd(amountMinor)}</dd>
+                    <dd className="font-bold tabular-nums text-belize-navy" data-testid="send-money-review-total">
+                      {bzd(amountMinor)}
+                    </dd>
                   </div>
                 </dl>
 
@@ -392,7 +419,12 @@ export default function SendMoneyPage() {
                   </Alert>
                 )}
 
-                <Button onClick={() => void confirm()} disabled={confirming} className="mt-4 min-h-[48px] w-full">
+                <Button
+                  onClick={() => void confirm()}
+                  disabled={confirming}
+                  className="mt-4 min-h-[48px] w-full"
+                  data-testid="send-money-confirm-button"
+                >
                   {confirming ? 'Sending…' : `Send ${bzd(amountMinor)}`}
                 </Button>
               </Card>

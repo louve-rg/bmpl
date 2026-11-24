@@ -297,6 +297,8 @@ export default function WalletPage() {
                           // two people, which `/wallet/[id]` was never built to hide.
                           href={t.type === 'TRANSFER' ? `/wallet/transfers/${t.id}` : `/wallet/${t.id}`}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-blue/40 hover:shadow-bmpl-md"
+                          data-testid="wallet-transaction-row"
+                          data-transaction-type={t.type}
                         >
                           <div className="min-w-0">
                             <p className="break-words text-sm font-medium text-slate-900">{describeTransaction(t)}</p>
@@ -311,6 +313,7 @@ export default function WalletPage() {
                             className={`shrink-0 text-sm font-semibold tabular-nums ${
                               t.direction === 'IN' ? 'text-emerald-700' : 'text-slate-900'
                             }`}
+                            data-testid="wallet-transaction-amount"
                           >
                             {t.direction === 'IN' ? '+' : '−'}
                             {bzd(Math.abs(t.signedMinor))}
