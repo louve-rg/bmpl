@@ -1207,7 +1207,16 @@ model WalletTransaction {
   /// bookkeeping over money that simply does not represent anything.
   isTest      Boolean                 @default(false)
   currency    Currency                @default(BZD)
-  reference   String? // external/idempotency reference
+  reference   String? // external/idempotency reference — the write-guard (@@unique below). NEVER serialised to a client; see publicReference.
+  // MDF-1148 (finding A). The reference above embeds whatever the poster
+  // chose to make it collision-safe for ITS OWN purpose — for a transfer,
+  // literally `transfer:<senderUserId>:<idempotencyKey>` — so it can never
+  // safely leave the server. This is the one that can: generated once per
+  // posted transaction (see WalletService.postTransaction), short, opaque,
+  // human-quotable, and reveals nothing about either party or the
+  // idempotency key. Null only for a transaction posted before this column
+  // existed.
+  publicReference String? @unique
   description String?
   metadata    Json?
   postedAt    DateTime?
