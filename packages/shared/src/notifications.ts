@@ -88,6 +88,10 @@ export const NOTIFICATION_EVENTS = [
   'DELIVERY_CANCELLED',
   'DELIVERY_PROOF_AVAILABLE',
   'DELIVERY_EXCEPTION_RAISED',
+  // Wallet P2P transfers (WALLET-P2P-RECEIVED-NOTIFICATION) — distinct from
+  // PAYMENT_AUTHORIZED above, which is a marketplace checkout; this is money
+  // arriving from another user's wallet, not a purchase.
+  'WALLET_TRANSFER_RECEIVED',
   // vendor
   'VENDOR_NEW_ORDER',
   'VENDOR_APPROVED',

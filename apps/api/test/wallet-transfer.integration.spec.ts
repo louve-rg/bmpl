@@ -184,6 +184,33 @@ describe('POST /wallet/transfers', () => {
     expect(recipientReceipt.body).toMatchObject({ direction: 'RECEIVED', amountMinor: 4_000, counterpartyName: 'Pamela B.' });
   });
 
+  it('notifies the recipient exactly once per transfer, never the sender, and a replay does not notify again', async () => {
+    const { sender, recipient } = await pair('notify');
+    await fund(sender.userId, 5_000);
+    const key = randomUUID();
+
+    const recipientNotifications = () =>
+      ctx.prisma.notification.findMany({ where: { event: 'WALLET_TRANSFER_RECEIVED', recipients: { some: { userId: recipient.userId } } } });
+    const senderNotifications = () =>
+      ctx.prisma.notification.findMany({ where: { event: 'WALLET_TRANSFER_RECEIVED', recipients: { some: { userId: sender.userId } } } });
+
+    const r = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 1_000, idempotencyKey: key });
+    expect(r.status).toBe(201);
+
+    const after = await recipientNotifications();
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ category: 'PAYMENT', type: 'SYSTEM' });
+    expect(await senderNotifications()).toHaveLength(0);
+
+    // Same idempotencyKey — hits the P2002 replay branch, not a fresh post
+    // (see transferFunds's own comment: a notification is written in-tx with
+    // the ledger post, so a replay that skips the post must not notify again).
+    const replay = await transfer(sender.cookies, { recipientUserId: recipient.userId, amountMinor: 1_000, idempotencyKey: key });
+    expect(replay.status).toBe(200);
+    expect(replay.body.replayed).toBe(true);
+    expect(await recipientNotifications()).toHaveLength(1);
+  });
+
   it('refuses when the sender does not have enough available balance', async () => {
     const { sender, recipient } = await pair('insufficient');
     await fund(sender.userId, 1_000);
