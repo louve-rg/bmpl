@@ -627,7 +627,20 @@ describe('B. P2P transfer contract — reconciliation after real transfers', () 
 describe('C. adversarial — concurrent transfers against the same wallet', () => {
   it('N concurrent transfers draining a wallet that can cover only ONE of them: exactly one succeeds, invariants hold', async (t) => {
     const sender = await makeTestCustomer('race-drain-sender');
-    const recipients = await Promise.all([1, 2, 3, 4, 5].map((i) => makeTestCustomer(`race-drain-r${i}`)));
+    // Fixture setup is deliberately SEQUENTIAL, not Promise.all(x5) — the
+    // property under test is 5 simultaneous TRANSFER requests, not 5
+    // simultaneous REGISTRATIONS. Firing registration concurrently here was
+    // this test's own confound: under -t isolation (the very first requests
+    // this process makes) it reliably ECONNRESET'd inside AuthService.register
+    // itself — "Transaction API error: Transaction not found... obtained
+    // before disconnecting" logged server-side — a real, pre-existing
+    // concurrency fragility in registration's own $transaction under 5-way
+    // contention, UNRELATED to wallet transfers or Pam's code (reported to
+    // god separately; not fixed here, out of this file's boundary). Removing
+    // the concurrency this test never needed is the correct scoped fix on
+    // this side, not a retry and not a timeout widened to hide it.
+    const recipients = [];
+    for (const i of [1, 2, 3, 4, 5]) recipients.push(await makeTestCustomer(`race-drain-r${i}`));
     const STAKE = 10_00;
     await fund(sender.cookies, STAKE); // enough for exactly ONE of the five
 
