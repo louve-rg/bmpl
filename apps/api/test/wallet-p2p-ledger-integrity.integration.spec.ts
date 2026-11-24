@@ -56,6 +56,16 @@
  * this card's explicit boundary. No production data, no real money:
  * WALLET_MONEY_MOVEMENT_ENABLED stays false and every fixture account here is
  * isTest.
+ *
+ * A note on `-t` filtering, since root CLAUDE.md warns against it for an
+ * integration spec whose tests share state: that warning does not apply to
+ * THIS file. Every `it` here builds its own fixtures through
+ * `makeTestCustomer(unique label)` / `registerCustomer` — nothing is set up
+ * by one test and read by a later one through a shared `let`. `-t` only ever
+ * skips tests here, it never starves one of state another test was
+ * responsible for creating, which is exactly the condition under which
+ * filtering a single test for a fast, isolated repro (used while diagnosing
+ * the ECONNRESET below) is safe rather than a false proof.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
