@@ -80,8 +80,11 @@ export default function TransferReceiptPage() {
               </Alert>
             )}
 
-            <Card className="p-5 sm:p-6">
-              <p className={`text-3xl font-bold tabular-nums ${receipt.direction === 'RECEIVED' ? 'text-emerald-700' : 'text-belize-navy'}`}>
+            <Card className="p-5 sm:p-6" data-testid="transfer-receipt-card">
+              <p
+                className={`text-3xl font-bold tabular-nums ${receipt.direction === 'RECEIVED' ? 'text-emerald-700' : 'text-belize-navy'}`}
+                data-testid="transfer-receipt-amount"
+              >
                 {receipt.direction === 'RECEIVED' ? '+' : '−'}
                 {bzd(receipt.amountMinor)}
               </p>
@@ -89,11 +92,15 @@ export default function TransferReceiptPage() {
               <dl className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm">
                 <div className="flex justify-between gap-3">
                   <dt className="text-slate-500">{receipt.direction === 'SENT' ? 'To' : 'From'}</dt>
-                  <dd className="break-words text-right font-medium">{receipt.counterpartyName}</dd>
+                  <dd className="break-words text-right font-medium" data-testid="transfer-receipt-counterparty">
+                    {receipt.counterpartyName}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-slate-500">Reference</dt>
-                  <dd className="break-all text-right font-mono text-xs text-slate-600">{receipt.reference}</dd>
+                  <dd className="break-all text-right font-mono text-xs text-slate-600" data-testid="transfer-receipt-reference">
+                    {receipt.reference}
+                  </dd>
                 </div>
                 {receipt.note && (
                   <div className="flex justify-between gap-3">
