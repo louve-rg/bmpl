@@ -403,7 +403,22 @@ test(
     // avoids both.
     await expect(sender.page.getByText(`Sent to ${recipientName}`)).toBeVisible();
     await expect(sender.page.getByTestId('transfer-receipt-amount')).toHaveText('−BZ$8.00');
-    await expect(sender.page.getByTestId('transfer-receipt-reference')).toContainText('transfer:');
+    // Assert the SHAPE of the reference, not a literal "transfer:" prefix --
+    // Pam is replacing the current reference (which embeds the sender's own
+    // internal user id, a privacy leak Stanley found) with an opaque
+    // publicReference-backed value. Pinning "transfer:" would pin the bug,
+    // not the requirement, and would go red on a fix that is an improvement.
+    // This pins the actual invariant: a reference is rendered, and it never
+    // contains the sender's internal id, in either the old or new shape.
+    // CONFIRMED RED against the current, pre-fix build (2026-11-23, this
+    // worktree): the live reference really is "transfer:<senderUserId>:
+    // <idempotencyKey>", so this assertion independently reproduces the leak
+    // Stanley found in code, from the browser. It is expected to go GREEN
+    // once her fix lands -- that is the point of pinning the invariant
+    // instead of the current string.
+    const referenceText = (await sender.page.getByTestId('transfer-receipt-reference').textContent()) ?? '';
+    expect(referenceText.trim().length, 'receipt must render a non-empty reference').toBeGreaterThan(0);
+    expect(referenceText, "a receipt reference must never leak the sender's internal user id").not.toContain(sender.userId);
     await expect(
       sender.page
         .locator('main')
