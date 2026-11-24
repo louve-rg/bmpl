@@ -419,10 +419,14 @@ test(
     const referenceText = (await sender.page.getByTestId('transfer-receipt-reference').textContent()) ?? '';
     expect(referenceText.trim().length, 'receipt must render a non-empty reference').toBeGreaterThan(0);
     expect(referenceText, "a receipt reference must never leak the sender's internal user id").not.toContain(sender.userId);
+    // Rendered date is "23-Nov-2026, 17:06" -- a 3-letter month abbreviation,
+    // not a full month name and not a pure numeric DD/DD. Matching on the
+    // 3-letter prefix catches both abbreviated and full month names; the
+    // numeric alternative stays for any locale that renders digits-only.
     await expect(
       sender.page
         .locator('main')
-        .getByText(/\d{1,2}[/,-]\d{1,2}|january|february|march|april|may|june|july|august|september|october|november|december/i),
+        .getByText(/\d{1,2}[/,-]\d{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i),
     ).toBeVisible();
     // Transfers post synchronously with no pending state (DECIDED, not
     // tested: no pending state at all) -- status is always POSTED
