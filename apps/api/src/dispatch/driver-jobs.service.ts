@@ -76,10 +76,14 @@ const LIST_INCLUDE = {
 type DeliveryListRow = Prisma.OrderDeliveryGetPayload<{ include: typeof LIST_INCLUDE }>;
 
 /**
- * Rows needed for the claim-fallback list (MDF-18). Separate from
- * LIST_INCLUDE: this one also carries the order's `userId` (never shown —
- * only used to exclude a driver's own order) and `isTest`, neither of
- * which LIST_INCLUDE's own callers need.
+ * Rows needed to CLAIM a delivery (MDF-18). Separate from LIST_INCLUDE: this
+ * one also carries the order's `userId` (never shown — only used to exclude a
+ * driver's own order) and `isTest`, neither of which LIST_INCLUDE's own
+ * callers need.
+ *
+ * EDW-P3: the claim-fallback LIST this used to serve now lives in
+ * UnclaimedJobsService, which answers it for both dispatch surfaces. This
+ * include remains for `claim()` itself, the one caller left.
  */
 const CLAIMABLE_INCLUDE = {
   vendorOrder: {
@@ -98,8 +102,6 @@ const CLAIMABLE_INCLUDE = {
     },
   },
 } satisfies Prisma.OrderDeliveryInclude;
-
-type ClaimableRow = Prisma.OrderDeliveryGetPayload<{ include: typeof CLAIMABLE_INCLUDE }>;
 
 /**
  * Driver job feed + operational transitions. A driver only ever sees/acts on
@@ -452,7 +454,12 @@ export class DriverJobService {
         data: { status: 'DRIVER_DECLINED', declinedAt: new Date(), declineReason: dto.reason, assignedDriverProfileId: null, assignedVehicleId: null, offerExpiresAt: null },
       });
       if (cleared.count === 0) return false;
-      await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } }, data: { status: 'DECLINED', respondedAt: new Date(), endedAt: new Date(), declineReason: dto.reason } });
+      // EDW-P3: the driver answered, so this row is an explicit pass — the one
+      // case that keeps the delivery out of their Available list once
+      // automatic dispatch is exhausted. It still shows in their Unclaimed
+      // list, and they can still claim it from there: Edward's ruling is that
+      // a driver who passed may reconsider, not that they are barred.
+      await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } }, data: { status: 'DECLINED', respondedAt: new Date(), endedAt: new Date(), declineReason: dto.reason, resolution: 'DECLINED_BY_DRIVER' } });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'ASSIGNED', toStatus: 'DRIVER_DECLINED', event: 'DECLINE', actorRole: 'DRIVER', actorUserId: actor.userId, note: dto.reason });
       await this.core.auditTransition('DECLINE', actor.userId, deliveryId, { reason: dto.reason }, tx);
       // The vendor is told; the admin who assigned is told only when there WAS
@@ -484,48 +491,13 @@ export class DriverJobService {
   // ---- claim fallback (MDF-18) --------------------------------------------
 
   /**
-   * Deliveries automatic dispatch has already given up on
-   * (`dispatchExhaustedAt` set — `DispatchEngineService.markExhausted`'s own
-   * considered statement that the retry budget is spent), narrowed to
-   * exactly the ones THIS driver is already a legitimate candidate for.
-   *
-   * Pull-only and deliberately separate from `listJobs`/`queue` — nothing
-   * here is ever merged into the push feed, so a driver has to come
-   * looking for stuck work rather than have it appear alongside an offer.
-   * Automatic dispatch is completely untouched by this list existing.
+   * EDW-P3: the exhausted-job pool that used to be computed here now lives in
+   * `UnclaimedJobsService`, which answers it for BOTH dispatch surfaces and
+   * knows which of those jobs this driver explicitly passed on. This method
+   * and its `summarizeClaimable` partner were removed rather than left beside
+   * it: two queries for one list is how Available and Unclaimed would have
+   * drifted apart. `GET /driver/jobs/claimable` now reads that service.
    */
-  async claimableJobs(userId: string) {
-    const profileId = await this.myProfileId(userId);
-    const exhausted = await this.prisma.orderDelivery.findMany({
-      // Both statuses dispatch()'s own dispatchable-status guard treats as
-      // open — see the CLAIM action's own comment in packages/shared/dispatch.ts.
-      where: { status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] }, dispatchExhaustedAt: { not: null }, assignedDriverProfileId: null, ...notOwnOrder(userId) },
-      orderBy: { dispatchExhaustedAt: 'asc' },
-      take: 50,
-      include: CLAIMABLE_INCLUDE,
-    });
-    if (exhausted.length === 0) return [];
-
-    // Same per-driver concurrent-job cap the engine's own ranker enforces
-    // (DispatchSettings.maxConcurrentPerDriver) — otherwise a driver could
-    // pull manually past a limit automatic dispatch would never have
-    // offered them. Checked once here, not per candidate.
-    const settings = await this.engine.settings();
-    const activeJobs = await this.drivers.activeJobCount(profileId);
-    if (activeJobs >= settings.maxConcurrentPerDriver) return [];
-
-    const claimable = [];
-    for (const d of exhausted) {
-      const district = d.vendorOrder.order.addresses[0]?.district;
-      if (!district) continue; // nobody can be a legitimate candidate without one
-      const e = await this.drivers.assignmentEligibility(profileId, district, undefined, {
-        isTestDelivery: d.vendorOrder.order.isTest,
-        city: d.vendorOrder.order.addresses[0]?.city ?? null,
-      });
-      if (e.eligible) claimable.push(this.summarizeClaimable(d));
-    }
-    return claimable;
-  }
 
   /**
    * A driver pulls a delivery automatic dispatch has already given up on.
@@ -634,20 +606,6 @@ export class DriverJobService {
       throw new ConflictException('This delivery was just claimed or reassigned — reload and try again.');
     }
     return this.getJob(actor.userId, deliveryId);
-  }
-
-  private summarizeClaimable(d: ClaimableRow) {
-    const address = d.vendorOrder.order.addresses[0] ?? null;
-    return {
-      id: d.id,
-      orderNumber: d.vendorOrder.order.orderNumber,
-      vendor: d.vendorOrder.vendorProfile.businessName,
-      itemCount: d.vendorOrder.itemCount,
-      city: address?.city ?? null,
-      district: address?.district ?? null,
-      feeMinor: Number(d.feeMinor),
-      dispatchExhaustedAt: d.dispatchExhaustedAt,
-    };
   }
 
   async confirmPickup(actor: Actor, deliveryId: string, dto: ConfirmPickupInput) {

@@ -23,6 +23,7 @@ import {
 } from '@bmpl/shared';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
+import { UnclaimedJobsService } from './unclaimed-jobs.service';
 
 /** Statuses a driver still has work to do on. Shared by both job kinds. */
 const OPEN: DeliveryStatus[] = [...DRIVER_OPEN_STATUSES];
@@ -111,7 +112,14 @@ function notOwnLeg(userId: string): Prisma.ShipmentLegWhereInput {
 
 @Injectable()
 export class DriverJobFeedService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // EDW-P3: the one owner of "which exhausted jobs may this driver see, and
+    // did they pass on them", for both dispatch surfaces. Injected rather
+    // than re-queried here so the Available tab and the Unclaimed list cannot
+    // disagree about which jobs exist.
+    private readonly unclaimed: UnclaimedJobsService,
+  ) {}
 
   private async myProfileId(userId: string): Promise<string> {
     const p = await this.prisma.driverProfile.findUnique({ where: { userId }, select: { id: true } });
@@ -119,7 +127,20 @@ export class DriverJobFeedService {
     return p.id;
   }
 
-  /** Every job in one of the four views, both kinds, in one ordering. */
+  /**
+   * Every job in one of the four views, both kinds, in one ordering.
+   *
+   * EDW-P3: `available` is the one view that is NOT purely "jobs assigned to
+   * me". Once automatic dispatch has cycled through every eligible driver
+   * without anybody accepting, the job belongs in the Available list of every
+   * still-eligible driver who did not explicitly pass on it — including a
+   * driver whose offer expired, one who never saw the notification, and one
+   * who only became eligible after the rotation ended. That composition is
+   * made HERE, on the server, from stored facts; the client is never asked to
+   * merge two lists or re-derive who passed. `assigned`, `active`,
+   * `completed`, `open` and `all` are unchanged and still mean "work this
+   * driver holds".
+   */
   async list(userId: string, scope: DriverDeliveryView | 'open' | 'all' = 'open'): Promise<DriverJobSummary[]> {
     const profileId = await this.myProfileId(userId);
     const [deliveries, legs] = await Promise.all([
@@ -136,6 +157,15 @@ export class DriverJobFeedService {
     ]);
 
     const jobs = [...deliveries.map((d) => this.fromDelivery(d)), ...legs.map((l) => this.fromLeg(l))];
+    if (scope === 'available') {
+      // Outstanding offers first — they are the only items with a clock on
+      // them, and `compareDriverJobs` already sorts them that way — then the
+      // claimable pool, longest-waiting first, in the order the pool service
+      // returned it. A claim has no deadline, so it must never push a live
+      // offer down the list.
+      jobs.sort(compareDriverJobs);
+      return [...jobs, ...(await this.unclaimed.availableFromPool(userId))];
+    }
     // Completed work reads best newest-first; open work oldest-first, because the
     // thing that has been waiting longest is the thing to do.
     return scope === 'completed'
@@ -143,7 +173,13 @@ export class DriverJobFeedService {
       : jobs.sort(compareDriverJobs);
   }
 
-  /** Tab badges, counted across both kinds in one round trip each. */
+  /**
+   * Tab badges, counted across both kinds in one round trip each.
+   *
+   * EDW-P3: the `available` badge counts the same thing `list('available')`
+   * returns, claimable pool included. A badge that disagreed with the tab it
+   * labels is exactly the dishonesty MDF-1074 was raised for.
+   */
   async counts(userId: string): Promise<Record<DriverDeliveryView, number>> {
     const profileId = await this.myProfileId(userId);
     const [deliveries, legs] = await Promise.all([
@@ -180,6 +216,7 @@ export class DriverJobFeedService {
       const view = driverViewForStatus(row.courierStatus as DeliveryStatus, row.acceptedAt);
       if (view) counts[view] += row._count._all;
     }
+    counts.available += await this.unclaimed.availableFromPoolCount(userId);
     return counts;
   }
 

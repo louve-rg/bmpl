@@ -486,7 +486,15 @@ export class DispatchEngineService {
       if (expired.count === 0) return false;
       await tx.deliveryAssignment.updateMany({
         where: { orderDeliveryId: deliveryId, status: 'ACTIVE' },
-        data: { status: 'DECLINED', endedAt: new Date(), endReason: 'Offer expired' },
+        // EDW-P3: `resolution` is what makes this row readable as a lapse
+        // rather than a refusal. `status` stays DECLINED — every existing
+        // reader of it keeps its current meaning — and `endReason` keeps its
+        // existing note; what changes is that nobody has to infer the
+        // difference from a missing `respondedAt` or a sentence any driver
+        // could have typed. A driver whose offer timed out has not refused
+        // this delivery, and must not be excluded from their Available list
+        // as though they had.
+        data: { status: 'DECLINED', endedAt: new Date(), endReason: 'Offer expired', resolution: 'EXPIRED' },
       });
       await this.core.appendTimeline(tx, deliveryId, {
         fromStatus: 'ASSIGNED',
