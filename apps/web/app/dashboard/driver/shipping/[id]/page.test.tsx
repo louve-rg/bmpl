@@ -387,8 +387,12 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
     expect(el.querySelector('#code')).toBeNull();
   });
 
-  it('still asks for both the code and who took it at handoff, unchanged', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'ARRIVING', nextActionLabel: 'Confirm handoff' }));
+  it('still asks for both the code and who took it at a door handoff (LAST_MILE), unchanged', async () => {
+    // EDW-P4: FIRST_MILE/ARRIVING is now the terminal "present, don't type"
+    // case (see the describe block below) — this is the genuinely-unchanged
+    // case, a LAST_MILE leg delivering to the recipient's own door, where
+    // the courier really does enter someone else's code.
+    apiGet.mockResolvedValue(shippingJob({ status: 'ARRIVING', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm handoff' }));
     const el = await mount();
 
     expect(el.textContent).toContain('Finish the handover');
@@ -712,6 +716,110 @@ describe('DriverShippingJobPage — the courier sees his own pickup code collect
     expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
     expect(el.textContent).not.toContain('Present your code to terminal staff');
     expect(el.textContent).not.toContain('Collection code');
+  });
+});
+
+/**
+ * EDW-P4 (Edward, client-reported): the courier is shown his own code to
+ * PRESENT at a terminal, but this screen also still offered a code-ENTRY
+ * field and a confirm button for the exact same stage — wrong, since
+ * completing that step is terminal staff's own action, not this screen's.
+ * Fixed in `actionFor` (now jobKind-aware) rather than in the component
+ * tree, so the fix applies to both terminal "present" moments at once and
+ * leaves every OTHER needsCode case (proven above, MDF-560/717) untouched.
+ */
+describe('DriverShippingJobPage — no code-entry field or confirm button while presenting at a terminal (EDW-P4)', () => {
+  const FIXTURE_CODE = 'TEST-CODE-4001';
+
+  it('a FIRST_MILE leg at ARRIVING: no entry field, no confirm button, shows a waiting state instead', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+    );
+    const el = await mount();
+
+    // The code is still shown, to present.
+    expect(el.textContent).toContain(FIXTURE_CODE);
+    // But nothing here lets the courier type it in or confirm anything.
+    expect(el.querySelector('#code')).toBeNull();
+    expect(el.querySelector('#who')).toBeNull();
+    expect(el.textContent).not.toContain('Finish the handover');
+    expect(el.textContent).not.toContain('Confirm handoff');
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm handoff')).toBe(false);
+    // A proper waiting state, not silence.
+    expect(el.querySelector('[data-testid="awaiting-terminal-staff"]')).not.toBeNull();
+    expect(el.textContent).toContain('Waiting for terminal staff to confirm');
+    // Still has a way out of the screen.
+    const back = Array.from(el.querySelectorAll('a')).find((a) => a.textContent === 'Back to my deliveries');
+    expect(back).toBeTruthy();
+  });
+
+  it('never calls the handoff endpoint for a FIRST_MILE leg at ARRIVING — there is no button left to trigger it', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+    );
+    await mount();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('a LAST_MILE leg at DRIVER_ACCEPTED: no entry field even if requiresPickupPin were wrongly true — the terminal release gate is unconditional', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', requiresPickupPin: true, nextActionLabel: 'Confirm pickup' })),
+    );
+    const el = await mount();
+
+    expect(el.querySelector('#code')).toBeNull();
+    expect(el.querySelector('#who')).toBeNull();
+    expect(el.textContent).not.toContain('Collection code');
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm pickup')).toBe(false);
+    expect(el.querySelector('[data-testid="awaiting-terminal-staff"]')).not.toBeNull();
+  });
+
+  it('an open exception at this same stage shows the exception banner, not the waiting state', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', legStatus: 'EXCEPTION', nextActionLabel: 'Confirm handoff' })),
+    );
+    const el = await mount();
+
+    expect(el.textContent).toContain('This leg has an open issue');
+    expect(el.querySelector('[data-testid="awaiting-terminal-staff"]')).toBeNull();
+  });
+
+  it('polls for an update while waiting, and stops once the stage moves on', async () => {
+    vi.useFakeTimers();
+    try {
+      let status = 'ARRIVING';
+      apiGet.mockImplementation((path: string) =>
+        path.endsWith('/code')
+          ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
+          : Promise.resolve(shippingJob({ status, jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+      );
+      await mount();
+      const callsBeforePoll = apiGet.mock.calls.length;
+
+      // Staff record the handoff on their own screen between polls.
+      status = 'COMPLETED';
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(apiGet.mock.calls.length).toBeGreaterThan(callsBeforePoll);
+
+      const callsAfterAdvance = apiGet.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30000);
+      });
+      // No longer awaiting (status moved on) — no further polling.
+      expect(apiGet.mock.calls.length).toBe(callsAfterAdvance);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
