@@ -488,6 +488,32 @@ export default function TerminalWorkspacePage() {
   const [releaseForms, setReleaseForms] = useState<Record<string, string>>({});
   const [collectForms, setCollectForms] = useState<Record<string, { code: string; collectedByName: string }>>({});
 
+  // EDW-P2 requirement 3: a handoff must not commit on the first click. The
+  // row's own reference/parcel/from/brought-by context (already on screen,
+  // see QueueRowCard) is what staff are meant to check -- so this is an
+  // INLINE second step, not a window.confirm() modal, which would paint
+  // over exactly that context. First click (with pin/name already filled)
+  // only flips the row into this state; the second click is the real POST.
+  const [handoffConfirming, setHandoffConfirming] = useState<Record<string, boolean>>({});
+
+  // EDW-P2 requirement 4: the one feedback state this screen never gave --
+  // a successful handoff used to just make the row vanish. Same pattern as
+  // driver/jobs/page.tsx's own `notice` (EDW-P3): a transient, dismiss-on-
+  // timeout Alert, not a persistent banner that would outlive its own
+  // relevance once the queue moves on.
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
+  const handoffNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (handoffNoticeTimer.current) clearTimeout(handoffNoticeTimer.current);
+    };
+  }, []);
+  function showHandoffNotice(message: string) {
+    setHandoffNotice(message);
+    if (handoffNoticeTimer.current) clearTimeout(handoffNoticeTimer.current);
+    handoffNoticeTimer.current = setTimeout(() => setHandoffNotice(null), 6000);
+  }
+
   const loadWorkspace = useCallback(async () => {
     setWorkspaceErr(null);
     setNoMembership(false);
@@ -688,11 +714,40 @@ export default function TerminalWorkspacePage() {
     }
   }
 
-  async function handoff(legId: string) {
+  // EDW-P2 requirement 3: the first click only asks for confirmation; it
+  // never posts. `reference` is captured from the row the staff member is
+  // actually looking at (passed by the caller, not re-derived here) so the
+  // eventual success notice can name it even after refreshAfterAction()
+  // below removes the row this leg came from.
+  function requestHandoffConfirm(legId: string) {
+    const form = handoffForms[legId] ?? { pin: '', receivedByName: '' };
+    if (!form.pin.trim() || !form.receivedByName.trim()) {
+      setRowErr((prev) => ({ ...prev, [legId]: 'Enter the code presented and who is receiving it.' }));
+      return;
+    }
+    clearRowState(legId);
+    setHandoffConfirming((prev) => ({ ...prev, [legId]: true }));
+  }
+
+  function cancelHandoffConfirm(legId: string) {
+    setHandoffConfirming((prev) => {
+      const { [legId]: _drop, ...rest } = prev;
+      return rest;
+    });
+  }
+
+  async function handoff(legId: string, reference: string) {
     const form = handoffForms[legId] ?? { pin: '', receivedByName: '' };
     const pin = form.pin.trim();
     const receivedByName = form.receivedByName.trim();
     if (!pin || !receivedByName) {
+      // Can only happen if the confirm step is somehow reached with an
+      // emptied form (e.g. the leg's own state changed underneath it) --
+      // refuse rather than post an incomplete request.
+      setHandoffConfirming((prev) => {
+        const { [legId]: _drop, ...rest } = prev;
+        return rest;
+      });
       setRowErr((prev) => ({ ...prev, [legId]: 'Enter the code presented and who is receiving it.' }));
       return;
     }
@@ -704,8 +759,17 @@ export default function TerminalWorkspacePage() {
         const { [legId]: _drop, ...rest } = prev;
         return rest;
       });
+      setHandoffConfirming((prev) => {
+        const { [legId]: _drop, ...rest } = prev;
+        return rest;
+      });
+      showHandoffNotice(`Received ${reference}.`);
       await refreshAfterAction();
     } catch (e) {
+      setHandoffConfirming((prev) => {
+        const { [legId]: _drop, ...rest } = prev;
+        return rest;
+      });
       setRowErr((prev) => ({ ...prev, [legId]: errMessage(e, 'Could not record this handoff.') }));
     } finally {
       setBusy(null);
@@ -849,13 +913,16 @@ export default function TerminalWorkspacePage() {
               error={rowErr[row.action === 'COLLECT' ? row.shipmentId : row.legId]}
               handoffForm={row.action === 'HANDOFF' ? handoffForms[row.legId] : undefined}
               onHandoffChange={(next) => setHandoffForms((prev) => ({ ...prev, [row.action === 'HANDOFF' ? row.legId : '']: next }))}
+              handoffConfirming={row.action === 'HANDOFF' ? (handoffConfirming[row.legId] ?? false) : false}
               releaseValue={row.action === 'RELEASE_TO_COURIER' ? releaseForms[row.legId] : undefined}
               onReleaseChange={(v) => setReleaseForms((prev) => ({ ...prev, [row.action === 'RELEASE_TO_COURIER' ? row.legId : '']: v }))}
               collectForm={row.action === 'COLLECT' ? collectForms[row.shipmentId] : undefined}
               onCollectChange={(next) => setCollectForms((prev) => ({ ...prev, [row.action === 'COLLECT' ? row.shipmentId : '']: next }))}
               onDepart={depart}
               onArrive={arrive}
-              onHandoff={handoff}
+              onHandoff={requestHandoffConfirm}
+              onHandoffConfirm={row.action === 'HANDOFF' ? () => handoff(row.legId, row.reference) : () => {}}
+              onHandoffCancel={cancelHandoffConfirm}
               onRelease={release}
               onCollect={collect}
             />
@@ -933,6 +1000,14 @@ export default function TerminalWorkspacePage() {
           here; Lookup (below) already finds one specific shipment by its
           reference, which is the one action a clerk can already take on an
           item this page isn't showing. */}
+      {/* EDW-P2 requirement 4: the one feedback state the Hand-off queue
+          never gave -- a successful receipt used to just make the row
+          vanish, with nothing distinguishing it from the row simply moving
+          to a different tab's filter. Not scoped to `onQueueTab`: staff can
+          switch tabs within the 6s window and the confirmation should still
+          reach them. */}
+      {handoffNotice && <Alert tone="success">{handoffNotice}</Alert>}
+
       {rows && queueHasMore && onQueueTab && (
         <Alert tone="neutral">
           There are more parcels waiting than the list below shows. Use Lookup to find a specific one by its reference or tracking number.
@@ -1157,6 +1232,7 @@ function QueueRowCard({
   error,
   handoffForm,
   onHandoffChange,
+  handoffConfirming,
   releaseValue,
   onReleaseChange,
   collectForm,
@@ -1164,6 +1240,8 @@ function QueueRowCard({
   onDepart,
   onArrive,
   onHandoff,
+  onHandoffConfirm,
+  onHandoffCancel,
   onRelease,
   onCollect,
 }: {
@@ -1173,6 +1251,7 @@ function QueueRowCard({
   error?: string;
   handoffForm: { pin: string; receivedByName: string } | undefined;
   onHandoffChange: (next: { pin: string; receivedByName: string }) => void;
+  handoffConfirming: boolean;
   releaseValue: string | undefined;
   onReleaseChange: (v: string) => void;
   collectForm: { code: string; collectedByName: string } | undefined;
@@ -1180,6 +1259,8 @@ function QueueRowCard({
   onDepart: (legId: string) => void;
   onArrive: (legId: string) => void;
   onHandoff: (legId: string) => void;
+  onHandoffConfirm: () => void;
+  onHandoffCancel: (legId: string) => void;
   onRelease: (legId: string) => void;
   onCollect: (shipmentId: string) => void;
 }) {
@@ -1250,6 +1331,7 @@ function QueueRowCard({
                   id={`handoff-pin-${row.legId}`}
                   value={handoffForm?.pin ?? ''}
                   onChange={(e) => onHandoffChange({ pin: e.target.value, receivedByName: handoffForm?.receivedByName ?? '' })}
+                  disabled={handoffConfirming}
                   inputMode="numeric"
                   className="w-full font-mono text-base sm:w-28"
                   placeholder="1234"
@@ -1260,12 +1342,30 @@ function QueueRowCard({
                   id={`handoff-who-${row.legId}`}
                   value={handoffForm?.receivedByName ?? ''}
                   onChange={(e) => onHandoffChange({ pin: handoffForm?.pin ?? '', receivedByName: e.target.value })}
+                  disabled={handoffConfirming}
                   placeholder="Who is receiving it"
                 />
               </Field>
-              <Button onClick={() => onHandoff(row.legId)} disabled={isBusy} className="w-full sm:w-auto">
-                {isBusy ? 'Recording…' : 'Record handoff'}
-              </Button>
+              {/* EDW-P2 requirement 3: an inline second step, not a
+                  window.confirm() modal -- a modal would paint over the
+                  reference/parcel/from/brought-by context above, which is
+                  exactly what staff are meant to be checking before they
+                  commit. The row stays fully visible; only the action
+                  itself gains a second click. */}
+              {handoffConfirming ? (
+                <>
+                  <Button onClick={onHandoffConfirm} disabled={isBusy} className="w-full sm:w-auto">
+                    {isBusy ? 'Recording…' : `Confirm receipt of ${row.reference}?`}
+                  </Button>
+                  <Button variant="outline" onClick={() => onHandoffCancel(row.legId)} disabled={isBusy} className="w-full sm:w-auto">
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => onHandoff(row.legId)} disabled={isBusy} className="w-full sm:w-auto">
+                  Record handoff
+                </Button>
+              )}
             </div>
           </>
         )}
