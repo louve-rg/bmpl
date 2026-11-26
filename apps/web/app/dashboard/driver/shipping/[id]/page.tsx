@@ -170,8 +170,25 @@ const errMessage = (e: unknown) => (e as ApiError)?.message ?? 'Something went w
  * mirrors that: only handoff's schema (`legHandoffSchema`) has a
  * `receivedByName` field at all — pickup's (`legPickupSchema`) is pin-only,
  * so a pickup confirmation must never send that field.
+ *
+ * EDW-P4 (Edward, client-reported): `DRIVER_ACCEPTED` and `ARRIVING` are each
+ * shared by two very different moments for the SAME courier — a door leg,
+ * where the courier genuinely enters someone else's code, and a terminal
+ * leg, where `showsOwnHandoffCode` (lib/driver-shipping-job.ts) already shows
+ * the courier his OWN code to present. Only `jobKind` tells those apart (see
+ * that function's own doc). Both terminal cases return no action at all here
+ * — not because there's nothing happening, but because the thing that
+ * happens next is terminal staff's own "Record handoff" / "Release to
+ * courier" action (apps/web/app/dashboard/terminal/page.tsx), never this
+ * screen's. For LAST_MILE/DRIVER_ACCEPTED this also matches the API's own
+ * unconditional refusal (shipment-driver.service.ts: a leg held at a hub
+ * 400s `/pickup` regardless of pin) — asserted here defensively rather than
+ * trusted to `requiresPickupPin` alone, which was never scoped to this case.
+ * FIRST_MILE/ARRIVING has no equivalent backend guard yet (reported to
+ * god/Pam, not fixed here — apps/api is out of scope for this change).
  */
 function actionFor(
+  jobKind: 'FIRST_MILE' | 'LAST_MILE',
   status: string,
   requiresPickupPin: boolean,
 ): { path: string; needsCode?: boolean; needsReceivedBy?: boolean } | null {
@@ -179,12 +196,14 @@ function actionFor(
     case 'ASSIGNED':
       return { path: 'accept' };
     case 'DRIVER_ACCEPTED':
+      if (jobKind === 'LAST_MILE') return null;
       return { path: 'pickup', needsCode: requiresPickupPin };
     case 'PICKUP_CONFIRMED':
       return { path: 'in-transit' };
     case 'IN_TRANSIT':
       return { path: 'arriving' };
     case 'ARRIVING':
+      if (jobKind === 'FIRST_MILE') return null;
       return { path: 'handoff', needsCode: true, needsReceivedBy: true };
     default:
       return null;
@@ -335,9 +354,25 @@ export default function DriverShippingJobPage() {
   }, [job?.id, job?.jobKind, job?.status]);
 
   const blocked = job ? isExceptionBlocked(job) : false;
-  const action = job && !blocked ? actionFor(job.status, job.requiresPickupPin ?? false) : null;
+  const action = job && !blocked ? actionFor(job.jobKind, job.status, job.requiresPickupPin ?? false) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
   const reportState = job ? reportIssueState(job.status, reportedReason !== null) : 'unavailable';
+  // EDW-P4: true for exactly the two terminal "present, don't type" moments
+  // once there is genuinely nothing left for the courier's OWN screen to do
+  // but wait — not merely whenever showsOwnHandoffCode is true, since an
+  // open exception (blocked) explains itself with its own banner instead.
+  const awaitingTerminalStaff = job !== null && !blocked && action === null && showsOwnHandoffCode(job.jobKind, job.status);
+
+  // Poll while waiting on a terminal action neither this screen nor this
+  // driver can perform — the only way this screen finds out staff recorded
+  // the handoff/release is a fresh GET, there is no push channel here.
+  useEffect(() => {
+    if (!awaitingTerminalStaff) return;
+    const timer = setInterval(() => {
+      void load();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [awaitingTerminalStaff, load]);
 
   async function run() {
     if (!job || !action) return;
@@ -624,6 +659,18 @@ export default function DriverShippingJobPage() {
                   <p className="mt-1 text-2xl font-bold tracking-[0.3em] text-[color:var(--bmpl-text)]">
                     {ownCode ?? (ownCodeLoading ? '· · · ·' : '—')}
                   </p>
+                  {/* EDW-P4: no entry field, no confirm button here — this
+                      screen cannot complete this step. The only thing left
+                      is for terminal staff to record it on their own screen,
+                      which this page finds out about by polling (above). */}
+                  {awaitingTerminalStaff && (
+                    <p
+                      data-testid="awaiting-terminal-staff"
+                      className="mt-3 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]"
+                    >
+                      <Spinner className="h-4 w-4" /> Waiting for terminal staff to confirm…
+                    </p>
+                  )}
                 </>
               ) : (
                 <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
