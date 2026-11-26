@@ -73,8 +73,9 @@ describe('CodeLookupPanel', () => {
     expect(el.textContent).not.toMatch(/other terminal|elsewhere|different (hub|location|terminal)/i);
   });
 
-  it('directs to the reference-based Lookup tab when too many parcels match', () => {
+  it('directs to the reference-based Lookup tab when too many parcels match, with the concrete threshold (6+ renders tooMany, 1-5 lists candidates)', () => {
     const { el } = renderPanel({ kind: 'tooMany' });
+    expect(el.textContent).toContain('More than 5 parcels');
     expect(el.textContent).toContain('shipment reference');
     expect(el.textContent).toContain('Lookup tab');
   });
@@ -102,42 +103,53 @@ describe('CodeLookupPanel', () => {
    * can defeat, but the test still proves the three allowed fields render
    * and nothing else is invented in their place.
    */
-  it('renders a found candidate with only reference, parcel and origin -- never a person name', () => {
-    const { el, onSelectCandidate } = renderPanel({
-      kind: 'found',
-      candidates: [{ legId: 'leg_1', reference: 'BML-42', parcel: '1 parcel', from: 'Belize City Hub' }],
-    });
+  const belizeCity = { legId: 'leg_1', reference: 'BML-42', parcel: '1 parcel', from: 'Belize City Hub', hub: { code: 'BZE', name: 'Belize City Hub' }, arrivedAt: '2026-11-26T14:00:00.000Z', locked: false };
+  const sanPedro = { legId: 'leg_2', reference: 'BML-43', parcel: '2 parcels', from: 'San Pedro Hub', hub: { code: 'SPR', name: 'San Pedro Hub' }, arrivedAt: null, locked: false };
+
+  it('renders a found candidate with reference, parcel, origin, current hub and arrival -- never a person name (Q7/Q8: hub is required because a result can span two terminals)', () => {
+    const { el, onSelectCandidate } = renderPanel({ kind: 'found', candidates: [belizeCity] });
     expect(el.textContent).toContain('BML-42');
     expect(el.textContent).toContain('1 parcel');
     expect(el.textContent).toContain('From Belize City Hub');
+    expect(el.textContent).toContain('BZE');
+    expect(el.textContent).toContain('Arrived');
 
     const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Use this one')!;
     act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    expect(onSelectCandidate).toHaveBeenCalledWith({ legId: 'leg_1', reference: 'BML-42', parcel: '1 parcel', from: 'Belize City Hub' });
+    expect(onSelectCandidate).toHaveBeenCalledWith(belizeCity);
   });
 
-  it('renders every candidate when more than one is returned, each independently selectable', () => {
-    const { el, onSelectCandidate } = renderPanel({
-      kind: 'found',
-      candidates: [
-        { legId: 'leg_1', reference: 'BML-42', parcel: '1 parcel', from: 'Belize City Hub' },
-        { legId: 'leg_2', reference: 'BML-43', parcel: '2 parcels', from: 'San Pedro Hub' },
-      ],
-    });
+  it('renders "Not yet arrived" when a candidate has not arrived at its current hub', () => {
+    const { el } = renderPanel({ kind: 'found', candidates: [sanPedro] });
+    expect(el.textContent).toContain('Not yet arrived');
+  });
+
+  it('renders every candidate when more than one is returned (up to 5), each independently selectable', () => {
+    const { el, onSelectCandidate } = renderPanel({ kind: 'found', candidates: [belizeCity, sanPedro] });
     expect(el.textContent).toContain('BML-42');
     expect(el.textContent).toContain('BML-43');
 
     const buttons = Array.from(el.querySelectorAll('button')).filter((b) => b.textContent === 'Use this one');
     expect(buttons).toHaveLength(2);
     act(() => buttons[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    expect(onSelectCandidate).toHaveBeenCalledWith({ legId: 'leg_2', reference: 'BML-43', parcel: '2 parcels', from: 'San Pedro Hub' });
+    expect(onSelectCandidate).toHaveBeenCalledWith(sanPedro);
+  });
+
+  it('a locked candidate shows why and cannot be selected (Q7: locked is derived, never the raw attempt count)', () => {
+    const locked = { ...belizeCity, locked: true };
+    const { el, onSelectCandidate } = renderPanel({ kind: 'found', candidates: [locked] });
+    expect(el.textContent).toContain('Locked');
+    expect(el.textContent).toContain('admin override');
+    expect(el.textContent).not.toMatch(/\d+ (of|\/) ?\d+ attempts|attempt \d/i);
+
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Use this one') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onSelectCandidate).not.toHaveBeenCalled();
   });
 
   it('selecting a candidate only reports the choice -- it never renders anything claiming the parcel has been received', () => {
-    const { el } = renderPanel({
-      kind: 'found',
-      candidates: [{ legId: 'leg_1', reference: 'BML-42', parcel: '1 parcel', from: 'Belize City Hub' }],
-    });
+    const { el } = renderPanel({ kind: 'found', candidates: [belizeCity] });
     expect(el.textContent).not.toMatch(/received|confirmed|accepted/i);
   });
 
