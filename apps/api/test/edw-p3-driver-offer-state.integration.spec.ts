@@ -48,8 +48,11 @@ const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
+// `claim.claimPath` comes back root-relative with a leading slash and no
+// `/api` prefix — the form the web client's own helper takes — so this strips
+// one leading slash rather than producing `/api//driver/...`.
 const post = (c: string[], p: string, b: object | string = {}) =>
-  request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+  request(ctx.server).post(`/api/${p.replace(/^\//, '')}`).set('Cookie', c).send(b);
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const patch = (c: string[], p: string, b: object = {}) =>
   request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
@@ -360,10 +363,12 @@ describe('EDW-P3 storage — an expiry and an explicit pass are now different ro
     expect(passedRow.status).toBe('DECLINED');
     expect(expiredRow.resolution).toBe('EXPIRED');
     expect(passedRow.resolution).toBe('DECLINED_BY_DRIVER');
-    // The leg sweeper's expiry note lives in the SAME column a driver's own
-    // reason uses, which is exactly why the text could never be the
-    // discriminator.
-    expect(expiredRow.declineReason).toBe('Offer expired.');
+    // The leg sweeper used to write "Offer expired." into the SAME column a
+    // driver's own reason uses, which is exactly why the text could never be
+    // the discriminator. It writes nothing there now: `declineReason` means
+    // only what a driver actually said, and an expiry is the case where
+    // nobody said anything.
+    expect(expiredRow.declineReason).toBeNull();
     expect(passedRow.declineReason).toBe('Not today');
   });
 
@@ -403,6 +408,11 @@ describe('EDW-P3 matrix (M) — marketplace delivery, after the rotation is exha
     const row = lists.unclaimed.find((j) => j.id === deliveryId)!;
     expect(row.claim.youPassed).toBe(true);
     expect(row.claim.inAvailableJobs).toBe(false);
+    // The exact literal the driver app posts verbatim (PR #901 consumes
+    // `claim.claimPath` as-is through a helper that prepends the API base):
+    // root-relative, leading slash, no `/api`. Pinned because a drift here
+    // breaks the frontend silently rather than loudly.
+    expect(row.claim.claimPath).toBe(`/driver/jobs/${deliveryId}/claim`);
 
     // Edward's point: a driver who passed may reconsider.
     expect((await post(driver.cookies, row.claim.claimPath)).status).toBe(201);
@@ -540,6 +550,8 @@ describe('EDW-P3 matrix (L) — shipment courier leg, after the rotation is exha
     expect(row!.claim.youPassed).toBe(true);
     expect(row!.claim.inAvailableJobs).toBe(false);
     expect(row!.kind).toBe('DIRECT');
+    // Same literal shape as the delivery row, on the leg route (PR #901).
+    expect(row!.claim.claimPath).toBe(`/driver/jobs/legs/${legId}/claim`);
 
     expect((await post(driver.cookies, row!.claim.claimPath)).status).toBe(201);
     const after = await legOf(legId);
@@ -559,7 +571,19 @@ describe('EDW-P3 matrix (L) — shipment courier leg, after the rotation is exha
     const lists = await listsFor(driver.cookies);
     expect(idsOf(lists.available)).toContain(legId);
     expect(idsOf(lists.unclaimed)).toContain(legId);
-    expect(lists.unclaimed.find((j) => j.id === legId)!.claim.youPassed).toBe(false);
+    const row = lists.unclaimed.find((j) => j.id === legId)! as unknown as {
+      reference: string; load: string; pickup: { area: string | null }; dropoff: { area: string | null };
+      claim: { youPassed: boolean; dispatchExhaustedAt: string };
+    };
+    expect(row.claim.youPassed).toBe(false);
+    // The four fields the driver app renders for a courier leg (PR #901),
+    // asserted here so the contract it was built against is pinned by a test
+    // against the real response rather than by prose.
+    expect(row.reference).toMatch(/^EDW3-/);
+    expect(row.load).toBeTruthy();
+    expect(row.pickup.area).toBeTruthy();
+    expect(row.dropoff.area).toBeTruthy();
+    expect(row.claim.dispatchExhaustedAt).toBeTruthy();
     expect((await post(driver.cookies, `driver/jobs/legs/${legId}/claim`)).status).toBe(201);
   });
 
@@ -678,8 +702,11 @@ describe('EDW-P3 concurrency — exactly one winner, no double assignment', () =
       ctx.prisma,
       racers.map((r) => () => post(r.cookies, `driver/jobs/${deliveryId}/claim`)),
     );
-    const wins = probe.responses.filter((r) => r.status === 201);
-    expect(wins, `statuses: ${probe.responses.map((r) => r.status).join(',')}`).toHaveLength(1);
+    const statuses = probe.responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 201), `statuses: ${statuses.join(',')}`).toHaveLength(1);
+    // Every loser is told the job moved on, not handed a 500 or a silent
+    // second assignment.
+    expect(statuses.filter((s) => s === 409), `statuses: ${statuses.join(',')}`).toHaveLength(racers.length - 1);
     const after = await deliveryOf(deliveryId);
     expect(after.status).toBe('ASSIGNED');
     expect(racers.map((r) => r.driverProfileId)).toContain(after.assignedDriverProfileId);
@@ -699,8 +726,9 @@ describe('EDW-P3 concurrency — exactly one winner, no double assignment', () =
       ctx.prisma,
       racers.map((r) => () => post(r.cookies, `driver/jobs/legs/${legId}/claim`)),
     );
-    const wins = probe.responses.filter((r) => r.status === 201);
-    expect(wins, `statuses: ${probe.responses.map((r) => r.status).join(',')}`).toHaveLength(1);
+    const statuses = probe.responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 201), `statuses: ${statuses.join(',')}`).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409), `statuses: ${statuses.join(',')}`).toHaveLength(racers.length - 1);
     const after = await legOf(legId);
     expect(after.courierStatus).toBe('ASSIGNED');
     expect(racers.map((r) => r.driverProfileId)).toContain(after.assignedDriverProfileId);
@@ -837,6 +865,67 @@ describe('EDW-P3 concurrency — exactly one winner, no double assignment', () =
     expect(idsOf(second.available)).toEqual(idsOf(first.available));
     expect(idsOf(second.unclaimed)).toEqual(idsOf(first.unclaimed));
     expect(second.unclaimed.find((j) => j.id === passed.deliveryId)!.claim.youPassed).toBe(true);
+  });
+
+  it('C10 one driver claiming from Available while a driver who PASSED claims from Unclaimed resolves to one winner, loser 409', async () => {
+    // The two lists are different lists with different membership rules, and
+    // this is the case where that matters most: the Available claimer never
+    // passed, the Unclaimed claimer did, and both are legitimately allowed to
+    // take the job. Exactly one may.
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const lapsed = await makeDriver();
+    const passer = await makeDriver({ availability: 'OFFLINE' });
+    await enableDispatch({ dispatchMaxOffers: 3 });
+
+    // 1. Offered to `lapsed`, who never answers.
+    expect((await engine.dispatch(deliveryId)).result).toBe('ASSIGNED');
+    expect((await deliveryOf(deliveryId)).assignedDriverProfileId).toBe(lapsed.driverProfileId);
+    // Parked before the sweep so the sweeper's own re-offer finds nobody —
+    // this test needs to choose who is asked next, which real dispatch
+    // deliberately does not let a caller do.
+    await ctx.prisma.driverProfile.update({ where: { id: lapsed.driverProfileId }, data: { availability: 'OFFLINE' } });
+    await ctx.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { offerExpiresAt: new Date(Date.now() - 1000) } });
+    expect((await engine.sweepExpiredOffers()).expired).toBe(1);
+
+    // 2. Offered to `passer`, who explicitly says no.
+    await ctx.prisma.driverProfile.update({ where: { id: passer.driverProfileId }, data: { availability: 'ONLINE' } });
+    expect((await engine.dispatch(deliveryId)).result).toBe('ASSIGNED');
+    expect((await deliveryOf(deliveryId)).assignedDriverProfileId).toBe(passer.driverProfileId);
+    await ctx.prisma.driverProfile.update({ where: { id: passer.driverProfileId }, data: { availability: 'OFFLINE' } });
+    expect((await post(passer.cookies, `driver/jobs/${deliveryId}/decline`, { reason: 'Not tonight' })).status).toBe(201);
+
+    // 3. The rotation is spent.
+    await enableDispatch({ dispatchMaxOffers: 1 });
+    expect((await engine.dispatch(deliveryId)).result).toBe('EXHAUSTED');
+    await ctx.prisma.driverProfile.updateMany({
+      where: { id: { in: [lapsed.driverProfileId, passer.driverProfileId] } },
+      data: { availability: 'ONLINE' },
+    });
+
+    // Each driver's lists are what the matrix says they should be.
+    const lapsedLists = await listsFor(lapsed.cookies);
+    const passerLists = await listsFor(passer.cookies);
+    expect(idsOf(lapsedLists.available)).toContain(deliveryId);
+    expect(idsOf(passerLists.available)).not.toContain(deliveryId);
+    const fromAvailable = lapsedLists.available.find((j) => j.id === deliveryId)!.claim!;
+    const fromUnclaimed = passerLists.unclaimed.find((j) => j.id === deliveryId)!.claim;
+    expect(fromAvailable.youPassed).toBe(false);
+    expect(fromUnclaimed.youPassed).toBe(true);
+    // Both lists hand out the same claim route — the server does not offer the
+    // two of them different ways in.
+    expect(fromUnclaimed.claimPath).toBe(fromAvailable.claimPath);
+
+    const probe = await raceOverSeparateConnections(ctx.prisma, [
+      () => post(lapsed.cookies, fromAvailable.claimPath),
+      () => post(passer.cookies, fromUnclaimed.claimPath),
+    ]);
+    const statuses = probe.responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 201), `statuses: ${statuses.join(',')}`).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409), `statuses: ${statuses.join(',')}`).toHaveLength(1);
+    const after = await deliveryOf(deliveryId);
+    expect([lapsed.driverProfileId, passer.driverProfileId]).toContain(after.assignedDriverProfileId);
+    expect(await ctx.prisma.deliveryAssignment.count({ where: { orderDeliveryId: deliveryId, status: 'ACTIVE' } })).toBe(1);
   });
 
   it('C9 at the concurrent-job cap both lists are empty rather than offering work no claim would accept', async () => {

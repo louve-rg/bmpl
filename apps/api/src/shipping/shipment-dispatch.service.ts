@@ -974,11 +974,13 @@ export class ShipmentDispatchService {
           // rejected: silence is not a decision, and `declineReason` could
           // not be trusted to say which it was — it is the SAME free-text
           // column a driver's own typed reason goes into, so a driver who
-          // wrote "Offer expired." was indistinguishable from the sweeper.
-          // `resolution` is the column that actually answers it. `status` and
-          // `declineReason` keep their existing values so no existing reader
-          // changes meaning.
-          data: { status: 'DECLINED', endedAt: new Date(), declineReason: 'Offer expired.', resolution: 'EXPIRED' },
+          // typed "Offer expired." was indistinguishable from the sweeper.
+          //
+          // `resolution` answers it now, so this stops writing into
+          // `declineReason` at all: that column is free to mean only what a
+          // driver actually said, and an expiry is precisely the case where
+          // nobody said anything. Left NULL rather than set to a sentence.
+          data: { status: 'DECLINED', endedAt: new Date(), declineReason: null, resolution: 'EXPIRED' },
         });
       }
       await this.audit.record({ action: 'SHIPMENT_LEG_OFFER_EXPIRED', newValue: { legId, driverProfileId } }, tx);

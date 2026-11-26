@@ -47,7 +47,14 @@ export interface UnclaimedJobClaimInfo {
    * Unclaimed Jobs. False only for a job they explicitly passed on.
    */
   inAvailableJobs: boolean;
-  /** POST here, with no body, to take the job. */
+  /**
+   * POST here, with no body, to take the job.
+   *
+   * Root-relative and WITHOUT the `/api` prefix — the exact form the web
+   * client's own helper takes (`api.post('/driver/jobs/…/claim')`), so the
+   * client can post it verbatim instead of branching on `kind` to rebuild it.
+   * The leading slash is load-bearing: the helper joins it onto its base.
+   */
   claimPath: string;
 }
 
@@ -501,7 +508,7 @@ export class UnclaimedJobsService {
       offerExpiresAt: null,
       queuePosition: null,
       isTest: d.vendorOrder.order.isTest,
-      claim: this.claimInfo(d.dispatchExhaustedAt!, youPassed, `driver/jobs/${d.id}/claim`),
+      claim: this.claimInfo(d.dispatchExhaustedAt!, youPassed, `/driver/jobs/${d.id}/claim`),
       // ---- The pre-existing claim-fallback contract, unchanged. ----
       // The driver app reads these today for the Unclaimed list; the
       // normalized fields above are ADDED beside them, never instead of them,
@@ -548,7 +555,7 @@ export class UnclaimedJobsService {
       offerExpiresAt: null,
       queuePosition: null,
       isTest: s.isTest,
-      claim: this.claimInfo(l.dispatchExhaustedAt!, youPassed, `driver/jobs/legs/${l.id}/claim`),
+      claim: this.claimInfo(l.dispatchExhaustedAt!, youPassed, `/driver/jobs/legs/${l.id}/claim`),
     };
   }
 
