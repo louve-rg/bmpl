@@ -7,8 +7,23 @@ import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { formatWindow } from '../../../../../lib/availability-window';
 import { uploadFile } from '../../../../../lib/uploads';
-import { isExceptionBlocked, pickupPhotoSection, reportIssueState, showsOwnHandoffCode } from '../../../../../lib/driver-shipping-job';
-import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge, StickyActionBar } from '../../../../../components/ui';
+import {
+  isExceptionBlocked,
+  pickupPhotoSection,
+  reportIssueState,
+  showsOwnHandoffCode,
+} from '../../../../../lib/driver-shipping-job';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Label,
+  PageHeader,
+  Spinner,
+  StatusBadge,
+  StickyActionBar,
+} from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
 
@@ -237,9 +252,19 @@ function PlaceBlock({
       <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
         {step} · {label}
       </p>
-      <p className="mt-1 break-words text-base font-semibold text-[color:var(--bmpl-text)]">{place.name ?? place.area ?? '—'}</p>
-      {place.address && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.address}</p>}
-      {place.area && place.name && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.area}</p>}
+      <p className="mt-1 break-words text-base font-semibold text-[color:var(--bmpl-text)]">
+        {place.name ?? place.area ?? '—'}
+      </p>
+      {place.address && (
+        <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+          {place.address}
+        </p>
+      )}
+      {place.area && place.name && (
+        <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+          {place.area}
+        </p>
+      )}
 
       {windows.length > 0 && (
         <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
@@ -248,7 +273,9 @@ function PlaceBlock({
       )}
 
       {place.instructions && (
-        <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{place.instructions}</p>
+        <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {place.instructions}
+        </p>
       )}
 
       {locked && place.kind === 'ADDRESS' && (
@@ -258,7 +285,9 @@ function PlaceBlock({
         // overruled that), so this caption is now about name/phone only —
         // saying "address" here would be a lie the moment `place.address`
         // itself is already showing above.
-        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The name and phone number appear once you accept.</p>
+        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">
+          The name and phone number appear once you accept.
+        </p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -337,7 +366,9 @@ export default function DriverShippingJobPage() {
     let cancelled = false;
     setOwnCodeLoading(true);
     api
-      .get<{ kind: string; code: string | null; attempts: number }>(`/driver/shipping-jobs/${job.id}/code`)
+      .get<{ kind: string; code: string | null; attempts: number }>(
+        `/driver/shipping-jobs/${job.id}/code`,
+      )
       .then((res) => {
         if (!cancelled) setOwnCode(res?.code ?? null);
       })
@@ -354,14 +385,16 @@ export default function DriverShippingJobPage() {
   }, [job?.id, job?.jobKind, job?.status]);
 
   const blocked = job ? isExceptionBlocked(job) : false;
-  const action = job && !blocked ? actionFor(job.jobKind, job.status, job.requiresPickupPin ?? false) : null;
+  const action =
+    job && !blocked ? actionFor(job.jobKind, job.status, job.requiresPickupPin ?? false) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
   const reportState = job ? reportIssueState(job.status, reportedReason !== null) : 'unavailable';
   // EDW-P4: true for exactly the two terminal "present, don't type" moments
   // once there is genuinely nothing left for the courier's OWN screen to do
   // but wait — not merely whenever showsOwnHandoffCode is true, since an
   // open exception (blocked) explains itself with its own banner instead.
-  const awaitingTerminalStaff = job !== null && !blocked && action === null && showsOwnHandoffCode(job.jobKind, job.status);
+  const awaitingTerminalStaff =
+    job !== null && !blocked && action === null && showsOwnHandoffCode(job.jobKind, job.status);
 
   // Poll while waiting on a terminal action neither this screen nor this
   // driver can perform — the only way this screen finds out staff recorded
@@ -380,7 +413,10 @@ export default function DriverShippingJobPage() {
     setErr(null);
     try {
       const body = action.needsCode
-        ? { pin: code.trim(), ...(action.needsReceivedBy ? { receivedByName: receivedBy.trim() } : {}) }
+        ? {
+            pin: code.trim(),
+            ...(action.needsReceivedBy ? { receivedByName: receivedBy.trim() } : {}),
+          }
         : {};
       await api.post(`/driver/shipping-jobs/${job.id}/${action.path}`, body);
       setCode('');
@@ -414,7 +450,10 @@ export default function DriverShippingJobPage() {
     try {
       const key = await uploadFile(`/driver/shipping-jobs/${job.id}/pickup-photo/upload`, file);
       const keys = [...photoKeys, key];
-      const updated = await api.post<ShippingJob>(`/driver/shipping-jobs/${job.id}/pickup-photo/confirm`, { photoKeys: keys });
+      const updated = await api.post<ShippingJob>(
+        `/driver/shipping-jobs/${job.id}/pickup-photo/confirm`,
+        { photoKeys: keys },
+      );
       setPhotoKeys(keys);
       setJob(updated);
     } catch (e) {
@@ -494,7 +533,9 @@ export default function DriverShippingJobPage() {
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} label={job.statusLabel} />
-            <span className="text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">{money(job.feeMinor)}</span>
+            <span className="text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">
+              {money(job.feeMinor)}
+            </span>
           </div>
 
           <div className="mt-4 space-y-3">
@@ -532,7 +573,10 @@ export default function DriverShippingJobPage() {
               // comment. Without this, a multi-hop shipment could label an
               // earlier or later leg's hub as this driver's own Collect/
               // Deliver point, implying work that is not theirs.
-              const points = tripMapPoints(routeStops, { pickup: job.pickup, dropoff: job.dropoff });
+              const points = tripMapPoints(routeStops, {
+                pickup: job.pickup,
+                dropoff: job.dropoff,
+              });
               if (points.length === 0) return null;
               // SHIP-B Bug 1: `addressUnlocked` used to track exactly this —
               // "some stop is still area-only" — because it gated every door
@@ -550,24 +594,33 @@ export default function DriverShippingJobPage() {
               // does not and will not reveal it — it is a different leg's
               // privacy boundary, not a timer. Say that instead of promising
               // a reveal that can never happen.
-              const otherLegDoorAreaOnly = routeStops.some((s) => s.kind === 'ADDRESS' && s.address == null);
+              const otherLegDoorAreaOnly = routeStops.some(
+                (s) => s.kind === 'ADDRESS' && s.address == null,
+              );
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
                   {points.length < routeStops.length && otherLegDoorAreaOnly && (
-                    <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end belongs to a different leg — only its area is ever shown here.</p>
+                    <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">
+                      The other end belongs to a different leg — only its area is ever shown here.
+                    </p>
                   )}
                 </Card>
               );
             })()}
 
             <Card className="p-4 sm:p-5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">What you are moving</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
+                What you are moving
+              </p>
               <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text)]">
-                {job.parcel.description || `${job.parcel.pieces} ${job.parcel.pieces === 1 ? 'parcel' : 'parcels'}`}
+                {job.parcel.description ||
+                  `${job.parcel.pieces} ${job.parcel.pieces === 1 ? 'parcel' : 'parcels'}`}
               </p>
               {job.parcel.weightGrams != null && (
-                <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted)]">About {(job.parcel.weightGrams / 453.6).toFixed(1)} lb</p>
+                <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted)]">
+                  About {(job.parcel.weightGrams / 453.6).toFixed(1)} lb
+                </p>
               )}
             </Card>
 
@@ -681,7 +734,10 @@ export default function DriverShippingJobPage() {
               )}
               {action?.needsCode && (
                 <>
-                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
+                  <label
+                    className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]"
+                    htmlFor="code"
+                  >
                     {action.needsReceivedBy ? 'Handover code' : 'Collection code'}
                   </label>
                   <input
@@ -695,7 +751,10 @@ export default function DriverShippingJobPage() {
                   />
                   {action.needsReceivedBy && (
                     <>
-                      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
+                      <label
+                        className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]"
+                        htmlFor="who"
+                      >
                         Who took it
                       </label>
                       <input
@@ -707,8 +766,9 @@ export default function DriverShippingJobPage() {
                       />
                       {job.pinAttemptsRemaining < 5 && (
                         <p className="mt-2 text-xs text-amber-700">
-                          {job.pinAttemptsRemaining} {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs an
-                          administrator.
+                          {job.pinAttemptsRemaining}{' '}
+                          {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs
+                          an administrator.
                         </p>
                       )}
                     </>
