@@ -15,10 +15,20 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// A STABLE object — see BMPL-380, cited by jobs/[id]/page.test.tsx: a fresh
+// object on every useRouter() call can turn a callback dependency into an
+// infinite render loop that looks exactly like a hang.
+const router = { push: vi.fn() };
+vi.mock('next/navigation', () => ({
+  useRouter: () => router,
+}));
+
 const apiGet = vi.fn();
+const apiPost = vi.fn();
 vi.mock('../../../../lib/api', () => ({
   api: {
     get: (...args: unknown[]) => apiGet(...args),
+    post: (...args: unknown[]) => apiPost(...args),
   },
 }));
 
@@ -68,8 +78,31 @@ async function renderPage(jobs: unknown[]) {
   return { container, root };
 }
 
+/** Same as renderPage, but opens on the Available tab (claim rows only ever render there). */
+async function renderAvailablePage(jobs: unknown[]) {
+  apiGet.mockImplementation((url: string) => {
+    if (url === '/driver/jobs/counts') return Promise.resolve({ available: jobs.length, assigned: 0, active: 0, completed: 0 });
+    if (url === '/driver/jobs/queue') return Promise.resolve({ items: [], route: {}, followsRecommendation: true });
+    if (url.startsWith('/driver/jobs?scope=')) return Promise.resolve(jobs);
+    return Promise.resolve(null);
+  });
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  await act(async () => {
+    root.render(React.createElement(DriverJobsPage));
+  });
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return { container, root };
+}
+
 afterEach(() => {
   apiGet.mockReset();
+  apiPost.mockReset();
+  router.push.mockReset();
   document.body.innerHTML = '';
 });
 
@@ -158,5 +191,78 @@ describe('DriverJobsPage — list shows a door end\'s real address (SHIP-B Bug 1
     // Exactly one occurrence of "Dangriga" — the primary line's fallback,
     // not a second, redundant area line underneath it.
     expect(text.split('Dangriga').length - 1).toBe(1);
+  });
+});
+
+/**
+ * EDW-P3: the Available list now has two kinds of row — a live offer
+ * (unchanged, no `claim` key) and a post-exhaustion row the server appends
+ * after them, carrying a `claim` object. Routing the latter to the normal
+ * job-detail page would 404 it (not assigned to this driver yet), so it
+ * must render inline instead, and the owner's "one job, not two" rule means
+ * it must say plainly that the same job is also on Unclaimed Jobs.
+ */
+function claimRow(over: Record<string, unknown> = {}) {
+  return job({
+    id: 'leg-claim',
+    view: 'available',
+    status: 'ASSIGNED',
+    statusLabel: 'Assigned',
+    claim: {
+      dispatchExhaustedAt: '2026-11-20T10:00:00.000Z',
+      youPassed: false,
+      inAvailableJobs: true,
+      claimPath: '/driver/jobs/leg-claim/claim',
+    },
+    ...over,
+  });
+}
+
+describe('DriverJobsPage — unclaimed rows appended to Available (EDW-P3)', () => {
+  it('gives a claim row a Claim button and no link to the job-detail page, while a live offer stays linked', async () => {
+    const liveOffer = job({ id: 'leg-live', view: 'available', status: 'ASSIGNED', offerExpiresAt: '2026-11-26T20:00:00.000Z' });
+    const { container } = await renderAvailablePage([liveOffer, claimRow()]);
+
+    const links = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(links).toContain('/dashboard/driver/shipping/leg-live');
+    expect(links).not.toContain('/dashboard/driver/shipping/leg-claim');
+
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons).toContain('Claim this job');
+  });
+
+  it('says the row is also on Unclaimed Jobs, and shows when dispatch gave up rather than a fake offer-expiry countdown', async () => {
+    const { container } = await renderAvailablePage([claimRow()]);
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/Also listed on\s*Unclaimed Jobs/);
+    expect(text).toMatch(/Waiting since/);
+    expect(text).not.toMatch(/Offer expires/);
+  });
+
+  it('claims via claim.claimPath — never a path built from the job id — and navigates to the resulting job', async () => {
+    apiPost.mockResolvedValue({ id: 'won1' });
+    const { container } = await renderAvailablePage([claimRow()]);
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Claim this job')!;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiPost).toHaveBeenCalledWith('/driver/jobs/leg-claim/claim');
+    expect(router.push).toHaveBeenCalledWith('/dashboard/driver/shipping/won1');
+  });
+
+  it('on a 409, removes the row and shows a plain notice rather than an error', async () => {
+    apiPost.mockRejectedValue({ status: 409, message: 'This delivery was just claimed or reassigned — reload and try again.' });
+    const { container } = await renderAvailablePage([claimRow()]);
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Claim this job')!;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Claim this job')).toBe(false);
+    expect(container.textContent).toMatch(/no longer available — it was claimed or reassigned/);
+    expect(router.push).not.toHaveBeenCalled();
   });
 });
