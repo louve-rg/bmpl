@@ -49,9 +49,51 @@ let ctx: TestContext;
 let admin: string[];
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
+const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+
+/** A driver eligible for the BELIZE district — mirrors
+ *  transport-leg-operations.integration.spec.ts's own `makeDriver`. Used
+ *  only to prove Edward's SECOND reported symptom (manual admin assignment
+ *  refused) is actually fixed once the onward leg is genuinely READY. */
+async function makeDriver() {
+  const s = uniq();
+  const { cookies, userId } = await registerUser(`tdrv_${s}@example.com`);
+  await ctx.prisma.userRole.upsert({
+    where: { userId_roleCode: { userId, roleCode: 'DELIVERY_DRIVER' } },
+    create: { userId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() },
+    update: { status: 'APPROVED', approvedAt: new Date() },
+  });
+  const profile = await ctx.prisma.driverProfile.create({
+    data: {
+      userId,
+      legalName: 'T Driver',
+      displayName: `Tdr${s}`,
+      phone: '+5016000000',
+      homeDistrict: 'BELIZE',
+      licenceNumber: `TDL-${s}`,
+      licenceExpiry: FUTURE,
+      vehicleOwnership: 'OWNED',
+      availability: 'ONLINE',
+      isActive: true,
+    },
+  });
+  const vehicle = await ctx.prisma.driverVehicle.create({
+    data: {
+      driverProfileId: profile.id,
+      type: 'CAR', make: 'Toyota', model: 'Hilux',
+      licencePlate: `TL-${s}`.slice(0, 18),
+      registrationExpiry: FUTURE, insuranceExpiry: FUTURE,
+      isActive: true, isPrimary: true, approvalStatus: 'APPROVED',
+    },
+  });
+  await ctx.prisma.driverServiceArea.create({ data: { driverProfileId: profile.id, district: 'BELIZE', isActive: true } });
+  return { cookies, userId, driverProfileId: profile.id, vehicleId: vehicle.id };
+}
+const assignManually = (legId: string, d: { driverProfileId: string; vehicleId: string }) =>
+  post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
 
 async function registerUser(email: string) {
   const reg = await request(ctx.server)
@@ -224,6 +266,16 @@ describe('EDW-P1/P2: a chained FIRST_MILE -> LINE_HAUL pair shares one handoff c
     // the handoff committed, not merely marked arrived.
     const released = await legRow(lastMile.id);
     expect(released.status).toBe('READY');
+
+    // Edward's SECOND reported symptom: admin could not assign a driver
+    // manually either. Before this fix, this failed for the right reason
+    // (isLegActionable — the prior leg was never COMPLETED) but failed all
+    // the same. Proven fixed, not merely asserted: a real driver, really
+    // assigned, through the real admin endpoint.
+    const driver = await makeDriver();
+    const manualAssign = await assignManually(lastMile.id, driver);
+    expect(manualAssign.status).toBe(201);
+    expect((await legRow(lastMile.id)).assignedDriverProfileId).toBe(driver.driverProfileId);
   });
 
   it('a wrong code at the receiving terminal is refused, and counted against the LINE_HAUL leg\'s own counter — independently of the FIRST_MILE leg\'s', async () => {
