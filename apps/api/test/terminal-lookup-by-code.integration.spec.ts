@@ -314,6 +314,44 @@ describe('EDW-P2 (MDF-1173): POST terminal/legs/lookup-by-code', () => {
     expect(findPinLeak(res.body, code)).toBeNull();
   });
 
+  it('6b · EDW-P1/P2 (#902) code sharing: the FIRST_MILE leg this code also belongs to never produces a second candidate, or an ambiguous refusal, for the same shipment', async () => {
+    // #902 (main, 8e9c6008) seeds a LINE_HAUL leg immediately following a
+    // FIRST_MILE leg at the same hub with that SAME handoffPin — "the code
+    // that travelled with the parcel". That does NOT create a second
+    // candidate here: this endpoint's eligibility is kind: 'LINE_HAUL' only,
+    // so the FIRST_MILE row (same code, same shipment) is never in the
+    // WHERE clause to begin with — and independently of that filter, the
+    // two legs can never BOTH be in this endpoint's eligible window
+    // (arrived, not yet handed off) at the same time anyway: `releaseNext`/
+    // `isLegActionable` only ever make ONE leg of a shipment actionable at
+    // once, so the LINE_HAUL leg cannot even depart, let alone arrive,
+    // before the FIRST_MILE leg sharing its code is already COMPLETED.
+    // "Ambiguous = more than 5 matching LEGS" and "more than 5 matching
+    // SHIPMENTS" are therefore the same count for any shipment, at any
+    // point in time, under this query — proven directly below rather than
+    // assumed.
+    const net = await makeNetwork();
+    const staff = await makeTerminalStaff([net.destinationHubId]);
+    const booked = await bookDoorToHub(await fundedSender(), net);
+    const first = (await legs(booked.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const lineHaul = (await legs(booked.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    const sharedCode = await handoffPinFor(first.id);
+    expect(await handoffPinFor(lineHaul.id)).toBe(sharedCode); // #902's own guarantee
+
+    expect((await post(admin, `admin/logistics/legs/${first.id}/start`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: sharedCode, receivedByName: 'Counter staff' })).status).toBe(201);
+    await departLineHaul(lineHaul.id);
+    await arriveLineHaul(lineHaul.id);
+
+    const completedFirstMile = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(completedFirstMile.status).toBe('COMPLETED'); // sharing this code does not reopen it
+
+    const res = await lookupByCode(staff.cookies, sharedCode);
+    expect(res.status).toBe(200);
+    expect(res.body.candidates).toHaveLength(1);
+    expect(res.body.candidates[0].legId).toBe(lineHaul.id);
+  });
+
   it('7 · every lookup is audited, hit or miss, and the audit row never carries the submitted code', async () => {
     const net = await makeNetwork();
     const staff = await makeTerminalStaff([net.destinationHubId]);
