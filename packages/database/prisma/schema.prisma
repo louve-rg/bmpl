@@ -1421,6 +1421,35 @@ enum DeliveryAssignmentStatus {
   COMPLETED
 }
 
+/// EDW-P3: WHY a closed offer closed, for the two cases `status` cannot tell
+/// apart. Both the delivery sweeper and the courier-leg sweeper write
+/// `status = DECLINED` when an offer simply ran out of time, which is the
+/// identical row an explicit "no thanks" from the driver writes — so a lapsed
+/// offer and a decision were indistinguishable in storage, and the lists a
+/// driver sees could only treat both the same way. They are not the same
+/// thing: a timeout is not an answer, and a missed notification is not a
+/// refusal.
+///
+/// Deliberately a SEPARATE column rather than an `EXPIRED` value added to
+/// `DeliveryAssignmentStatus`, for two reasons. That enum is shared with
+/// `PassengerTripAssignment`, where "the offer lapsed" has no meaning yet and
+/// an unused value would be a standing invitation to write one. And every
+/// existing query that filters `status = DECLINED` (ops counts, driver stats,
+/// the append-only history reads) would silently change meaning the moment
+/// some rows moved to a new value — this way `status` keeps saying exactly
+/// what it has always said, and this column adds the distinction next to it.
+///
+/// NULL means "not established": every row written before this column
+/// existed whose evidence cannot prove which case it was, and every row whose
+/// `status` already answers the question (ACCEPTED/REASSIGNED/CANCELLED/
+/// COMPLETED). NULL is never read as an explicit pass.
+enum DriverOfferResolution {
+  /// The driver themselves answered, and the answer was no.
+  DECLINED_BY_DRIVER
+  /// The offer ran out of time with no answer from the driver.
+  EXPIRED
+}
+
 // Pickup / delivery PIN verification outcome.
 enum VerificationStatus {
   PENDING
@@ -2277,10 +2306,18 @@ model DeliveryAssignment {
   endedAt          DateTime? // reassigned/cancelled/completed time
   declineReason    String?
   endReason        String? // reassignment / cancellation reason that ended this row
+  /// EDW-P3: for a DECLINED row, whether the driver actually said no or the
+  /// offer merely lapsed — see DriverOfferResolution. Null on every other
+  /// status, and on historical rows whose evidence cannot establish it.
+  resolution       DriverOfferResolution?
   createdAt        DateTime                 @default(now())
 
   @@index([orderDeliveryId, assignedAt])
   @@index([driverProfileId, status])
+  /// EDW-P3: the post-exhaustion Available/Unclaimed lists ask exactly one
+  /// question of this table — "has THIS driver explicitly passed on any of
+  /// these deliveries" — for a batch of delivery ids at a time.
+  @@index([driverProfileId, resolution])
   @@map("delivery_assignments")
 }
 
@@ -5694,10 +5731,20 @@ model ShipmentLegOffer {
   respondedAt     DateTime?
   endedAt         DateTime?
   declineReason   String?
+  /// EDW-P3: the courier-leg half of the same distinction DeliveryAssignment
+  /// now carries — see DriverOfferResolution. This side needed it more: the
+  /// leg sweeper wrote its "Offer expired." note into `declineReason`, the
+  /// SAME column a driver's own typed reason goes into, so the only thing
+  /// separating a lapse from a decision was a sentence a driver could have
+  /// written themselves.
+  resolution      DriverOfferResolution?
   createdAt       DateTime                 @default(now())
 
   @@index([shipmentLegId, assignedAt])
   @@index([driverProfileId, status])
+  /// EDW-P3: same single question as delivery_assignments' own resolution
+  /// index — "has THIS driver explicitly passed on any of these legs".
+  @@index([driverProfileId, resolution])
   @@map("shipment_leg_offers")
 }
 

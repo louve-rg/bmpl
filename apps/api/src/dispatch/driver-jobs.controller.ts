@@ -24,6 +24,7 @@ import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { DriverJobService } from './driver-jobs.service';
 import { DriverJobFeedService } from './driver-job-feed.service';
+import { UnclaimedJobsService } from './unclaimed-jobs.service';
 
 /**
  * Driver job feed + operational transitions. Requires an APPROVED DELIVERY_DRIVER
@@ -42,6 +43,7 @@ export class DriverJobsController {
   constructor(
     private readonly jobs: DriverJobService,
     private readonly feed: DriverJobFeedService,
+    private readonly unclaimed: UnclaimedJobsService,
   ) {}
 
   private actor(user: AuthContext, req: Request) {
@@ -91,14 +93,33 @@ export class DriverJobsController {
   }
 
   /**
-   * MDF-18: deliveries automatic dispatch has already given up on, narrowed
-   * to the ones this driver personally qualifies for. Declared BEFORE `:id`
-   * for the same reason `queue` is — a static segment below the
-   * parameterized route would otherwise be swallowed as a delivery id.
+   * Unclaimed Jobs: work automatic dispatch has already given up on, narrowed
+   * to the ones this driver personally qualifies for — MARKETPLACE deliveries
+   * AND shipment courier legs (EDW-P3 added the second half; this list was
+   * delivery-only before, while the courier side had no claim path at all).
+   *
+   * Every item carries `claim.youPassed` and `claim.inAvailableJobs`: a job
+   * this driver explicitly passed on stays here and stays claimable, and is
+   * the only case excluded from `?scope=available`. Declared BEFORE `:id` for
+   * the same reason `queue` is — a static segment below the parameterized
+   * route would otherwise be swallowed as a delivery id.
    */
   @Get('claimable')
   claimable(@CurrentUser() u: AuthContext) {
-    return this.jobs.claimableJobs(u.userId);
+    return this.unclaimed.unclaimed(u.userId);
+  }
+
+  /**
+   * EDW-P3: claim a shipment courier LEG automatic dispatch has given up on —
+   * the courier-leg half of MDF-18's delivery claim below. A distinct route
+   * because a leg id and a delivery id address different tables; the list
+   * above hands the client the right one in `claim.claimPath`, so nothing
+   * has to guess. Declared before `:id/claim` for route-matching clarity,
+   * though the segment counts already differ.
+   */
+  @Post('legs/:id/claim')
+  claimLeg(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.unclaimed.claimLeg(this.actor(u, req), id);
   }
 
   @Get(':id')

@@ -176,5 +176,9 @@ export const NOTIFICATION_EVENTS = [
   'ROUTE_SCHEDULE_CHANGED',
   'SHIPPING_PROVIDER_STATUS_CHANGED',
   'SHIPMENT_LEG_OPERATOR_REJECTED',
+  // EDW-P3: the customer-facing counterpart to a courier leg being claimed or
+  // assigned to a driver — distinct from the existing SHIPMENT_LEG_OFFERED
+  // (that one is driver-facing, before anyone has taken the leg).
+  'SHIPMENT_LEG_DRIVER_ASSIGNED',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

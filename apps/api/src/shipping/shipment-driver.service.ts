@@ -209,7 +209,11 @@ export class ShipmentDriverService {
       if (cleared.count === 0) return false;
       await tx.shipmentLegOffer.updateMany({
         where: { shipmentLegId: legId, driverProfileId: profileId, status: { in: ['ACTIVE', 'ACCEPTED'] } },
-        data: { status: 'DECLINED', respondedAt: new Date(), endedAt: new Date(), declineReason: reason },
+        // EDW-P3: an explicit pass, recorded as one — the courier-leg mirror
+        // of DriverJobService.decline's own `resolution` write. Keeps this leg
+        // out of this driver's Available list once dispatch is exhausted,
+        // while leaving it claimable from their Unclaimed list.
+        data: { status: 'DECLINED', respondedAt: new Date(), endedAt: new Date(), declineReason: reason, resolution: 'DECLINED_BY_DRIVER' },
       });
       await this.audit.record({ action: 'SHIPMENT_LEG_DECLINED', actorId: actor.userId, reason, newValue: { legId, reference: leg.shipment.reference } }, tx);
       return true;

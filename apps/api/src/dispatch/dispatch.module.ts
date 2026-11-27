@@ -11,6 +11,7 @@ import { DispatchEngineService } from './dispatch-engine.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
 import { DriverJobService } from './driver-jobs.service';
 import { DriverJobFeedService } from './driver-job-feed.service';
+import { UnclaimedJobsService } from './unclaimed-jobs.service';
 import { DeliveryAccessService } from './delivery-access.service';
 import { AdminDispatchController } from './admin-dispatch.controller';
 import { DriverJobsController } from './driver-jobs.controller';
@@ -37,6 +38,7 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
     DispatchService,
     DriverJobService,
     DriverJobFeedService,
+    UnclaimedJobsService,
     DeliveryAccessService,
     DispatchEngineService,
     DispatchSchedulerService,
