@@ -323,6 +323,17 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     { controller: 'TerminalController', route: 'DELETE /terminal/staff/:userId/locations/:locationId', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/deactivate', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/reactivate', roles: 'MANAGER', throttled: false },
+    // EDW-P2 (MDF-1173): ANY, not MANAGER — this is the lookup step that
+    // PRECEDES handoff below, strictly less powerful than it (pure read, no
+    // state change), and handoff itself is already ANY. Requiring MANAGER
+    // here would mean an ordinary counter clerk holding the parcel has to
+    // find a manager before even identifying it — a softer version of the
+    // exact administration dependency Edward asked to remove. Safe at ANY
+    // because of what's already in the implementation: hub-scoped to the
+    // caller's own active hubs, @StrictThrottle(), an audit row on every
+    // call (hit, miss or refusal), a derived `locked` instead of a raw
+    // attempt count, and the 6-plus-match refusal.
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/lookup-by-code', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
     { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },
