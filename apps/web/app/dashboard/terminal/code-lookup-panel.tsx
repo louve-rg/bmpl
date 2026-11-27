@@ -1,14 +1,35 @@
 /**
- * EDW-P2 (requirement 1/2, code-led handoff): DRAFT, NOT WIRED IN YET.
+ * EDW-P2 (requirement 1/2, code-led handoff): WIRED, against the real
+ * `POST /terminal/legs/lookup-by-code` (Pam, PR #909 -- branch
+ * feat/edw-p2-terminal-lookup-by-code, `ShipmentService.lookupByHandoffCode`
+ * in apps/api/src/shipping/shipment.service.ts). This file's own 7-field
+ * candidate type and the 1-5/6+ threshold were designed ahead of the
+ * endpoint and reconciled against it unchanged -- confirmed field-for-field
+ * against a booted app + real Postgres (Pam's own 10-test integration spec,
+ * `terminal-lookup-by-code.integration.spec.ts`, run directly, plus a
+ * throwaway dump spec for the raw JSON, deleted after) rather than against
+ * prose or this file's own unit tests. Two things the real endpoint settled
+ * that this file did NOT have right until this pass:
  *
- * Nothing imports this file. Pam's lookup endpoint does not exist yet, so
- * there is nothing for this to call. god's instruction
- * (2026-11-26T19-45-39-781Z-ceb724, corrected 2026-11-26T19-55-40-078Z-9e4498
- * once Pam answered Q7/Q8) was to keep this a draft until the real endpoint
- * ships and it can be wired in as one PR with it -- landing the copy alone
- * would be dead code with no caller, and the owner asked us not to fragment
- * one feature into several small PRs. The field set and wording below are
- * settled policy regardless:
+ *   - `tooMany`/`limitReached` now carry the server's own verbatim message
+ *     (optional `message` field, falling back to this file's original copy
+ *     when absent, so every pre-existing test keeps passing unchanged) --
+ *     the server's literal strings ('Too many parcels match that code. Ask
+ *     for the shipment reference instead.' / 'Too many lookups. Wait a
+ *     moment and try again.') are now the authoritative text; the copy
+ *     written before the endpoint existed was a placeholder, not a design
+ *     decision worth keeping over the real source.
+ *   - `limitApproaching` has NO real trigger: the endpoint's rate limiter
+ *     (`checkLookupRate`, a plain Redis fixed-window counter) returns
+ *     nothing on a successful call that would let a caller know how close
+ *     to the limit it is -- only a hard 429 once the limit is exceeded. This
+ *     state is therefore currently UNREACHABLE from page.tsx's wiring. Left
+ *     in place rather than deleted (reported to god as a gap, not silently
+ *     removed or guessed into existence) because it is still exercised by
+ *     this file's own tests and a future server change could add the signal.
+ *
+ * The field set and wording below are the settled policy this reconciled
+ * against:
  *
  *   - Q1 (binding): `broughtBy`/`courier` are EXCLUDED from a candidate --
  *     a person's name has no disambiguation value and discloses who is
@@ -84,9 +105,9 @@ export type CodeLookupState =
   | { kind: 'invalid' }
   | { kind: 'loading' }
   | { kind: 'notFound' }
-  | { kind: 'tooMany' }
+  | { kind: 'tooMany'; message?: string }
   | { kind: 'limitApproaching'; remaining: number }
-  | { kind: 'limitReached' }
+  | { kind: 'limitReached'; message?: string }
   | { kind: 'error'; message: string }
   | { kind: 'found'; candidates: CodeLookupCandidate[] };
 
@@ -134,10 +155,16 @@ export function CodeLookupPanel({
         </Button>
       </div>
 
-      {state.kind === 'notFound' && <Alert tone="neutral">No parcel expecting that code at your location.</Alert>}
+      {/* No "at your location" or similar -- the server's own miss response is
+          deliberately byte-identical for "no such code" and "that code is at
+          a terminal you don't hold" (confirmed directly against the real
+          endpoint), so this copy must not imply the parcel exists elsewhere. */}
+      {state.kind === 'notFound' && <Alert tone="neutral">No parcel matches that code.</Alert>}
 
       {state.kind === 'tooMany' && (
-        <Alert tone="neutral">More than 5 parcels match that code here. Search by the shipment reference instead, on the Lookup tab.</Alert>
+        <Alert tone="neutral">
+          {state.message ?? 'More than 5 parcels match that code here. Search by the shipment reference instead, on the Lookup tab.'}
+        </Alert>
       )}
 
       {state.kind === 'limitApproaching' && (
@@ -146,7 +173,9 @@ export function CodeLookupPanel({
         </Alert>
       )}
 
-      {state.kind === 'limitReached' && <Alert tone="warning">Too many code lookups. Wait a moment before trying again.</Alert>}
+      {state.kind === 'limitReached' && (
+        <Alert tone="warning">{state.message ?? 'Too many code lookups. Wait a moment before trying again.'}</Alert>
+      )}
 
       {state.kind === 'error' && <Alert tone="error">{state.message}</Alert>}
 

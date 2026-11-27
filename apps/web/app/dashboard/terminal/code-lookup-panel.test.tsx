@@ -7,13 +7,16 @@ import { CodeLookupPanel, isValidLookupCode, type CodeLookupState } from './code
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * EDW-P2: draft component, not wired into page.tsx yet (see the file's own
- * header comment for why -- Pam's lookup endpoint does not exist). These
- * tests cover the policy decisions god already made binding (2026-11-26T19-
- * 45-39-781Z-ceb724) ahead of the endpoint: `broughtBy`/`courier` can never
- * appear (excluded by the type itself, not just by omission in one render),
- * the lookup's own feedback states are distinct from the six HANDOFF states
- * on page.tsx, and selecting a candidate never claims to have received it.
+ * EDW-P2: this component is now wired into page.tsx against the real
+ * `POST /terminal/legs/lookup-by-code` (see the file's own header comment
+ * for the conformance check that reconciled it). These tests cover the
+ * policy decisions god made binding ahead of the endpoint: `broughtBy`/
+ * `courier` can never appear (excluded by the type itself, not just by
+ * omission in one render), the lookup's own feedback states are distinct
+ * from the six HANDOFF states on page.tsx, and selecting a candidate never
+ * claims to have received it -- plus the two states (`tooMany`/
+ * `limitReached`) whose copy now prefers the server's own verbatim message
+ * when the wiring provides one.
  */
 
 let root: Root | null = null;
@@ -67,17 +70,22 @@ describe('CodeLookupPanel', () => {
     expect(el.textContent).not.toMatch(/lock/i);
   });
 
-  it('renders "not found" without ever implying the code exists at a different terminal (Q3: opaque at lookup, by design)', () => {
+  it('renders "not found" without ever implying the code exists at a different terminal (Q3: opaque at lookup, by design -- the real endpoint confirms miss and wrong-terminal are byte-identical)', () => {
     const { el } = renderPanel({ kind: 'notFound' });
-    expect(el.textContent).toContain('No parcel expecting that code at your location.');
-    expect(el.textContent).not.toMatch(/other terminal|elsewhere|different (hub|location|terminal)/i);
+    expect(el.textContent).toContain('No parcel matches that code.');
+    expect(el.textContent).not.toMatch(/other terminal|elsewhere|different (hub|location|terminal)|your location/i);
   });
 
-  it('directs to the reference-based Lookup tab when too many parcels match, with the concrete threshold (6+ renders tooMany, 1-5 lists candidates)', () => {
+  it('directs to the reference-based Lookup tab when too many parcels match, with the concrete threshold (6+ renders tooMany, 1-5 lists candidates), using the fallback copy when no server message is given', () => {
     const { el } = renderPanel({ kind: 'tooMany' });
     expect(el.textContent).toContain('More than 5 parcels');
     expect(el.textContent).toContain('shipment reference');
     expect(el.textContent).toContain('Lookup tab');
+  });
+
+  it("prefers the server's own verbatim message for tooMany when the wiring provides one", () => {
+    const { el } = renderPanel({ kind: 'tooMany', message: 'Too many parcels match that code. Ask for the shipment reference instead.' });
+    expect(el.textContent).toContain('Too many parcels match that code. Ask for the shipment reference instead.');
   });
 
   it('warns before the per-caller lookup limit is reached, with a correct singular/plural', () => {
@@ -87,9 +95,14 @@ describe('CodeLookupPanel', () => {
     expect(singular.textContent).toContain('1 code lookup left');
   });
 
-  it('never leaves the per-caller limit as an unexplained dead end once reached', () => {
+  it('never leaves the per-caller limit as an unexplained dead end once reached, using the fallback copy when no server message is given', () => {
     const { el } = renderPanel({ kind: 'limitReached' });
     expect(el.textContent).toContain('Too many code lookups');
+  });
+
+  it("prefers the server's own verbatim message for limitReached when the wiring provides one", () => {
+    const { el } = renderPanel({ kind: 'limitReached', message: 'Too many lookups. Wait a moment and try again.' });
+    expect(el.textContent).toContain('Too many lookups. Wait a moment and try again.');
   });
 
   it('renders a server error message verbatim', () => {

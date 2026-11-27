@@ -223,6 +223,11 @@ type StubOpts = {
   staffBody?: unknown;
   lookupStatus?: number;
   lookupBody?: unknown;
+  // EDW-P2: POST /terminal/legs/lookup-by-code, kept distinct from the
+  // generic action branch below -- a lookup test needs a DIFFERENT
+  // status/body from whatever the same test's own HANDOFF action expects.
+  lookupByCodeStatus?: number;
+  lookupByCodeBody?: unknown;
   inboundStatus?: number;
   inboundItems?: unknown[];
   inboundHasMore?: boolean;
@@ -298,6 +303,10 @@ function stubFetch(opts: StubOpts = {}) {
         }
         const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
         return jsonResponse(200, rows, { 'X-BMPL-Queue-Has-More': String(opts.queueHasMore ?? false) });
+      }
+      if (url.includes('/api/terminal/legs/lookup-by-code')) {
+        calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(opts.lookupByCodeStatus ?? 200, opts.lookupByCodeBody ?? { candidates: [] });
       }
       if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
         calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -562,6 +571,82 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     expect(container!.querySelector('#handoff-pin-leg_h4')).toBeNull();
     expect(container!.querySelector('#handoff-who-leg_h4')).toBeNull();
     expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Record handoff')).toBe(false);
+  });
+
+  /**
+   * EDW-P2 requirements 1/2: "lead with the code" -- a real
+   * `POST /terminal/legs/lookup-by-code`, reconciled against a booted app +
+   * real Postgres (see code-lookup-panel.tsx's own header comment). These
+   * tests cover the WIRING: wrong/empty codes read as a miss, a real hit
+   * lets staff pick a candidate without that pick completing anything by
+   * itself (it only pre-fills the matching row's own existing pin field and
+   * scrolls to it -- the existing two-click confirm still owns the submit),
+   * and the two real server refusals (400 ambiguous, 429 rate-limited)
+   * render verbatim rather than this file's own placeholder copy.
+   */
+  it('a code that matches nothing shows a miss, never implying the parcel exists elsewhere', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW_LINE_HAUL], lookupByCodeBody: { candidates: [] } });
+    await mount();
+
+    setValue(container!.querySelector('#code-lookup-input') as HTMLInputElement, '9999');
+    await clickButton('Find parcel');
+
+    expect(container!.textContent).toContain('No parcel matches that code.');
+  });
+
+  it('selecting a found candidate pre-fills the matching row\'s own pin field and scrolls to it, without posting anything itself', async () => {
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = vi.fn();
+    const candidate = {
+      legId: 'leg_h3',
+      reference: 'BML-31',
+      parcel: '1 parcel',
+      from: 'Door collection',
+      hub: { code: 'BZE', name: 'Belize City Hub' },
+      arrivedAt: '2026-11-27T12:00:00.000Z',
+      locked: false,
+    };
+    const calls = stubFetch({ queueRows: [HANDOFF_ROW_LINE_HAUL], lookupByCodeBody: { candidates: [candidate] } });
+    await mount();
+
+    setValue(container!.querySelector('#code-lookup-input') as HTMLInputElement, '4821');
+    await clickButton('Find parcel');
+    expect(container!.textContent).toContain('BML-31');
+
+    await clickButton('Use this one');
+
+    // Identification only -- no handoff call fired from the selection itself.
+    expect(calls.find((c) => c.url.includes('/handoff'))).toBeUndefined();
+    // The SAME code just typed into the lookup now sits in the matching
+    // row's own pin field, ready for staff to add who is receiving it.
+    expect((container!.querySelector('#handoff-pin-leg_h3') as HTMLInputElement).value).toBe('4821');
+  });
+
+  it('an ambiguous (6+) match renders the real server message verbatim, not this file\'s placeholder copy', async () => {
+    stubFetch({
+      queueRows: [HANDOFF_ROW_LINE_HAUL],
+      lookupByCodeStatus: 400,
+      lookupByCodeBody: { message: 'Too many parcels match that code. Ask for the shipment reference instead.' },
+    });
+    await mount();
+
+    setValue(container!.querySelector('#code-lookup-input') as HTMLInputElement, '4321');
+    await clickButton('Find parcel');
+
+    expect(container!.textContent).toContain('Too many parcels match that code. Ask for the shipment reference instead.');
+  });
+
+  it("the endpoint's own per-caller rate limit (429) renders the real server message verbatim", async () => {
+    stubFetch({
+      queueRows: [HANDOFF_ROW_LINE_HAUL],
+      lookupByCodeStatus: 429,
+      lookupByCodeBody: { message: 'Too many lookups. Wait a moment and try again.' },
+    });
+    await mount();
+
+    setValue(container!.querySelector('#code-lookup-input') as HTMLInputElement, '9999');
+    await clickButton('Find parcel');
+
+    expect(container!.textContent).toContain('Too many lookups. Wait a moment and try again.');
   });
 
   it('submits a release-to-courier with only the pin', async () => {
