@@ -467,6 +467,37 @@ describe('EDW-P3 matrix (M) — marketplace delivery, after the rotation is exha
     expect(winnerLists.available.find((j) => j.id === deliveryId)?.claim).toBeUndefined();
   });
 
+  it('M4b assigned by an ADMINISTRATOR, not a claim — same NEITHER-list result for everyone else, no race involved', async () => {
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const assignee = await makeDriver();
+    const bystander = await makeDriver();
+    await offerThenExpire(deliveryId);
+    // Confirm it was genuinely visible before the admin acts, so "neither
+    // list" below is the assignment's effect, not an empty list to begin with.
+    expect(idsOf((await listsFor(bystander.cookies)).available)).toContain(deliveryId);
+    expect(idsOf((await listsFor(bystander.cookies)).unclaimed)).toContain(deliveryId);
+
+    // REASSIGN, not ASSIGN: an offer that lapsed (not an explicit decline)
+    // leaves the delivery at DRIVER_DECLINED (DispatchEngineService.expireOffer),
+    // which is outside ASSIGN's legal `from` (PENDING_ASSIGNMENT only) — the
+    // same reason C6 below uses reassign for this same post-exhaustion state.
+    expect(
+      (await post(adminCookies, `admin/deliveries/${deliveryId}/reassign`, {
+        driverProfileId: assignee.driverProfileId,
+        vehicleId: assignee.vehicleId,
+        reason: 'Assigned by hand from the dispatch-exhausted alert.',
+      })).status,
+    ).toBe(201);
+
+    const lists = await listsFor(bystander.cookies);
+    expect(idsOf(lists.available)).not.toContain(deliveryId);
+    expect(idsOf(lists.unclaimed)).not.toContain(deliveryId);
+    const after = await deliveryOf(deliveryId);
+    expect(after.assignedDriverProfileId).toBe(assignee.driverProfileId);
+    expect(await ctx.prisma.deliveryAssignment.count({ where: { orderDeliveryId: deliveryId, status: 'ACTIVE' } })).toBe(1);
+  });
+
   it('M5 a driver who is no longer eligible -> in NEITHER list, and cannot claim', async () => {
     const vendor = await makeVendor();
     const { deliveryId } = await readyDelivery(vendor);
@@ -609,6 +640,32 @@ describe('EDW-P3 matrix (L) — shipment courier leg, after the rotation is exha
     const lists = await listsFor(other.cookies);
     expect(idsOf(lists.available)).not.toContain(legId);
     expect(idsOf(lists.unclaimed)).not.toContain(legId);
+  });
+
+  it('L4b assigned by an ADMINISTRATOR, not a claim — same NEITHER-list result for everyone else, no race involved', async () => {
+    const { legId } = await readyLeg();
+    const assignee = await makeDriver();
+    const bystander = await makeDriver();
+    await offerLegThenExpire(legId);
+    expect(idsOf((await listsFor(bystander.cookies)).available)).toContain(legId);
+    expect(idsOf((await listsFor(bystander.cookies)).unclaimed)).toContain(legId);
+
+    // REASSIGN, same reason as M4b: a lapsed leg offer leaves courierStatus
+    // at DRIVER_DECLINED, outside ASSIGN's legal `from`.
+    expect(
+      (await post(adminCookies, `admin/logistics/legs/${legId}/reassign`, {
+        driverProfileId: assignee.driverProfileId,
+        vehicleId: assignee.vehicleId,
+        reason: 'Assigned by hand from the dispatch-exhausted alert.',
+      })).status,
+    ).toBe(201);
+
+    const lists = await listsFor(bystander.cookies);
+    expect(idsOf(lists.available)).not.toContain(legId);
+    expect(idsOf(lists.unclaimed)).not.toContain(legId);
+    const after = await legOf(legId);
+    expect(after.assignedDriverProfileId).toBe(assignee.driverProfileId);
+    expect(await ctx.prisma.shipmentLegOffer.count({ where: { shipmentLegId: legId, status: 'ACTIVE' } })).toBe(1);
   });
 
   it('L5 a driver who is no longer eligible -> in NEITHER list, and cannot claim', async () => {
