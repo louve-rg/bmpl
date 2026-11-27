@@ -71,6 +71,12 @@ const envSchema = z.object({
   THROTTLE_TTL_SECONDS: z.coerce.number().int().default(60),
   THROTTLE_LIMIT: z.coerce.number().int().default(300), // general per-IP per window
   THROTTLE_AUTH_LIMIT: z.coerce.number().int().default(10), // login/register/etc.
+  // MDF-1184: the terminal lookup-by-code route's own per-IP number — a
+  // read-only, low-privilege lookup a busy office can legitimately call
+  // several times a minute, so it is intentionally NOT THROTTLE_AUTH_LIMIT.
+  // See apps/api/src/throttling/throttle.decorators.ts (TerminalLookupThrottle)
+  // for the full reasoning.
+  THROTTLE_TERMINAL_LOOKUP_LIMIT: z.coerce.number().int().default(30),
   // In test, throttling is skipped unless this is set (keeps the suite deterministic).
   THROTTLE_TEST_ENABLED: boolFromString(false),
 

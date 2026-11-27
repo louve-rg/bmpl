@@ -323,7 +323,7 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     { controller: 'TerminalController', route: 'DELETE /terminal/staff/:userId/locations/:locationId', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/deactivate', roles: 'MANAGER', throttled: false },
     { controller: 'TerminalController', route: 'POST /terminal/staff/:userId/reactivate', roles: 'MANAGER', throttled: false },
-    // EDW-P2 (MDF-1173): ANY, not MANAGER — this is the lookup step that
+    // EDW-P2 (MDF-1171): ANY, not MANAGER — this is the lookup step that
     // PRECEDES handoff below, strictly less powerful than it (pure read, no
     // state change), and handoff itself is already ANY. Requiring MANAGER
     // here would mean an ordinary counter clerk holding the parcel has to
@@ -344,10 +344,16 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
 
   /** One scan, reused by both assertions below: every @Get/@Post/@Delete/
    *  @Patch on the three terminal-staff classes, in source order, each
-   *  tagged with whether a @StrictThrottle() appears in the ~80 characters
-   *  immediately before it — long enough to span the decorator's own line
-   *  plus a blank line, short enough that an unrelated sibling route's
-   *  throttle can never be mistaken for this one's. */
+   *  tagged with whether a per-IP throttle decorator appears in the ~80
+   *  characters immediately before it — long enough to span the decorator's
+   *  own line plus a blank line, short enough that an unrelated sibling
+   *  route's throttle can never be mistaken for this one's.
+   *  `@StrictThrottle()` or `@TerminalLookupThrottle()` both count — MDF-1184
+   *  gave the lookup route its own per-IP number (same mechanism, a
+   *  different limit) rather than leaving it unthrottled, and this scan
+   *  must keep recognizing a real decorator swap as "throttled", not punish
+   *  it as if the route lost its throttle entirely. */
+  const THROTTLE_DECORATORS = ['@StrictThrottle()', '@TerminalLookupThrottle()'];
   function scanTerminalStaffRoutes(src: string) {
     const classNames = ['TerminalController', 'TerminalLegsController', 'TerminalShipmentsController'];
     const routes: { method: string; throttled: boolean }[] = [];
@@ -362,7 +368,7 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
       while ((m = re.exec(block)) !== null) {
         const windowStart = Math.max(0, m.index - 80);
         const preceding = block.slice(windowStart, m.index);
-        routes.push({ method: m[1]!, throttled: preceding.includes('@StrictThrottle()') });
+        routes.push({ method: m[1]!, throttled: THROTTLE_DECORATORS.some((d) => preceding.includes(d)) });
       }
     }
     return routes;
@@ -381,7 +387,7 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
     ).toBe(ROLE_MATRIX.length);
   });
 
-  it('every route ROLE_MATRIX marks throttled actually carries @StrictThrottle(), in source order', () => {
+  it('every route ROLE_MATRIX marks throttled actually carries a per-IP throttle decorator, in source order', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
     const routes = scanTerminalStaffRoutes(src);
 
@@ -391,8 +397,8 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
       expect(
         r.throttled,
         `${expected.route} (${expected.controller}) is declared throttled=${expected.throttled} in ROLE_MATRIX, ` +
-          `but its actual @StrictThrottle() presence in the source is ${r.throttled} — MDF-716's own finding ` +
-          `(the lookup route shipped without one) is exactly this class of drift.`,
+          `but its actual @StrictThrottle()/@TerminalLookupThrottle() presence in the source is ${r.throttled} — ` +
+          `MDF-716's own finding (the lookup route shipped without one) is exactly this class of drift.`,
       ).toBe(expected.throttled);
     });
   });
