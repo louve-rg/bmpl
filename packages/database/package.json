@@ -11,8 +11,9 @@
     }
   },
   "scripts": {
-    "generate": "prisma generate",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "generate": "node scripts/guard-worktree-node-modules.cjs && prisma generate && node scripts/stamp-schema-hash.cjs",
+    "verify-client": "node scripts/verify-client-matches-schema.cjs",
+    "build": "node scripts/guard-worktree-node-modules.cjs && prisma generate && node scripts/stamp-schema-hash.cjs && tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
