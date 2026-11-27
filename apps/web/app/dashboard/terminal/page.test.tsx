@@ -633,20 +633,23 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     await clickButton('Find parcel');
 
     expect(container!.textContent).toContain('Too many parcels match that code. Ask for the shipment reference instead.');
+    // The server text says to use the reference but not where -- this panel names the Lookup tab itself.
+    expect(container!.textContent).toContain('Use the shipment reference on the Lookup tab.');
   });
 
-  it("the endpoint's own per-caller rate limit (429) renders the real server message verbatim", async () => {
+  it('a 429 ALWAYS shows this panel\'s own wording, never the server message -- the only 429 a clerk can hit today is the raw library string "ThrottlerException: Too Many Requests" from the shared per-IP throttle, not checkLookupRate\'s own text (Stanley, live browser run)', async () => {
     stubFetch({
       queueRows: [HANDOFF_ROW_LINE_HAUL],
       lookupByCodeStatus: 429,
-      lookupByCodeBody: { message: 'Too many lookups. Wait a moment and try again.' },
+      lookupByCodeBody: { message: 'ThrottlerException: Too Many Requests' },
     });
     await mount();
 
     setValue(container!.querySelector('#code-lookup-input') as HTMLInputElement, '9999');
     await clickButton('Find parcel');
 
-    expect(container!.textContent).toContain('Too many lookups. Wait a moment and try again.');
+    expect(container!.textContent).toContain('Too many code lookups');
+    expect(container!.textContent).not.toContain('ThrottlerException');
   });
 
   it('submits a release-to-courier with only the pin', async () => {

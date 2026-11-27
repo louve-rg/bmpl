@@ -164,6 +164,8 @@ export function CodeLookupPanel({
       {state.kind === 'tooMany' && (
         <Alert tone="neutral">
           {state.message ?? 'More than 5 parcels match that code here. Search by the shipment reference instead, on the Lookup tab.'}
+          {/* The server's own message (above) says to use the reference but not where -- this panel's older fallback already named the Lookup tab, so keep naming it here too. */}
+          {state.message && ' Use the shipment reference on the Lookup tab.'}
         </Alert>
       )}
 

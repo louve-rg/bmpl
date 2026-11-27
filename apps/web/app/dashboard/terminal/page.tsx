@@ -544,7 +544,15 @@ export default function TerminalWorkspacePage() {
       if (status === 400) {
         setCodeLookupState({ kind: 'tooMany', message: errMessage(e, 'Too many parcels match that code.') });
       } else if (status === 429) {
-        setCodeLookupState({ kind: 'limitReached', message: errMessage(e, 'Too many code lookups.') });
+        // NEVER use the server's own message here (Stanley, live browser run):
+        // the route's per-IP throttle fires below our own per-user rate limit
+        // today, so the ONLY 429 a clerk can actually see right now is the
+        // raw library string "ThrottlerException: Too Many Requests", not our
+        // friendly checkLookupRate() text. Deliberately not filtering on that
+        // string, or any other library exception name -- matching a name is
+        // exactly what silently breaks on a library upgrade. Our own copy is
+        // true for either 429 source, so always use it instead of the server's.
+        setCodeLookupState({ kind: 'limitReached' });
       } else {
         setCodeLookupState({ kind: 'error', message: errMessage(e, 'Could not look up that code.') });
       }
