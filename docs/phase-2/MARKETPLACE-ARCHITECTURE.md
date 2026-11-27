@@ -139,8 +139,10 @@ and transitions the payment `PENDING→AUTHORIZED` — all in one transaction. M
 moves **only** customer↔escrow; **vendor balances are never touched** and escrow
 holds the funds until a future settlement milestone. Real movement is gated by the
 wallet package's `assertMoneyMovementEnabled`, passed `true` **only** for these
-escrow operations. (Correction: there is no global `WALLET_MONEY_MOVEMENT_ENABLED`
-in code — the gate is this per-call argument, and no real-money rail exists.) The
+escrow operations. (Correction: `WALLET_MONEY_MOVEMENT_ENABLED` does exist, in
+`packages/shared/src/wallet.ts`, hard-set to `false` — but it has zero
+consumers anywhere in `apps/`. The real gate is this per-call argument, and
+no real-money rail exists.) The
 `WalletTransaction.reference` (`payment:<id>:auth`) is unique → ledger-level
 idempotency (re-authorizing replays, never double-debits). On any validation
 failure the order is rolled back atomically (hold + reservation released, order
