@@ -21,6 +21,7 @@
     "test:integration": "pnpm --filter @bmpl/api test:integration",
     "clean": "turbo run clean",
     "deploy:status": "node scripts/deploy-status.mjs",
+    "check:node-modules-links": "node scripts/check-node-modules-links.cjs",
     "db:generate": "pnpm --filter @bmpl/database generate",
     "db:migrate": "pnpm --filter @bmpl/database migrate",
     "db:migrate:deploy": "pnpm --filter @bmpl/database migrate:deploy",
