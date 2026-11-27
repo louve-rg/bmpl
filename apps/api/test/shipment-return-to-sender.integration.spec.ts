@@ -152,14 +152,16 @@ const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }
 const flag = (legId: string, reason = 'Recipient not home; no safe place to leave the parcel.') =>
   post(admin, `admin/logistics/legs/${legId}/exception`, { reason });
 
-/** A driver walks a courier leg through every transition to the handoff. */
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+/** A driver walks a courier leg through every transition to the handoff. The
+ *  leg driven here always ends at a hub, so the final handoff (EDW-P4) must
+ *  come from staff, naming the courier as who presented the code. */
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Counter staff',
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+    pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
   })).status).toBe(201);
 }
 

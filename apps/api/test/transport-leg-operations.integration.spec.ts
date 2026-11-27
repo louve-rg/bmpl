@@ -136,14 +136,17 @@ async function pinOf(legId: string) {
 const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }) =>
   post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
 
-/** A driver walks a courier leg from offer to handoff. */
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+/** A driver walks a courier leg from offer to handoff. Every leg driven here
+ *  ends at a terminal (hub.SPW), so the handoff itself must come from staff
+ *  (EDW-P4) — the courier presents the code in person, but it is the desk
+ *  that submits it, naming the courier as who presented it. */
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Counter staff',
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+    pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
   })).status).toBe(201);
 }
 
@@ -667,10 +670,19 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect(revealed.status).toBe(200);
     expect(revealed.body.code).toBe(firstMilePin);
 
-    // (b) A wrong code: refused, and counted.
+    // (b) A wrong code: refused, and counted. Submitted by staff naming the
+    // assigned courier (EDW-P4: the courier's own direct call is refused
+    // before the pin is even looked at, so it cannot exercise THIS lockout —
+    // the legitimate desk submission is what actually reaches the pin check
+    // in production now).
     expect(
-      (await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: otherPin(firstMilePin), receivedByName: 'Desk' }))
-        .status,
+      (
+        await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, {
+          pin: otherPin(firstMilePin),
+          receivedByName: 'Desk',
+          presentedCourierUserId: driver1.userId,
+        })
+      ).status,
     ).toBe(400);
     expect(await attemptsOn(firstMile.id)).toBe(1);
     expect(await custodyCount(s.id)).toBe(2); // a rejected attempt moves nothing
@@ -696,9 +708,28 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect(await attemptsOn(firstMile.id)).toBe(2);
     expect(await custodyCount(s.id)).toBe(2);
 
-    // The right code, from the actual currently-assigned courier: succeeds.
+    // EDW-P4: the courier can no longer self-complete a handoff into a
+    // terminal — only staff may receive custody there (the pickup side
+    // already had this; the handoff side did not). Refused before the pin
+    // is even checked (`destinationHubId != null`, self-asserted), so it
+    // does not burn an attempt — this is not a wrong-code guess.
+    const selfSubmit = await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Desk SPW' });
+    expect(selfSubmit.status).toBe(400);
+    expect(await attemptsOn(firstMile.id)).toBe(2); // unchanged
+    expect(await custodyCount(s.id)).toBe(2); // nothing moved
+
+    // The right code, from STAFF, naming the actual currently-assigned
+    // courier as who presented it: succeeds — a terminal desk genuinely
+    // receiving the parcel, actor (staff) and presented identity (courier)
+    // being two different people.
     expect(
-      (await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Desk SPW' })).status,
+      (
+        await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, {
+          pin: firstMilePin,
+          receivedByName: 'Desk SPW',
+          presentedCourierUserId: driver1.userId,
+        })
+      ).status,
     ).toBe(201);
     expect(await custodyCount(s.id)).toBe(3); // courier -> hub
 
@@ -805,6 +836,82 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     ]);
 
     expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('DELIVERED');
+  });
+});
+
+/**
+ * EDW-P4: Edward's instruction, in his own words — "Ensure that the API also
+ * prevents the courier from performing a terminal-only receipt action." The
+ * Edward REQ 6 journey above proves both halves too, but inline inside a
+ * large end-to-end walk; this is the isolated, minimal case so the guard has
+ * its own dedicated test rather than coverage by implication alone.
+ */
+describe('EDW-P4: a courier cannot self-complete a handoff into a terminal', () => {
+  it("refuses the courier's own submission at a hub-destined leg, succeeds for staff on that same leg, and still succeeds for a courier completing a door-destined leg", async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const firstMile = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    const lastMile = (await legs(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    expect((await assign(firstMile.id, driver)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) })).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
+
+    const pin = await pinOf(firstMile.id);
+
+    // (1) The guard FIRES: the courier presents the code to the desk in
+    // person, but the courier submitting it THEMSELVES — bypassing staff
+    // entirely — is refused before the pin is even checked
+    // (destinationHubId != null, actor is the leg's own assigned courier).
+    const selfSubmit = await post(driver.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Desk' });
+    expect(selfSubmit.status).toBe(400);
+    expect(selfSubmit.body.message).toContain('terminal staff');
+
+    // (2) The SAME leg, the SAME code, submitted by staff naming the courier
+    // who presented it: succeeds. Proves the guard refuses the actor, not
+    // the code or the leg.
+    expect(
+      (
+        await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, {
+          pin,
+          receivedByName: 'Desk',
+          presentedCourierUserId: driver.userId,
+        })
+      ).status,
+    ).toBe(201);
+
+    // (3) The guard is SCOPED, not merely firing: a LAST_MILE leg ends at a
+    // door, not a terminal (no destinationHubId), so the courier is the
+    // right — and only — person to complete it, and that must keep
+    // working. This is what proves the guard keys on the physical hub
+    // fact rather than `leg.kind` or some wider condition: a later change
+    // that drops the destinationHub check, keys on kind instead, or
+    // inverts a null test would still pass assertions (1) and (2) but fail
+    // this one immediately.
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, { carrierName: 'UAT Water Taxi' })).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+    expect(
+      (await post(admin, `admin/logistics/legs/${lineHaul.id}/handoff`, { pin: await pinOf(lineHaul.id), receivedByName: 'Desk BZW' })).status,
+    ).toBe(201);
+
+    const driver2 = await makeDriver();
+    expect((await assign(lastMile.id, driver2)).status).toBe(201);
+    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
+    expect(
+      (await post(admin, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: await pickupPinFor(lastMile.id) })).status,
+    ).toBe(201);
+    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/in-transit`)).status).toBe(201);
+    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/arriving`)).status).toBe(201);
+    expect(
+      (
+        await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/handoff`, {
+          pin: await pinOf(lastMile.id),
+          receivedByName: 'Recipient',
+        })
+      ).status,
+    ).toBe(201);
   });
 });
 

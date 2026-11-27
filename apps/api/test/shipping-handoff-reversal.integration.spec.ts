@@ -196,14 +196,15 @@ async function driveFirstMileToInProgress(courier: { cookies: string[] }, legId:
  *  dispatched and its courier has accepted (DRIVER_ACCEPTED) but not yet
  *  picked up — the exact moment this file's release-to-courier tests
  *  exercise. Completes FIRST_MILE and every LINE_HAUL leg on the way using
- *  the plain admin code-only route (no presented-courier identity needed —
- *  LINE_HAUL has no assigned courier, and FIRST_MILE's own courier submits
- *  through their own app here, which is unaffected by this card). */
-async function driveToLastMileAccepted(firstCourier: { cookies: string[] }, lastMileCourier: { cookies: string[] }, shipmentId: string) {
+ *  the plain admin code-only route (LINE_HAUL has no assigned courier;
+ *  FIRST_MILE's handoff goes through staff too, EDW-P4 — naming the
+ *  courier as who presented the code — since the courier's own direct call
+ *  at a hub-destined leg is refused). */
+async function driveToLastMileAccepted(firstCourier: { cookies: string[]; userId: string }, lastMileCourier: { cookies: string[] }, shipmentId: string) {
   const { firstMile, lineHauls, lastMile } = await journey(shipmentId);
   await driveFirstMileToInProgress(firstCourier, firstMile.id);
   const firstMilePin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id }, select: { handoffPin: true } })).handoffPin!;
-  expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk' })).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk', presentedCourierUserId: firstCourier.userId })).status).toBe(201);
   for (const lh of lineHauls) {
     expect((await post(admin, `admin/logistics/legs/${lh.id}/depart`, {})).status).toBe(201);
     expect((await post(admin, `admin/logistics/legs/${lh.id}/arrive`, {})).status).toBe(201);
@@ -1000,7 +1001,9 @@ describe('a LINE_HAUL leg cannot be handed off before it arrives (TERM-10)', () 
     const { firstMile, lineHauls } = await journey(shipment.id);
     await driveFirstMileToInProgress(courier, firstMile.id);
     const firstMilePin = (await legRow(firstMile.id)).handoffPin!;
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk', presentedCourierUserId: courier.userId })).status).toBe(201);
 
     const haul = lineHauls[0]!;
     if (state === 'DEPARTED_NOT_ARRIVED') {

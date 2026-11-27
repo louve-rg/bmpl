@@ -143,14 +143,17 @@ const flag = (legId: string, reason = 'Vehicle broke down at the pickup.') =>
 
 const resolve = (legId: string, body: object) => post(admin, `admin/logistics/legs/${legId}/resolve-exception`, body);
 
-/** A driver walks a courier leg through every transition to the handoff. */
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+/** A driver walks a courier leg through every transition to the handoff. The
+ *  leg always ends at a hub here, so the final handoff (EDW-P4) must come
+ *  from staff, naming the courier as who presented the code — not the
+ *  courier's own direct submission. */
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Counter staff',
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+    pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
   })).status).toBe(201);
 }
 
@@ -159,13 +162,16 @@ async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
  * the fifth is the one that locks the leg (MDF-96's PIN-lockout auto-flag)
  * and leaves it EXCEPTION with handoffPinAttempts at MAX_PIN_ATTEMPTS.
  */
-async function driveToPinLockout(driver: { cookies: string[] }, legId: string) {
+async function driveToPinLockout(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  // EDW-P4: wrong-code attempts go through staff (naming the real assigned
+  // courier) so they actually reach the pin/lockout counter instead of being
+  // refused upfront for self-submission at a hub-destined leg.
   for (let i = 0; i < 5; i++) {
-    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: '000000', receivedByName: 'Wrong' });
+    const r = await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: '000000', receivedByName: 'Wrong', presentedCourierUserId: driver.userId });
     expect(r.status).toBe(400);
   }
 }
@@ -277,8 +283,8 @@ describe('resume', () => {
     // The driver's own transitions carry on as if nothing had been flagged.
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-    const done = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-      pin: await pinOf(legId), receivedByName: 'Counter staff',
+    const done = await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+      pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
     });
     expect(done.status).toBe(201);
     const ship = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
@@ -330,7 +336,7 @@ describe('completeLeg racing flagException on the same IN_PROGRESS leg (MDF-223)
     const N = 5;
     const responses = await Promise.all([
       ...Array.from({ length: N }, () =>
-        post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin, receivedByName: 'Counter staff' }),
+        post(admin, `admin/logistics/legs/${legId}/handoff`, { pin, receivedByName: 'Counter staff', presentedCourierUserId: driver.userId }),
       ),
       ...Array.from({ length: N }, () => flag(legId, 'Vehicle broke down at the pickup.')),
     ]);
@@ -388,8 +394,8 @@ describe('resume — handoff PIN locked out (MDF-2)', () => {
     expect(leg.handoffPin).not.toBeNull(); // unchanged — only the counter resets, not the code itself
 
     // The actual proof: the shipment was stuck, and now it is not.
-    const done = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-      pin: await pinOf(legId), receivedByName: 'Counter staff',
+    const done = await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+      pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
     });
     expect(done.status).toBe(201);
 
@@ -638,6 +644,12 @@ describe('an active exception blocks every forward courier transition', () => {
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
     expect((await flag(legId, 'Flagged on arrival, before handoff.')).status).toBe(201);
 
+    // NOT rewritten to the staff-submission shape (unlike the other call
+    // sites in this file): ShipmentDriverService.completeHandoff runs its
+    // own assertNotException pre-check BEFORE ever reaching
+    // ShipmentService.completeLeg, so this 409 fires before EDW-P4's guard
+    // in completeLeg would even be reached — the courier's own direct call
+    // is the only path that exercises THIS specific pre-check.
     const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
       pin: await pinOf(legId), receivedByName: 'Counter staff',
     });

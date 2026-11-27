@@ -332,7 +332,9 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const handoffPin = (await legRow(firstMile.id)).handoffPin!;
-    expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: handoffPin, receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: handoffPin, receivedByName: 'Terminal desk', presentedCourierUserId: firstCourier.userId })).status).toBe(201);
     for (const lh of lineHauls) {
       expect((await post(admin, `admin/logistics/legs/${lh.id}/depart`, {})).status).toBe(201);
       expect((await post(admin, `admin/logistics/legs/${lh.id}/arrive`, {})).status).toBe(201);
