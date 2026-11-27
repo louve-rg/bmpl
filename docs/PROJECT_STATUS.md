@@ -170,9 +170,11 @@ authorized it, and those versions are superseded. What has **not** changed:
 
 - No real-money passenger payments — no fare is charged, no commission is
   taken, no cancellation fee is collected. (`WALLET_MONEY_MOVEMENT_ENABLED`
-  appears in older documents but does not exist in code; there is no global
-  money switch to leave untouched. The wallet's `assertMoneyMovementEnabled`
-  is a per-call code gate, and no real-money rail exists behind it.)
+  exists in `packages/shared/src/wallet.ts`, hard-set to `false`, but is a
+  dead export today — zero consumers anywhere in `apps/` — not a global
+  money switch anyone leaves untouched. The wallet's
+  `assertMoneyMovementEnabled` is the per-call code gate actually in force,
+  and no real-money rail exists behind it.)
 - No invented fare formulas, rates or commercial policy. Pricing is an
   unresolved product-owner decision; a plausible fare here becomes a real charge
   to a real person.

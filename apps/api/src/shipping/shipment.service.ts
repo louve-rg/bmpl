@@ -1031,7 +1031,7 @@ export class ShipmentService {
           // whether a value exists).
           collectionPin: this.genPin(),
           collectionPinGrandfathered: false,
-          legs: { create: plan.legs.map((l) => this.legData(l, payNow || simulated, routeOperators)) },
+          legs: { create: this.legRows(plan.legs, payNow || simulated, routeOperators) },
         },
         include: SHIPMENT_INCLUDE,
       });
@@ -1122,7 +1122,7 @@ export class ShipmentService {
    * workable on booking, same as a paid one. A real shipment is unaffected:
    * unpaid still means PENDING, exactly as before.
    */
-  private legData(l: PlannedLeg, workable: boolean, routeOperators?: Map<string, string | null>) {
+  private legData(l: PlannedLeg, workable: boolean, routeOperators: Map<string, string | null> | undefined, inheritedHandoffPin: string | null) {
     return {
       sequence: l.sequence,
       kind: l.kind,
@@ -1137,7 +1137,7 @@ export class ShipmentService {
       durationMinutes: l.durationMinutes,
       priceMinor: BigInt(l.priceMinor),
       description: l.description,
-      handoffPin: this.genPin(),
+      handoffPin: inheritedHandoffPin ?? this.genPin(),
       // Generated universally, same as handoffPin above — cheap, consistent,
       // and the leg doesn't need to know at creation time whether it will
       // end up enforcing (see verifyLegPinOrThrow / pickupPinFor, which
@@ -1149,6 +1149,50 @@ export class ShipmentService {
       // grandfather, see the migration's own comment) is ever true.
       pickupPinGrandfathered: false,
     };
+  }
+
+  /**
+   * EDW-P1/P2 (owner ruling, 2026-11-26): a FIRST_MILE leg handed to a
+   * terminal and the LINE_HAUL leg that departs from that same hub share ONE
+   * handoff code, generated once here, rather than each getting its own
+   * independent `genPin()`. This is what makes "the courier presents a code
+   * at the origin terminal, the same code travels on the package, the
+   * receiving terminal enters it to complete the line-haul handoff" literally
+   * true — the receiving terminal was never any other party's "second org
+   * vouching" (which a third-party Terminal Company has no axis to reach:
+   * neither `logistics.verify` admin permission nor carrier/provider-org
+   * membership), it is reading a value that physically travelled with the
+   * parcel it is holding. Nothing downstream changes: `completeLeg` still
+   * verifies a leg's PIN against that SAME leg's own `handoffPin` column
+   * (`verifyLegPinOrThrow`), and each leg keeps its own independent
+   * `handoffPinAttempts` lockout — this only changes which value the two
+   * legs are seeded with at creation.
+   *
+   * Scoped deliberately narrow, matching Edward's own reported shape and
+   * nothing wider: only a LINE_HAUL leg whose `originHubId` equals the
+   * IMMEDIATELY PRECEDING leg's `destinationHubId`, where that preceding leg
+   * is FIRST_MILE, inherits its code. A LINE_HAUL leg with no FIRST_MILE
+   * predecessor (HUB_TO_HUB, the sender dropped the parcel off at the hub in
+   * person — there is no courier to carry a code anywhere) keeps its own
+   * independent PIN, unaffected. A LINE_HAUL leg immediately following
+   * ANOTHER LINE_HAUL (a multi-hop transport chain) is also left untouched —
+   * extending code-sharing across a further hop is a separate decision this
+   * card did not authorise. `pickupPin`, and every LAST_MILE/DIRECT leg's own
+   * `handoffPin`, are never shared by this method — only the one
+   * FIRST_MILE->LINE_HAUL pairing above.
+   */
+  private legRows(legs: PlannedLeg[], workable: boolean, routeOperators?: Map<string, string | null>) {
+    const handoffPins: (string | null)[] = [];
+    return legs.map((l, i) => {
+      const prev = i > 0 ? legs[i - 1] : null;
+      const inheritedHandoffPin =
+        l.kind === 'LINE_HAUL' && prev?.kind === 'FIRST_MILE' && prev.destinationHubId != null && prev.destinationHubId === l.originHubId
+          ? handoffPins[i - 1] ?? null
+          : null;
+      const row = this.legData(l, workable, routeOperators, inheritedHandoffPin);
+      handoffPins.push(row.handoffPin);
+      return row;
+    });
   }
 
   private genPin(): string {

@@ -120,9 +120,10 @@ matrix. Reset Redis between rapid reruns if the rate-limit spec flakes
   enum + `@bmpl/shared` `AUDIT_ACTIONS` mirror together).
 - Uploads reuse `StorageService` (presign → PUT → `headObject` verify → persist key).
 - **Money movement is gated in code, not by configuration.** (Correction: the
-  "global `WALLET_MONEY_MOVEMENT_ENABLED`" this document once described was
-  never built — no such variable exists in code.) The gate is the wallet
-  package's `assertMoneyMovementEnabled(enabled)`, a per-call boolean passed
+  "global `WALLET_MONEY_MOVEMENT_ENABLED`" this document once described IS a
+  real export, `packages/shared/src/wallet.ts`, hard-set to `false` — but it
+  has zero consumers anywhere in `apps/`, so nothing reads it. It is not the
+  gate.) The gate is the wallet package's `assertMoneyMovementEnabled(enabled)`, a per-call boolean passed
   `true` **only** by `WalletService.postTransaction`'s sanctioned internal
   **customer↔escrow** operations (M12). Every posted transaction MUST be balanced (`assertBalanced` — debits ==
   credits, net 0) and carry a **unique `reference`** (ledger-level idempotency).

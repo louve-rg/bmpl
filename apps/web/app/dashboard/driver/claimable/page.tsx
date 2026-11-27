@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { isShipmentJob, type DriverJobKind } from '@bmpl/shared';
 import { api, type ApiError } from '../../../../lib/api';
 import { Alert, Button, Card, EmptyState, PageHeader, Spinner } from '../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../components/driver/DriverBreadcrumb';
@@ -31,22 +33,45 @@ function districtLabel(d?: string | null): string {
 
 /**
  * `DriverJobService.summarizeClaimable`'s own shape (apps/api/src/dispatch/
- * driver-jobs.service.ts). Deliberately narrower than the regular job feed:
- * no pickup area/address (the regular feed/queue carries `pickupArea`; this
- * one does not select the vendor's location at all), no `kind`/`reference`
- * (this list is marketplace-only — `claimableJobs` only ever queries
- * `orderDelivery`, never a shipment leg), and no computed rate — `feeMinor`
- * is whatever the delivery's own fee already is.
+ * driver-jobs.service.ts). EDW-P3 extended this from marketplace-only to
+ * BOTH marketplace deliveries and shipment courier legs, so the marketplace
+ * fields (`orderNumber`/`vendor`/`itemCount`/`city`/`district`) stay exactly
+ * as they were — kept beside the new normalized ones, never replaced — and
+ * are present only for a marketplace row; a courier-leg row instead carries
+ * `kind`/`kindLabel`/`reference`/`pickup`/`dropoff`/`load`, the same
+ * vocabulary the Available-list job card already uses.
  */
 interface ClaimableJob {
   id: string;
-  orderNumber: string;
-  vendor: string;
-  itemCount: number;
-  city: string | null;
-  district: string | null;
+  // ---- marketplace only, unchanged ----
+  orderNumber?: string;
+  vendor?: string;
+  itemCount?: number;
+  city?: string | null;
+  district?: string | null;
+  // ---- courier leg only, new in EDW-P3 ----
+  kind?: DriverJobKind;
+  kindLabel?: string;
+  reference?: string;
+  pickup?: { area: string | null };
+  dropoff?: { area: string | null };
+  load?: string;
+  // ---- both ----
   feeMinor: number;
-  dispatchExhaustedAt: string | null;
+  /**
+   * `inAvailableJobs` is the server's own eligibility call — today it equals
+   * `!youPassed`, but that is never recomputed here. When true, this exact
+   * job also shows on `/dashboard/driver/jobs` (Available tab); the card
+   * says so, so a driver checking both tabs sees one job, not two.
+   * `claimPath` is always posted as-is rather than branched on kind — it
+   * already resolves which of the two server routes applies.
+   */
+  claim: {
+    dispatchExhaustedAt: string | null;
+    youPassed: boolean;
+    inAvailableJobs: boolean;
+    claimPath: string;
+  };
 }
 
 /* ----------------------------------------------------------------- page */
@@ -111,22 +136,26 @@ export default function ClaimableJobsPage() {
    * own message attached to that card.
    */
   async function claim(job: ClaimableJob) {
+    const title = job.orderNumber ? `Order #${job.orderNumber}` : job.reference ?? 'This job';
     setClaimingId(job.id);
     setFieldErrors((m) => {
       const { [job.id]: _dropped, ...rest } = m;
       return rest;
     });
     try {
-      const won = await api.post<{ id: string }>(`/driver/jobs/${job.id}/claim`);
-      router.push(`/dashboard/driver/jobs/${won.id}`);
+      // Always `claim.claimPath`, never a path built from `job.id` — it
+      // already resolves which of the two server routes (delivery or
+      // courier leg) this particular job needs.
+      const won = await api.post<{ id: string }>(job.claim.claimPath);
+      router.push(job.kind && isShipmentJob(job.kind) ? `/dashboard/driver/shipping/${won.id}` : `/dashboard/driver/jobs/${won.id}`);
     } catch (e) {
       const status = errStatus(e);
       if (status === 409 || status === 404) {
         setJobs((js) => (js ?? []).filter((j) => j.id !== job.id));
         showNotice(
           status === 409
-            ? `Order #${job.orderNumber} is no longer available — it was claimed or reassigned. Removed it from your list.`
-            : `Order #${job.orderNumber} is no longer available.`,
+            ? `${title} is no longer available — it was claimed or reassigned. Removed it from your list.`
+            : `${title} is no longer available.`,
         );
       } else {
         setFieldErrors((m) => ({ ...m, [job.id]: errMessage(e) }));
@@ -175,23 +204,57 @@ export default function ClaimableJobsPage() {
 }
 
 function JobCard({ job, busy, error, onClaim }: { job: ClaimableJob; busy: boolean; error: string | null; onClaim: () => void }) {
+  // A marketplace row always carries orderNumber; a courier-leg row never
+  // does — that single existing field is enough to tell the two apart
+  // without a new discriminant.
+  const marketplace = job.orderNumber != null;
   const destination = [job.city, districtLabel(job.district)].filter(Boolean).join(', ');
   return (
     <Card className="p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">Order #{job.orderNumber}</p>
-          <p className="mt-1.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
-            <span className="text-[color:var(--bmpl-text-faint)]">Collect from</span> {job.vendor}
+          {!marketplace && job.kindLabel && (
+            <span className="mb-1.5 inline-block rounded-full bg-belize-accent/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-belize-deep">
+              {job.kindLabel}
+            </span>
+          )}
+          <p className="break-words text-sm font-semibold text-[color:var(--bmpl-text)]">
+            {marketplace ? `Order #${job.orderNumber}` : job.reference}
           </p>
-          <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
-            <span className="text-[color:var(--bmpl-text-faint)]">Deliver to</span> {destination || '—'}
-          </p>
-          <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-faint)]">
-            {job.itemCount} item{job.itemCount === 1 ? '' : 's'}
-          </p>
-          {job.dispatchExhaustedAt && (
-            <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">Waiting since {formatDate(job.dispatchExhaustedAt)}</p>
+          {marketplace ? (
+            <>
+              <p className="mt-1.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+                <span className="text-[color:var(--bmpl-text-faint)]">Collect from</span> {job.vendor}
+              </p>
+              <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+                <span className="text-[color:var(--bmpl-text-faint)]">Deliver to</span> {destination || '—'}
+              </p>
+              <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-faint)]">
+                {job.itemCount} item{job.itemCount === 1 ? '' : 's'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-1.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+                <span className="text-[color:var(--bmpl-text-faint)]">Collect</span> {job.pickup?.area ?? '—'}
+              </p>
+              <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+                <span className="text-[color:var(--bmpl-text-faint)]">Deliver</span> {job.dropoff?.area ?? '—'}
+              </p>
+              {job.load && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-faint)]">{job.load}</p>}
+            </>
+          )}
+          {job.claim.dispatchExhaustedAt && (
+            <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">Waiting since {formatDate(job.claim.dispatchExhaustedAt)}</p>
+          )}
+          {job.claim.inAvailableJobs && (
+            <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">
+              Also showing in your{' '}
+              <Link href="/dashboard/driver/jobs" className="font-medium text-belize-blue hover:underline">
+                Available
+              </Link>{' '}
+              tab.
+            </p>
           )}
         </div>
         <div className="shrink-0 text-right">

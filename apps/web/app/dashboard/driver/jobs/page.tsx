@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DRIVER_DELIVERY_VIEWS,
@@ -12,7 +13,7 @@ import {
 } from '@bmpl/shared';
 import { api, type ApiError } from '../../../../lib/api';
 import { formatWindow } from '../../../../lib/availability-window';
-import { Alert, Card, EmptyState, PageHeader, Spinner, StatusBadge } from '../../../../components/ui';
+import { Alert, Button, Card, EmptyState, PageHeader, Spinner, StatusBadge } from '../../../../components/ui';
 import { DeliveryQueue } from '../../../../components/driver/DeliveryQueue';
 import { DriverBreadcrumb } from '../../../../components/driver/DriverBreadcrumb';
 
@@ -20,6 +21,9 @@ import { DriverBreadcrumb } from '../../../../components/driver/DriverBreadcrumb
 
 function errMessage(e: unknown): string {
   return (e as ApiError)?.message ?? 'Something went wrong.';
+}
+function errStatus(e: unknown): number | undefined {
+  return (e as ApiError)?.status;
 }
 function money(minor: number): string {
   return `$${(minor / 100).toFixed(2)}`;
@@ -85,6 +89,22 @@ interface JobSummary {
   vendor?: string;
   itemCount?: number;
   deliveredAt?: string | null;
+  /**
+   * EDW-P3: present only on a post-exhaustion row the server appends to the
+   * end of `scope=available`, after the live offers — a live offer never
+   * carries this key. The same underlying job also appears on the Unclaimed
+   * Jobs page (`/driver/jobs/claimable`); `claimPath` is how to claim it from
+   * either place, and is always used as-is rather than branched on `kind` —
+   * it already resolves which of the two server routes (delivery or courier
+   * leg) applies. `inAvailableJobs`/`youPassed` are the server's own
+   * eligibility call, never recomputed here.
+   */
+  claim?: {
+    dispatchExhaustedAt: string | null;
+    youPassed: boolean;
+    inAvailableJobs: boolean;
+    claimPath: string;
+  };
 }
 
 /** Shipping legs live on their own detail route; marketplace jobs on theirs. */
@@ -109,6 +129,7 @@ type Counts = Record<DriverDeliveryView, number>;
  * a driver with two jobs is deciding between them, not filtering.
  */
 export default function DriverJobsPage() {
+  const router = useRouter();
   // Null until the counts say which tab is worth opening — see below.
   const [view, setView] = useState<DriverDeliveryView | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -117,6 +138,57 @@ export default function DriverJobsPage() {
   const [error, setError] = useState<string | null>(null);
   // Once the driver picks a tab themselves, never move it under them.
   const chosenByDriver = useRef(false);
+
+  // ---- EDW-P3: claiming a post-exhaustion row appended to this list ----
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [claimErrors, setClaimErrors] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    };
+  }, []);
+  function showNotice(message: string) {
+    setNotice(message);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 6000);
+  }
+
+  /**
+   * Same lost-race handling as the Unclaimed Jobs page's own `claim()`: a
+   * 409/404 is another driver (or admin, or a fresh automatic offer) having
+   * won first, not this driver doing anything wrong, so it reads as a plain
+   * notice and the row simply leaves the list rather than an error dialog.
+   */
+  async function claimJob(job: JobSummary) {
+    if (!job.claim) return;
+    const title = isShipmentJob(job.kind) ? job.reference : `Order #${job.orderNumber}`;
+    setClaimingId(job.id);
+    setClaimErrors((m) => {
+      const { [job.id]: _dropped, ...rest } = m;
+      return rest;
+    });
+    try {
+      const won = await api.post<{ id: string }>(job.claim.claimPath);
+      router.push(isShipmentJob(job.kind) ? `/dashboard/driver/shipping/${won.id}` : `/dashboard/driver/jobs/${won.id}`);
+    } catch (e) {
+      const status = errStatus(e);
+      if (status === 409 || status === 404) {
+        setJobs((js) => js.filter((j) => j.id !== job.id));
+        void loadCounts();
+        showNotice(
+          status === 409
+            ? `${title} is no longer available — it was claimed or reassigned. Removed it from your list.`
+            : `${title} is no longer available.`,
+        );
+      } else {
+        setClaimErrors((m) => ({ ...m, [job.id]: errMessage(e) }));
+      }
+    } finally {
+      setClaimingId(null);
+    }
+  }
 
   const loadCounts = useCallback(async () => {
     try {
@@ -234,6 +306,7 @@ export default function DriverJobsPage() {
 
       {view && <p className="text-sm text-[color:var(--bmpl-text-muted)]">{DRIVER_VIEW_DESCRIPTIONS[view]}</p>}
 
+      {notice && <Alert tone="info">{notice}</Alert>}
       {error && <Alert tone="error">{error}</Alert>}
 
       <div id="driver-jobs-panel" role="tabpanel">
@@ -247,7 +320,13 @@ export default function DriverJobsPage() {
           <ul className="space-y-3">
             {jobs.map((job) => (
               <li key={job.id}>
-                <JobCard job={job} view={view} />
+                <JobCard
+                  job={job}
+                  view={view}
+                  onClaim={claimJob}
+                  claimBusy={claimingId === job.id}
+                  claimError={claimErrors[job.id] ?? null}
+                />
               </li>
             ))}
           </ul>
@@ -270,7 +349,73 @@ const EMPTY: Record<DriverDeliveryView, { title: string; description: string }> 
   completed: { title: 'No completed deliveries', description: 'Deliveries you complete will appear here.' },
 };
 
-function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
+/**
+ * EDW-P3: an appended post-exhaustion row has no offer in progress — the
+ * driver would have to come looking for it on the Unclaimed Jobs page
+ * (`/driver/jobs/claimable`), same job, same `claimPath`. Routing this card
+ * to the normal job-detail page would 404 (it isn't assigned to this driver
+ * yet), so it renders inline instead, same shape as that page's own card.
+ */
+function JobCard({
+  job,
+  view,
+  onClaim,
+  claimBusy,
+  claimError,
+}: {
+  job: JobSummary;
+  view: DriverDeliveryView;
+  onClaim: (job: JobSummary) => void;
+  claimBusy: boolean;
+  claimError: string | null;
+}) {
+  const claimable = view === 'available' && job.claim != null;
+  const body = <JobCardBody job={job} view={view} />;
+
+  if (!claimable) {
+    return (
+      <Link href={jobHref(job)} className="block">
+        <Card
+          className={`p-4 transition hover:border-belize-blue/40 hover:shadow-bmpl-md active:scale-[0.995] sm:p-5 ${
+            view === 'available' ? 'border-belize-accent/40 bg-belize-accent/5' : ''
+          }`}
+        >
+          {body}
+        </Card>
+      </Link>
+    );
+  }
+
+  return (
+    <Card className="p-4 border-belize-accent/40 bg-belize-accent/5 sm:p-5">
+      {body}
+      <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+        {/* Same job, same two places — says so plainly rather than letting a
+            driver who checks both tabs conclude there are two openings. */}
+        <p className="text-xs text-[color:var(--bmpl-text-faint)]">
+          Also listed on{' '}
+          <Link href="/dashboard/driver/claimable" className="font-medium text-belize-blue hover:underline">
+            Unclaimed Jobs
+          </Link>
+          .
+        </p>
+        {claimError && (
+          <Alert tone="error" className="mt-2">
+            {claimError}
+          </Alert>
+        )}
+        <Button className="mt-2 w-full sm:w-auto" disabled={claimBusy} onClick={() => onClaim(job)}>
+          {claimBusy ? <Spinner className="h-4 w-4" /> : 'Claim this job'}
+        </Button>
+        <p className="mt-2 text-xs text-[color:var(--bmpl-text-faint)]">
+          Claiming reserves this job for you. You still confirm it on the next screen before the delivery starts.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+function JobCardBody({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
   const shipping = isShipmentJob(job.kind);
   // A parcel leg names both ends; a marketplace job names the store and an area.
   const from = job.pickup.name ?? job.pickup.area;
@@ -278,12 +423,7 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
   const pickupWindows = (job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER');
   const dropoffWindows = (job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT');
   return (
-    <Link href={jobHref(job)} className="block">
-      <Card
-        className={`p-4 transition hover:border-belize-blue/40 hover:shadow-bmpl-md active:scale-[0.995] sm:p-5 ${
-          view === 'available' ? 'border-belize-accent/40 bg-belize-accent/5' : ''
-        }`}
-      >
+    <>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -340,15 +480,19 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
             <p className="mt-0.5 break-words text-xs text-[color:var(--bmpl-text-muted)]">{job.load}</p>
 
             <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">
-              {view === 'completed' && job.completedAt
-                ? `Completed ${formatDate(job.completedAt)}`
-                : view === 'available' && job.offerExpiresAt
-                  ? `Offer expires ${formatDate(job.offerExpiresAt)}`
-                  : job.acceptedAt
-                    ? `Accepted ${formatDate(job.acceptedAt)}`
-                    : job.assignedAt
-                      ? `Offered ${formatDate(job.assignedAt)}`
-                      : null}
+              {job.claim
+                ? job.claim.dispatchExhaustedAt
+                  ? `Waiting since ${formatDate(job.claim.dispatchExhaustedAt)}`
+                  : null
+                : view === 'completed' && job.completedAt
+                  ? `Completed ${formatDate(job.completedAt)}`
+                  : view === 'available' && job.offerExpiresAt
+                    ? `Offer expires ${formatDate(job.offerExpiresAt)}`
+                    : job.acceptedAt
+                      ? `Accepted ${formatDate(job.acceptedAt)}`
+                      : job.assignedAt
+                        ? `Offered ${formatDate(job.assignedAt)}`
+                        : null}
             </p>
           </div>
           <div className="shrink-0 text-right">
@@ -356,7 +500,6 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
             <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-faint)]">fee</p>
           </div>
         </div>
-      </Card>
-    </Link>
+    </>
   );
 }

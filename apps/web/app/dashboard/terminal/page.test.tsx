@@ -438,9 +438,82 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     setValue(container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement, '4821');
     setValue(container!.querySelector('#handoff-who-leg_h') as HTMLInputElement, 'Maria Lopez');
     await clickButton('Record handoff');
+    expect(calls.find((c) => c.url.includes('/handoff'))).toBeUndefined();
+    await clickButton('Confirm receipt of BML-3?');
 
     const call = calls.find((c) => c.url.includes('/handoff'));
     expect(call?.body).toEqual({ pin: '4821', receivedByName: 'Maria Lopez', presentedByAssignedCourier: true });
+  });
+
+  /**
+   * EDW-P2 requirement 3: the first click only asks for confirmation, with
+   * the row's own reference/parcel/from/brought-by context (god's own
+   * decisive reasoning for inline over window.confirm: a modal would paint
+   * over exactly that context) still on screen, and never posts. Nothing
+   * commits until the second click.
+   */
+  it('EDW-P2: "Record handoff" asks for confirmation inline first, without posting, and keeps the row context visible', async () => {
+    const calls = stubFetch({ queueRows: [HANDOFF_ROW] });
+    await mount();
+
+    setValue(container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#handoff-who-leg_h') as HTMLInputElement, 'Maria Lopez');
+    await clickButton('Record handoff');
+
+    expect(calls.find((c) => c.url.includes('/handoff'))).toBeUndefined();
+    expect(container!.textContent).toContain('Confirm receipt of BML-3?');
+    expect(container!.textContent).toContain('Door collection');
+    expect(container!.textContent).toContain('Juan Perez');
+    // The entered code/name are locked in for the confirm step, not erased.
+    expect((container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('EDW-P2: Cancel on the confirm step backs out without posting, and the form is editable again', async () => {
+    const calls = stubFetch({ queueRows: [HANDOFF_ROW] });
+    await mount();
+
+    setValue(container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#handoff-who-leg_h') as HTMLInputElement, 'Maria Lopez');
+    await clickButton('Record handoff');
+    await clickButton('Cancel');
+
+    expect(calls.find((c) => c.url.includes('/handoff'))).toBeUndefined();
+    expect(container!.textContent).not.toContain('Confirm receipt of BML-3?');
+    expect(container!.textContent).toContain('Record handoff');
+    expect((container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  /**
+   * EDW-P2 requirement 4's one missing state: a successful receipt used to
+   * just make the row vanish, indistinguishable from the row having moved
+   * to a different filter. Now it gets an explicit, named confirmation.
+   */
+  it('EDW-P2: a confirmed handoff shows a success notice naming the reference', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW], queueRowsAfter: [] });
+    await mount();
+
+    setValue(container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#handoff-who-leg_h') as HTMLInputElement, 'Maria Lopez');
+    await clickButton('Record handoff');
+    await clickButton('Confirm receipt of BML-3?');
+
+    expect(container!.textContent).toContain('Received BML-3.');
+  });
+
+  it('EDW-P2: a refused handoff at the confirm step shows the refusal and returns to the editable form, not stuck mid-confirm', async () => {
+    const calls = stubFetch({ queueRows: [HANDOFF_ROW], actionStatus: 409, actionBody: { message: 'This leg changed state before the handoff could be recorded — reload and try again.' } });
+    await mount();
+
+    setValue(container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#handoff-who-leg_h') as HTMLInputElement, 'Maria Lopez');
+    await clickButton('Record handoff');
+    await clickButton('Confirm receipt of BML-3?');
+
+    expect(calls.find((c) => c.url.includes('/handoff'))).toBeDefined();
+    expect(container!.textContent).toContain('This leg changed state before the handoff could be recorded');
+    expect(container!.textContent).not.toContain('Confirm receipt of BML-3?');
+    expect(container!.textContent).toContain('Record handoff');
+    expect((container!.querySelector('#handoff-pin-leg_h') as HTMLInputElement).disabled).toBe(false);
   });
 
   it('MDF-747: offers no handoff form for a FIRST_MILE leg with no assigned courier, and says so instead', async () => {

@@ -39,7 +39,11 @@ vi.mock('leaflet', () => {
     map: vi.fn(() => fakeMap()),
     tileLayer: vi.fn(() => ({ addTo: vi.fn().mockReturnThis() })),
     divIcon: vi.fn(() => ({})),
-    marker: vi.fn(() => ({ addTo: vi.fn().mockReturnThis(), on: vi.fn().mockReturnThis(), remove: vi.fn() })),
+    marker: vi.fn(() => ({
+      addTo: vi.fn().mockReturnThis(),
+      on: vi.fn().mockReturnThis(),
+      remove: vi.fn(),
+    })),
     latLngBounds: vi.fn(() => ({})),
   };
   return { default: L };
@@ -57,7 +61,12 @@ vi.mock('../../../../../lib/api', () => ({
 
 const { default: DriverShippingJobPage } = await import('./page');
 
-function place(over: Partial<{ address: string | null; pinnedLocation: { latitude: number; longitude: number } | null }> = {}) {
+function place(
+  over: Partial<{
+    address: string | null;
+    pinnedLocation: { latitude: number; longitude: number } | null;
+  }> = {},
+) {
   return {
     kind: 'ADDRESS' as const,
     name: 'Sender',
@@ -83,7 +92,10 @@ function shippingJob(overrides: Record<string, unknown> = {}) {
     addressUnlocked: true,
     pickup: place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
     dropoff: place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } }),
-    routeStops: [place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }), place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } })],
+    routeStops: [
+      place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
+      place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } }),
+    ],
     parcel: { description: 'A box', pieces: 1, weightGrams: null },
     feeMinor: 2500,
     handoffCodeHeldBy: 'the recipient',
@@ -132,7 +144,7 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     expect(el.textContent).toContain('BML-ABCD2345');
   });
 
-  it('SHIP-C: labels a stop by matching this leg\'s own pickup/dropoff pin, not by its position in the whole-shipment route', async () => {
+  it("SHIP-C: labels a stop by matching this leg's own pickup/dropoff pin, not by its position in the whole-shipment route", async () => {
     // An extra hub ahead of this leg's own two points, belonging to a
     // different leg of the same shipment — must read as "Via", never as
     // this driver's own "Collect", even though it sits first in the array.
@@ -148,7 +160,9 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     );
     const el = await mount();
     // The legend only renders once the map is revealed (lazy by default).
-    const showMap = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Show map');
+    const showMap = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Show map',
+    );
     await act(async () => {
       showMap!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -184,7 +198,9 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
 describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
   it('shows the pickup window beside Collect from, scoped to SENDER', async () => {
     apiGet.mockResolvedValue(
-      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '08:00', endTime: '12:00' }] }),
+      shippingJob({
+        availabilityWindows: [{ role: 'SENDER', startTime: '08:00', endTime: '12:00' }],
+      }),
     );
     const el = await mount();
     expect(el.textContent).toMatch(/Pickup Window: 8:00 AM–12:00 PM/);
@@ -192,7 +208,9 @@ describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
 
   it('shows an overnight window clearly rather than as an invalid range', async () => {
     apiGet.mockResolvedValue(
-      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }] }),
+      shippingJob({
+        availabilityWindows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }],
+      }),
     );
     const el = await mount();
     expect(el.textContent).toMatch(/Pickup Window: 10:00 PM–2:00 AM \(overnight\)/);
@@ -200,7 +218,9 @@ describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
 
   it('a RECIPIENT window appears beside Deliver to, never beside Collect from', async () => {
     apiGet.mockResolvedValue(
-      shippingJob({ availabilityWindows: [{ role: 'RECIPIENT', startTime: '09:00', endTime: '17:00' }] }),
+      shippingJob({
+        availabilityWindows: [{ role: 'RECIPIENT', startTime: '09:00', endTime: '17:00' }],
+      }),
     );
     const el = await mount();
     const text = el.textContent ?? '';
@@ -257,7 +277,10 @@ describe('DriverShippingJobPage — name/phone gate uses contactUnlocked, not ad
   });
 
   it('falls back to addressUnlocked when contactUnlocked is absent from the wire (pre-fix API)', async () => {
-    const raw = JSON.parse(JSON.stringify(shippingJob({ addressUnlocked: false }))) as Record<string, unknown>;
+    const raw = JSON.parse(JSON.stringify(shippingJob({ addressUnlocked: false }))) as Record<
+      string,
+      unknown
+    >;
     delete raw.contactUnlocked;
     apiGet.mockResolvedValue(raw);
     const el = await mount();
@@ -296,7 +319,9 @@ describe('DriverShippingJobPage — route map "other end" caption tracks the act
       }),
     );
     const el = await mount();
-    expect(el.textContent).toMatch(/The other end belongs to a different leg — only its area is ever shown here\./);
+    expect(el.textContent).toMatch(
+      /The other end belongs to a different leg — only its area is ever shown here\./,
+    );
     // Must not revert to promising a reveal this driver's own acceptance can never cause.
     expect(el.textContent).not.toMatch(/until you accept/);
   });
@@ -310,7 +335,10 @@ describe('DriverShippingJobPage — route map "other end" caption tracks the act
     apiGet.mockResolvedValue(
       shippingJob({
         addressUnlocked: false,
-        routeStops: [unpinnedButRevealed, place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } })],
+        routeStops: [
+          unpinnedButRevealed,
+          place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
+        ],
       }),
     );
     const el = await mount();
@@ -344,12 +372,17 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
     const el = await mount();
 
     const input = el.querySelector('#code') as HTMLInputElement;
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )!.set!;
     await act(async () => {
       nativeInputValueSetter.call(input, '1234');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Confirm pickup')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Confirm pickup',
+    )!;
     await act(async () => {
       button.click();
       await Promise.resolve();
@@ -367,7 +400,9 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
     expect(el.textContent).not.toContain('Collection code');
     expect(el.querySelector('#code')).toBeNull();
 
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Confirm pickup')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Confirm pickup',
+    )!;
     await act(async () => {
       button.click();
       await Promise.resolve();
@@ -378,7 +413,10 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
   });
 
   it('shows no code field for pickup when requiresPickupPin is absent from the wire (older/degraded response)', async () => {
-    const raw = JSON.parse(JSON.stringify(shippingJob({ status: 'DRIVER_ACCEPTED' }))) as Record<string, unknown>;
+    const raw = JSON.parse(JSON.stringify(shippingJob({ status: 'DRIVER_ACCEPTED' }))) as Record<
+      string,
+      unknown
+    >;
     delete raw.requiresPickupPin;
     apiGet.mockResolvedValue(raw);
     const el = await mount();
@@ -392,7 +430,9 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
     // case (see the describe block below) — this is the genuinely-unchanged
     // case, a LAST_MILE leg delivering to the recipient's own door, where
     // the courier really does enter someone else's code.
-    apiGet.mockResolvedValue(shippingJob({ status: 'ARRIVING', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm handoff' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'ARRIVING', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm handoff' }),
+    );
     const el = await mount();
 
     expect(el.textContent).toContain('Finish the handover');
@@ -410,7 +450,9 @@ describe('DriverShippingJobPage — pickup needs its own collection code (MDF-56
  */
 describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
   it('shows "Report an issue" once the driver actually holds the parcel (IN_TRANSIT)', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     const el = await mount();
     expect(el.textContent).toContain('Report an issue');
   });
@@ -429,9 +471,13 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
 
   it('declining the prompt never calls the API', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     const el = await mount();
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Report an issue',
+    )!;
     await act(async () => {
       button.click();
     });
@@ -441,9 +487,13 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
 
   it('a reason under 4 characters never calls the API', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('no');
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     const el = await mount();
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Report an issue',
+    )!;
     await act(async () => {
       button.click();
     });
@@ -453,20 +503,26 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
 
   it('reporting posts the reason, shows the confirmation, and hides the primary action — this screen stops offering it, without claiming more than the system does', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     apiPost.mockResolvedValue(undefined);
 
     const el = await mount();
     expect(el.textContent).toContain('Mark as arriving');
 
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Report an issue',
+    )!;
     await act(async () => {
       button.click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/report-issue', { reason: 'Nobody answered at the address' });
+    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/report-issue', {
+      reason: 'Nobody answered at the address',
+    });
     expect(el.textContent).toContain('Issue reported');
     expect(el.textContent).toContain('Nobody answered at the address');
     expect(el.textContent).not.toContain('Mark as arriving');
@@ -483,11 +539,15 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
    */
   it('never claims the delivery is "on hold" — the backend does not enforce that', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     apiPost.mockResolvedValue(undefined);
 
     const el = await mount();
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Report an issue',
+    )!;
     await act(async () => {
       button.click();
       await Promise.resolve();
@@ -501,11 +561,15 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
 
   it('does not invent a refund, fee or timeframe in the confirmation copy', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Could not find the recipient');
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }),
+    );
     apiPost.mockResolvedValue(undefined);
 
     const el = await mount();
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    const button = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Report an issue',
+    )!;
     await act(async () => {
       button.click();
       await Promise.resolve();
@@ -526,7 +590,13 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
  */
 describe('DriverShippingJobPage — an open exception blocks progression (owner ruling)', () => {
   it('hides the primary action and explains why, once legStatus is EXCEPTION', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        nextActionLabel: 'Mark as arriving',
+        legStatus: 'EXCEPTION',
+      }),
+    );
     const el = await mount();
 
     expect(el.textContent).not.toContain('Mark as arriving');
@@ -535,15 +605,25 @@ describe('DriverShippingJobPage — an open exception blocks progression (owner 
   });
 
   it('never states a timeframe or a promise about what happens next', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        nextActionLabel: 'Mark as arriving',
+        legStatus: 'EXCEPTION',
+      }),
+    );
     const el = await mount();
 
     const text = el.textContent!.toLowerCase();
-    expect(text).not.toMatch(/within \d|\d+\s*(hours?|days?|minutes?)|will be (resolved|reopened)|refund|fee/);
+    expect(text).not.toMatch(
+      /within \d|\d+\s*(hours?|days?|minutes?)|will be (resolved|reopened)|refund|fee/,
+    );
   });
 
   it('shows the normal primary action when legStatus is absent (additive field not arrived yet)', async () => {
-    const raw = JSON.parse(JSON.stringify(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }))) as Record<string, unknown>;
+    const raw = JSON.parse(
+      JSON.stringify(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' })),
+    ) as Record<string, unknown>;
     delete raw.legStatus;
     apiGet.mockResolvedValue(raw);
     const el = await mount();
@@ -553,7 +633,13 @@ describe('DriverShippingJobPage — an open exception blocks progression (owner 
   });
 
   it('shows the normal primary action when legStatus is a non-exception value', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'IN_PROGRESS' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        nextActionLabel: 'Mark as arriving',
+        legStatus: 'IN_PROGRESS',
+      }),
+    );
     const el = await mount();
 
     expect(el.textContent).toContain('Mark as arriving');
@@ -580,7 +666,9 @@ describe('DriverShippingJobPage — a 404 never strands the driver (MDF-nav2)', 
     const el = await mount();
 
     expect(el.textContent).toContain('This job is no longer yours.');
-    const link = Array.from(el.querySelectorAll('a')).find((a) => a.textContent === 'Back to my deliveries');
+    const link = Array.from(el.querySelectorAll('a')).find(
+      (a) => a.textContent === 'Back to my deliveries',
+    );
     expect(link).toBeTruthy();
     expect(link!.getAttribute('href')).toBe('/dashboard/driver/jobs');
   });
@@ -610,7 +698,13 @@ describe('DriverShippingJobPage — the courier sees his own handoff code at a t
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'FIRST_MILE',
+              nextActionLabel: 'Confirm handoff',
+            }),
+          ),
     );
     const el = await mount();
 
@@ -621,12 +715,17 @@ describe('DriverShippingJobPage — the courier sees his own handoff code at a t
     expect(el.textContent).not.toContain('Ask the terminal staff for the code');
   });
 
-  it('still tells a LAST_MILE driver to ask the recipient for their own code at ARRIVING — unchanged, never the driver\'s own code', async () => {
+  it("still tells a LAST_MILE driver to ask the recipient for their own code at ARRIVING — unchanged, never the driver's own code", async () => {
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
         : Promise.resolve(
-            shippingJob({ status: 'ARRIVING', jobKind: 'LAST_MILE', handoffCodeHeldBy: 'the person receiving it', nextActionLabel: 'Confirm handoff' }),
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'LAST_MILE',
+              handoffCodeHeldBy: 'the person receiving it',
+              nextActionLabel: 'Confirm handoff',
+            }),
           ),
     );
     const el = await mount();
@@ -637,7 +736,13 @@ describe('DriverShippingJobPage — the courier sees his own handoff code at a t
   });
 
   it('does not fetch the courier code before ARRIVING — nothing to present yet', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', jobKind: 'FIRST_MILE', nextActionLabel: 'Mark as arriving' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        jobKind: 'FIRST_MILE',
+        nextActionLabel: 'Mark as arriving',
+      }),
+    );
     await mount();
 
     expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
@@ -647,7 +752,13 @@ describe('DriverShippingJobPage — the courier sees his own handoff code at a t
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.reject({ status: 403, message: 'You are not the courier assigned to this leg.' })
-        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'FIRST_MILE',
+              nextActionLabel: 'Confirm handoff',
+            }),
+          ),
     );
 
     let threw = false;
@@ -676,13 +787,21 @@ describe('DriverShippingJobPage — the courier sees his own pickup code collect
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm pickup' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'DRIVER_ACCEPTED',
+              jobKind: 'LAST_MILE',
+              nextActionLabel: 'Confirm pickup',
+            }),
+          ),
     );
     const el = await mount();
 
     expect(apiGet).toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
     expect(el.textContent).toContain('Present your code to terminal staff');
-    expect(el.textContent).toContain('Show this code to the terminal staff. They will enter it to release the parcel to you.');
+    expect(el.textContent).toContain(
+      'Show this code to the terminal staff. They will enter it to release the parcel to you.',
+    );
     expect(el.textContent).toContain(FIXTURE_CODE);
     // The wrong-direction sentence must be gone for this exact case.
     expect(el.textContent).not.toContain('Ask the sender for the collection code');
@@ -692,7 +811,13 @@ describe('DriverShippingJobPage — the courier sees his own pickup code collect
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', nextActionLabel: 'Confirm pickup' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'DRIVER_ACCEPTED',
+              jobKind: 'LAST_MILE',
+              nextActionLabel: 'Confirm pickup',
+            }),
+          ),
     );
     const el = await mount();
 
@@ -703,14 +828,18 @@ describe('DriverShippingJobPage — the courier sees his own pickup code collect
   });
 
   it('does not fetch the courier code before DRIVER_ACCEPTED on a LAST_MILE leg — nothing to present yet', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'ASSIGNED', jobKind: 'LAST_MILE', nextActionLabel: 'Accept' }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'ASSIGNED', jobKind: 'LAST_MILE', nextActionLabel: 'Accept' }),
+    );
     await mount();
 
     expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
   });
 
   it('a FIRST_MILE leg at DRIVER_ACCEPTED is unaffected — still the plain pickup-at-a-door screen', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'FIRST_MILE', requiresPickupPin: false }));
+    apiGet.mockResolvedValue(
+      shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'FIRST_MILE', requiresPickupPin: false }),
+    );
     const el = await mount();
 
     expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
@@ -735,7 +864,13 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'FIRST_MILE',
+              nextActionLabel: 'Confirm handoff',
+            }),
+          ),
     );
     const el = await mount();
 
@@ -746,12 +881,16 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
     expect(el.querySelector('#who')).toBeNull();
     expect(el.textContent).not.toContain('Finish the handover');
     expect(el.textContent).not.toContain('Confirm handoff');
-    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm handoff')).toBe(false);
+    expect(
+      Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm handoff'),
+    ).toBe(false);
     // A proper waiting state, not silence.
     expect(el.querySelector('[data-testid="awaiting-terminal-staff"]')).not.toBeNull();
     expect(el.textContent).toContain('Waiting for terminal staff to confirm');
     // Still has a way out of the screen.
-    const back = Array.from(el.querySelectorAll('a')).find((a) => a.textContent === 'Back to my deliveries');
+    const back = Array.from(el.querySelectorAll('a')).find(
+      (a) => a.textContent === 'Back to my deliveries',
+    );
     expect(back).toBeTruthy();
   });
 
@@ -759,7 +898,13 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'FIRST_MILE',
+              nextActionLabel: 'Confirm handoff',
+            }),
+          ),
     );
     await mount();
     expect(apiPost).not.toHaveBeenCalled();
@@ -769,14 +914,23 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'DRIVER_ACCEPTED', jobKind: 'LAST_MILE', requiresPickupPin: true, nextActionLabel: 'Confirm pickup' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'DRIVER_ACCEPTED',
+              jobKind: 'LAST_MILE',
+              requiresPickupPin: true,
+              nextActionLabel: 'Confirm pickup',
+            }),
+          ),
     );
     const el = await mount();
 
     expect(el.querySelector('#code')).toBeNull();
     expect(el.querySelector('#who')).toBeNull();
     expect(el.textContent).not.toContain('Collection code');
-    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm pickup')).toBe(false);
+    expect(
+      Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Confirm pickup'),
+    ).toBe(false);
     expect(el.querySelector('[data-testid="awaiting-terminal-staff"]')).not.toBeNull();
   });
 
@@ -784,7 +938,14 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
     apiGet.mockImplementation((path: string) =>
       path.endsWith('/code')
         ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
-        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', legStatus: 'EXCEPTION', nextActionLabel: 'Confirm handoff' })),
+        : Promise.resolve(
+            shippingJob({
+              status: 'ARRIVING',
+              jobKind: 'FIRST_MILE',
+              legStatus: 'EXCEPTION',
+              nextActionLabel: 'Confirm handoff',
+            }),
+          ),
     );
     const el = await mount();
 
@@ -799,7 +960,9 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
       apiGet.mockImplementation((path: string) =>
         path.endsWith('/code')
           ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
-          : Promise.resolve(shippingJob({ status, jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+          : Promise.resolve(
+              shippingJob({ status, jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' }),
+            ),
       );
       await mount();
       const callsBeforePoll = apiGet.mock.calls.length;
@@ -825,7 +988,13 @@ describe('DriverShippingJobPage — no code-entry field or confirm button while 
 
 describe('DriverShippingJobPage — report-issue is itself blocked during an open exception', () => {
   it('hides "Report an issue" once legStatus is EXCEPTION, even while courierStatus is still reportable', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        nextActionLabel: 'Mark as arriving',
+        legStatus: 'EXCEPTION',
+      }),
+    );
     const el = await mount();
 
     expect(el.textContent).toContain('This leg has an open issue');
@@ -833,7 +1002,13 @@ describe('DriverShippingJobPage — report-issue is itself blocked during an ope
   });
 
   it('still shows "Report an issue" when legStatus is a non-exception value', async () => {
-    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'IN_PROGRESS' }));
+    apiGet.mockResolvedValue(
+      shippingJob({
+        status: 'IN_TRANSIT',
+        nextActionLabel: 'Mark as arriving',
+        legStatus: 'IN_PROGRESS',
+      }),
+    );
     const el = await mount();
 
     expect(el.textContent).toContain('Report an issue');
@@ -843,7 +1018,7 @@ describe('DriverShippingJobPage — report-issue is itself blocked during an ope
 // P2-SHIPMENT-PARITY: the API already computes a human statusLabel
 // (DELIVERY_STATUS_LABELS) for this exact `status` value — this badge used
 // to ignore it and show the raw courierStatus enum instead.
-describe('DriverShippingJobPage — status badge shows the API\'s own statusLabel, not the raw enum', () => {
+describe("DriverShippingJobPage — status badge shows the API's own statusLabel, not the raw enum", () => {
   it('shows "Accepted" for DRIVER_ACCEPTED, never the raw enum text', async () => {
     apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', statusLabel: 'Accepted' }));
     const el = await mount();

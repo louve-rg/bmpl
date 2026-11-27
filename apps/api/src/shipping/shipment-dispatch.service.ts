@@ -17,6 +17,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DriverService } from '../driver/driver.service';
 import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
+import { isShipmentPaidForDispatch } from '../dispatch/dispatch-rules';
 import { LogisticsNetworkService } from './logistics-network.service';
 
 export type LegDispatchOutcome =
@@ -968,9 +969,18 @@ export class ShipmentDispatchService {
       if (driverProfileId) {
         await tx.shipmentLegOffer.updateMany({
           where: { shipmentLegId: legId, driverProfileId, status: 'ACTIVE' },
-          // No EXPIRED status exists, and none is needed: an offer that lapsed
-          // was declined by silence. `declineReason` says which it was.
-          data: { status: 'DECLINED', endedAt: new Date(), declineReason: 'Offer expired.' },
+          // EDW-P3 corrects what this comment used to say. "An offer that
+          // lapsed was declined by silence" is exactly the conflation Edward
+          // rejected: silence is not a decision, and `declineReason` could
+          // not be trusted to say which it was — it is the SAME free-text
+          // column a driver's own typed reason goes into, so a driver who
+          // typed "Offer expired." was indistinguishable from the sweeper.
+          //
+          // `resolution` answers it now, so this stops writing into
+          // `declineReason` at all: that column is free to mean only what a
+          // driver actually said, and an expiry is precisely the case where
+          // nobody said anything. Left NULL rather than set to a sentence.
+          data: { status: 'DECLINED', endedAt: new Date(), declineReason: null, resolution: 'EXPIRED' },
         });
       }
       await this.audit.record({ action: 'SHIPMENT_LEG_OFFER_EXPIRED', newValue: { legId, driverProfileId } }, tx);
@@ -1230,9 +1240,11 @@ export class ShipmentDispatchService {
    * existed dispatchable, rather than stranding them.
    */
   private async isPaidFor(shipment: { quotedTotalMinor: bigint; payment: { status: string } | null }): Promise<boolean> {
-    if (shipment.quotedTotalMinor <= 0n) return true;
-    const status = shipment.payment?.status;
-    return status === 'AUTHORIZED' || status === 'SETTLING' || status === 'SETTLED';
+    // EDW-P3: the rule itself moved to `dispatch/dispatch-rules.ts` so the
+    // driver-initiated claim path enforces the SAME invariant as this
+    // automatic path rather than its own near-copy of it. This method stays
+    // as the call site every existing caller already uses.
+    return isShipmentPaidForDispatch(shipment);
   }
 
   private async notifyDriver(driverProfileId: string, legId: string, kind: string, reference: string) {
