@@ -28,7 +28,7 @@ import {
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Public, RequirePermission } from '../common/decorators';
-import { StrictThrottle } from '../throttling/throttle.decorators';
+import { StrictThrottle, TerminalLookupThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { ShipmentService } from '../shipping/shipment.service';
 import { TerminalService } from './terminal.service';
@@ -336,17 +336,19 @@ export class TerminalLegsController {
   ) {}
 
   /**
-   * EDW-P2 (MDF-1173): the "lead with the code" lookup — see
+   * EDW-P2 (MDF-1171): the "lead with the code" lookup — see
    * `ShipmentService.lookupByHandoffCode`'s own doc for the full settled
    * contract. POST only (the code never belongs in a URL/query string, and
    * this is a security-relevant read, not an idempotent GET). Hub scope is
    * `myActiveHubIds`, re-read at call time — the exact same discipline
    * `queue`/`inbound`/`outbound`/`custody`/`history` above already use, and
    * this method never sees a hub id it was not explicitly handed.
-   * `@StrictThrottle()` is defense in depth on top of
-   * `ShipmentService.checkLookupRate`'s own per-caller limit — the two are
-   * independent and keyed differently (IP vs. user id), same reasoning as
-   * every other terminal-staff write on this controller.
+   * `@TerminalLookupThrottle()` (MDF-1184) is a per-IP brake distinct from
+   * `@StrictThrottle()`'s auth-route number — see that decorator's own doc
+   * for why this route needed its own number rather than the shared one.
+   * It sits on top of `ShipmentService.checkLookupRate`'s own per-caller
+   * limit; the two are independent and keyed differently (IP vs. user id)
+   * and deliberately complementary, not redundant.
    *
    * `@HttpCode(200)`: same reasoning as `WalletController.
    * lookupTransferRecipient`'s own precedent — this is a POST because the
@@ -354,7 +356,7 @@ export class TerminalLegsController {
    * created, so the response code says "read", matching what it actually
    * is rather than NestJS's create-by-default 201.
    */
-  @StrictThrottle()
+  @TerminalLookupThrottle()
   @HttpCode(200)
   @Post('lookup-by-code')
   async lookupByCode(@CurrentUser() u: AuthContext, @Body(ZodBody(legLookupByCodeSchema)) dto: LegLookupByCodeInput) {
