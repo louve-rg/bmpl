@@ -11,10 +11,26 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+// Returns the worktree root, or null if this environment has no git worktree
+// at all (a Docker build context, an extracted tarball, CI checked out via
+// a tarball instead of a clone) -- in which case the hazard this guard exists
+// for cannot exist by construction: there is no other worktree to be
+// junctioned into. Only these two specific, named conditions fail open; any
+// other failure (git present, inside a repo, but the call still errors for
+// some other reason) still aborts -- a blanket try/catch here would silently
+// pass the exact silent-wrong-schema failure mode this card exists to kill.
 function resolveWorktreeRoot(cwd) {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
   } catch (err) {
+    if (err.code === 'ENOENT') {
+      console.log('[prisma-guard] no git binary found, not inside a git worktree -- skipping cross-worktree check.');
+      return null;
+    }
+    if (/not a git repository/i.test(String(err.stderr || ''))) {
+      console.log('[prisma-guard] not inside a git worktree, skipping cross-worktree check.');
+      return null;
+    }
     console.error('[prisma-guard] Could not resolve the git worktree root from ' + cwd + ': ' + err.message);
     process.exit(1);
   }
@@ -22,7 +38,11 @@ function resolveWorktreeRoot(cwd) {
 
 function main() {
   const packageDir = path.resolve(__dirname, '..');
-  const worktreeRoot = path.resolve(resolveWorktreeRoot(packageDir));
+  const worktreeRootRaw = resolveWorktreeRoot(packageDir);
+  if (worktreeRootRaw === null) {
+    return;
+  }
+  const worktreeRoot = path.resolve(worktreeRootRaw);
   const nodeModulesPath = path.join(worktreeRoot, 'node_modules');
 
   if (!fs.existsSync(nodeModulesPath)) {
