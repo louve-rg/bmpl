@@ -14,8 +14,9 @@ Related: [wallet/authorize API](../phase-2/API-INVENTORY.md#wallet-authorization
   (`assertMoneyMovementEnabled`) live in `@bmpl/wallet`. `WalletService`
   (`apps/api/src/wallet`) is the only place that persists transactions.
 - **Gate is per-call, for escrow only.** (Correction: the global
-  `WALLET_MONEY_MOVEMENT_ENABLED` named in earlier drafts was never built as
-  configuration — no such variable exists in code.) `postTransaction` is invoked
+  `WALLET_MONEY_MOVEMENT_ENABLED` named in earlier drafts does exist, in
+  `packages/shared/src/wallet.ts`, hard-set to `false` — but it is dead code,
+  with zero consumers anywhere in `apps/`. It gates nothing.) `postTransaction` is invoked
   with `enabled=true` **only** for the customer↔escrow authorization/release.
   Nothing else can move money, and no real-money rail exists behind the ledger.
 - **Convert the M11 hold, don't replace it.** The soft `WalletHold` (`HELD`) becomes
