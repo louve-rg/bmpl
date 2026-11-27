@@ -167,6 +167,13 @@ export function CodeLookupPanel({
         </Alert>
       )}
 
+      {/* checkLookupRate() in apps/api/src/shipping/shipment.service.ts returns
+          nothing on a successful call -- only a hard 429 past the limit -- so
+          there is no near-limit signal to dispatch to today. This state is
+          intentionally unreachable from page.tsx's wiring. Follow-up filed to
+          Pam to add either a remaining-count or remove this state (precedent:
+          the same service already exposes collectionPinAttemptsRemaining to
+          staff as remaining-not-raw). Do not wire this to a guess. */}
       {state.kind === 'limitApproaching' && (
         <Alert tone="warning">
           {state.remaining} code {state.remaining === 1 ? 'lookup' : 'lookups'} left before you will need to wait.
