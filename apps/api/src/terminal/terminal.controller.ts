@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   acceptTerminalInviteSchema,
@@ -10,6 +10,7 @@ import {
   inviteTerminalCompanyMemberSchema,
   legDepartSchema,
   legHandoffSchema,
+  legLookupByCodeSchema,
   legReleaseToCourierSchema,
   updateTerminalCompanySchema,
   type AcceptTerminalInviteInput,
@@ -21,6 +22,7 @@ import {
   type InviteTerminalCompanyMemberInput,
   type LegDepartInput,
   type LegHandoffInput,
+  type LegLookupByCodeInput,
   type LegReleaseToCourierInput,
   type UpdateTerminalCompanyInput,
 } from '@bmpl/validation';
@@ -332,6 +334,33 @@ export class TerminalLegsController {
     private readonly terminal: TerminalService,
     private readonly shipments: ShipmentService,
   ) {}
+
+  /**
+   * EDW-P2 (MDF-1173): the "lead with the code" lookup — see
+   * `ShipmentService.lookupByHandoffCode`'s own doc for the full settled
+   * contract. POST only (the code never belongs in a URL/query string, and
+   * this is a security-relevant read, not an idempotent GET). Hub scope is
+   * `myActiveHubIds`, re-read at call time — the exact same discipline
+   * `queue`/`inbound`/`outbound`/`custody`/`history` above already use, and
+   * this method never sees a hub id it was not explicitly handed.
+   * `@StrictThrottle()` is defense in depth on top of
+   * `ShipmentService.checkLookupRate`'s own per-caller limit — the two are
+   * independent and keyed differently (IP vs. user id), same reasoning as
+   * every other terminal-staff write on this controller.
+   *
+   * `@HttpCode(200)`: same reasoning as `WalletController.
+   * lookupTransferRecipient`'s own precedent — this is a POST because the
+   * code must stay out of a URL/query string, not because anything is
+   * created, so the response code says "read", matching what it actually
+   * is rather than NestJS's create-by-default 201.
+   */
+  @StrictThrottle()
+  @HttpCode(200)
+  @Post('lookup-by-code')
+  async lookupByCode(@CurrentUser() u: AuthContext, @Body(ZodBody(legLookupByCodeSchema)) dto: LegLookupByCodeInput) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.lookupByHandoffCode(dto.code, hubIds, { userId: u.userId });
+  }
 
   @StrictThrottle()
   @Post(':id/handoff')

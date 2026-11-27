@@ -536,6 +536,17 @@ enum AuditAction {
   // actor, the delivery, and the fact of the reveal — never the code value
   // itself, in any field.
   DELIVERY_PINS_REVEALED
+  // ---- Terminal lookup-by-code (EDW-P2 / MDF-1173) ----
+  // A terminal clerk's "lead with the code" lookup — identifying a parcel by
+  // its handoff code alone, before any leg is known. Zero state change and
+  // zero custody event on success; this is the ONLY record of the attempt.
+  // Fires on every call, hit or miss, so a probing pattern (many misses, or
+  // many codes tried in a window) is visible after the fact. Records the
+  // actor, the hubs searched and the outcome shape (miss / candidate count /
+  // refused-as-ambiguous) — never the submitted code itself, in any field,
+  // same discipline as SHIPMENT_HANDOFF_PIN_REVEALED/DELIVERY_PINS_REVEALED
+  // above.
+  SHIPMENT_HANDOFF_CODE_LOOKUP
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

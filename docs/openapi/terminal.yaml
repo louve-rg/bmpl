@@ -742,6 +742,41 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---- Leg custody actions (location-scoped) ----
+  /terminal/legs/lookup-by-code:
+    post:
+      tags: [TerminalStaff]
+      summary: Identify a parcel by its handoff code alone, before any leg/reference/shipment id is known (EDW-P2)
+      description: >-
+        "Lead with the code": a courier at the counter holds a handoff code
+        and nothing else. Hub scope is server-derived from the caller's own
+        active hubs, never request-supplied. A code matching nothing, and one
+        matching only a leg outside the caller's hubs, are byte-identical
+        (empty `candidates`). 1-5 matches return as separate candidates; 6+
+        refuses and asks for the shipment reference instead of guessing.
+        Pure identification — zero state change, zero custody event; a
+        returned `legId` only ever feeds the existing
+        `POST /terminal/legs/{id}/handoff` call, which still runs every check
+        it always has. POST (not GET): the code must never appear in a URL or
+        query string. Has its own independent per-caller rate limit on top of
+        the global throttle.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegLookupByCodeInput" }
+      responses:
+        "200":
+          description: >-
+            Always 200, hit or miss — this is a read. `candidates` is an
+            empty array on no match; never a raw code, PIN or courier
+            identity in any field.
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /terminal/legs/{id}/depart:
     post:
       tags: [TerminalStaff]
@@ -1004,6 +1039,11 @@ components:
         carrierName: { type: string, maxLength: 120 }
         carrierBookingRef: { type: string, maxLength: 120 }
         note: { type: string, maxLength: 500 }
+    LegLookupByCodeInput:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^\d{4,8}$', description: The handoff code, and nothing else — no leg, reference or shipment id. }
     LegHandoffInput:
       type: object
       required: [pin, receivedByName]
