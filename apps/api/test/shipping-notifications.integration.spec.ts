@@ -321,7 +321,10 @@ describe('the customer follows one journey', () => {
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter' });
+    // EDW-P4: a courier cannot self-complete a handoff into a hub-destined
+    // leg (FIRST_MILE here ends at a hub) — staff submit on the courier's
+    // behalf instead, same as every other fixture that used to self-submit.
+    await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter', presentedCourierUserId: driver.userId });
     const lineHauls = (await legsOf(s.id)).filter((l) => l.kind === 'LINE_HAUL');
     await post(admin, `admin/logistics/legs/${lineHauls[0]!.id}/depart`, {});
     await post(admin, `admin/logistics/legs/${lineHauls[0]!.id}/arrive`, {});
@@ -375,7 +378,9 @@ describe('a driver hears only about their own leg', () => {
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
-    await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter' });
+    // EDW-P4: FIRST_MILE ends at a hub — the courier cannot self-complete
+    // this handoff; staff submit on their behalf instead.
+    await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter', presentedCourierUserId: firstDriver.userId });
 
     const lineHauls = (await legsOf(s.id)).filter((l) => l.kind === 'LINE_HAUL');
     await post(admin, `admin/logistics/legs/${lineHauls[0]!.id}/depart`, {});
@@ -472,15 +477,21 @@ describe('operations are told when a human is needed', () => {
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
 
+    // EDW-P4: FIRST_MILE ends at a hub, so the courier cannot self-submit at
+    // all — staff submit the (wrong) code on their behalf instead, exactly
+    // as every other hub-destined handoff in this suite now does. This is
+    // still the wrong-PIN lockout under test: the caller changed, but the
+    // mechanism (5 wrong attempts -> EXCEPTION -> admin alert) is unchanged.
+    //
     // Four wrong guesses outside the capture window — only the fifth, the one
     // that actually locks the code, is the event under test.
     for (let i = 0; i < 4; i++) {
-      const bad = await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong' });
+      const bad = await post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong', presentedCourierUserId: driver.userId });
       expect(bad.status).toBe(400);
     }
 
     const fired = await capture(() =>
-      post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong' }),
+      post(admin, `admin/logistics/legs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong', presentedCourierUserId: driver.userId }),
     );
     const opsAlerts = fired.filter((n) => n.event === 'SHIPMENT_EXCEPTION');
     expect(opsAlerts.length).toBeGreaterThanOrEqual(1);
