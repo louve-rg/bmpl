@@ -136,13 +136,15 @@ async function pinOf(legId: string) {
 const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }) =>
   post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
 
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Counter staff',
+  // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+  // self-complete its handoff — staff submit on their behalf instead.
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, {
+    pin: await pinOf(legId), receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
   })).status).toBe(201);
 }
 

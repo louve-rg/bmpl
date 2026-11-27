@@ -186,7 +186,8 @@ const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }
   post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
 const depart = (legId: string, body: object = {}) => post(admin, `admin/logistics/legs/${legId}/depart`, body);
 const arrive = (legId: string) => post(admin, `admin/logistics/legs/${legId}/arrive`);
-const adminHandoff = (legId: string, pin: string) => post(admin, `admin/logistics/legs/${legId}/handoff`, { pin, receivedByName: 'Counter staff' });
+const adminHandoff = (legId: string, pin: string, receivedByName = 'Counter staff', presentedCourierUserId?: string) =>
+  post(admin, `admin/logistics/legs/${legId}/handoff`, { pin, receivedByName, presentedCourierUserId });
 const flag = (legId: string, reason = 'Aircraft diverted by weather.') => post(admin, `admin/logistics/legs/${legId}/exception`, { reason });
 const resolve = (legId: string, body: object) => post(admin, `admin/logistics/legs/${legId}/resolve-exception`, body);
 
@@ -266,10 +267,10 @@ describe('automatic dispatch releases LAST_MILE across two line-haul hops, with 
 
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
+    // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+    // self-complete its handoff — staff submit on their behalf instead.
     const firstMileHandoffPin = (await legRow(firstMile.id)).handoffPin!;
-    expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, {
-      pin: firstMileHandoffPin, receivedByName: 'Placencia desk',
-    })).status).toBe(201);
+    expect((await adminHandoff(firstMile.id, firstMileHandoffPin, 'Placencia desk', firstCourier.userId)).status).toBe(201);
 
     // LINE_HAUL legs are carrier-operated — never auto-offered to a driver,
     // always admin-driven. dispatchAutomatic being on changes nothing here.
@@ -385,9 +386,9 @@ describe('LINE_HAUL#2 stays PENDING across an EXCEPTION/RESUME cycle on LINE_HAU
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: (await legRow(firstMile.id)).pickupPin! })).status).toBe(201);
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
-    expect((await post(firstCourier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, {
-      pin: (await legRow(firstMile.id)).handoffPin!, receivedByName: 'Placencia desk',
-    })).status).toBe(201);
+    // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+    // self-complete its handoff — staff submit on their behalf instead.
+    expect((await adminHandoff(firstMile.id, (await legRow(firstMile.id)).handoffPin!, 'Placencia desk', firstCourier.userId)).status).toBe(201);
 
     expect((await legRow(lineHaul1.id)).status).toBe('READY');
     expect((await legRow(lineHaul2.id)).status).toBe('PENDING'); // baseline, before any exception
