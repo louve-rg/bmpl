@@ -35,7 +35,33 @@ function job(over: Record<string, unknown> = {}) {
     city: 'Belmopan',
     district: 'CAYO',
     feeMinor: 850,
-    dispatchExhaustedAt: '2026-11-20T10:00:00.000Z',
+    claim: {
+      dispatchExhaustedAt: '2026-11-20T10:00:00.000Z',
+      youPassed: false,
+      inAvailableJobs: false,
+      claimPath: '/driver/jobs/del1/claim',
+    },
+    ...over,
+  };
+}
+
+/** EDW-P3: the courier-leg side of the same endpoint — no marketplace fields at all. */
+function legJob(over: Record<string, unknown> = {}) {
+  return {
+    id: 'leg1',
+    kind: 'FIRST_MILE',
+    kindLabel: 'Shipping pickup',
+    reference: 'BML-7Q2K',
+    pickup: { area: 'Belize City' },
+    dropoff: { area: 'San Pedro' },
+    load: '1 parcel',
+    feeMinor: 1200,
+    claim: {
+      dispatchExhaustedAt: '2026-11-21T09:00:00.000Z',
+      youPassed: false,
+      inAvailableJobs: false,
+      claimPath: '/driver/jobs/leg1/claim',
+    },
     ...over,
   };
 }
@@ -97,7 +123,7 @@ describe('ClaimableJobsPage — lists what summarizeClaimable actually returns',
 });
 
 describe('ClaimableJobsPage — claim success', () => {
-  it('sends the claim and navigates to the job detail page the API hands back', async () => {
+  it('sends the claim to claim.claimPath and navigates to the marketplace detail page for a marketplace row', async () => {
     apiPost.mockResolvedValue({ id: 'del1' });
     const { container } = await renderPage([job()]);
     const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Claim this job')!;
@@ -108,6 +134,69 @@ describe('ClaimableJobsPage — claim success', () => {
     });
     expect(apiPost).toHaveBeenCalledWith('/driver/jobs/del1/claim');
     expect(router.push).toHaveBeenCalledWith('/dashboard/driver/jobs/del1');
+  });
+});
+
+/**
+ * EDW-P3: `claimableJobs` now covers shipment courier legs too — the
+ * courier side gains a claim path it never had. The card shows the
+ * normalized fields (kind/reference/pickup/dropoff/load) instead of the
+ * marketplace ones, and a successful claim routes to the shipping detail
+ * route, not the marketplace one.
+ */
+describe('ClaimableJobsPage — courier-leg rows (EDW-P3)', () => {
+  it('shows the leg reference, kind label and normalized pickup/dropoff areas, not marketplace fields', async () => {
+    const { container } = await renderPage([legJob()]);
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/BML-7Q2K/);
+    expect(text).toMatch(/Shipping pickup/);
+    expect(text).toMatch(/Collect\s*Belize City/);
+    expect(text).toMatch(/Deliver\s*San Pedro/);
+    expect(text).toMatch(/1 parcel/);
+    expect(text).not.toMatch(/Order #/);
+  });
+
+  it('claims via claim.claimPath and navigates to the shipping detail route for a courier leg', async () => {
+    apiPost.mockResolvedValue({ id: 'leg1' });
+    const { container } = await renderPage([legJob()]);
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Claim this job')!;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiPost).toHaveBeenCalledWith('/driver/jobs/leg1/claim');
+    expect(router.push).toHaveBeenCalledWith('/dashboard/driver/shipping/leg1');
+  });
+
+  it('on a 409 for a courier leg, names it by reference rather than a marketplace order number', async () => {
+    apiPost.mockRejectedValue({ status: 409, message: 'ignored' });
+    const { container } = await renderPage([legJob()]);
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Claim this job')!;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toMatch(/BML-7Q2K is no longer available/);
+  });
+});
+
+/**
+ * EDW-P3 (owner requirement): the same job can show on both this page and
+ * the Available tab. `claim.inAvailableJobs` is the server's own call on
+ * that, never recomputed here — when true, the card must say so, so a
+ * driver checking both tabs sees one job, not two.
+ */
+describe('ClaimableJobsPage — same job also on the Available tab (EDW-P3)', () => {
+  it('links to the Available tab when claim.inAvailableJobs is true', async () => {
+    const { container } = await renderPage([job({ claim: { ...job().claim, inAvailableJobs: true } })]);
+    expect(container.textContent).toMatch(/Also showing in your\s*Available\s*tab/);
+  });
+
+  it('says nothing about the Available tab when claim.inAvailableJobs is false', async () => {
+    const { container } = await renderPage([job()]);
+    expect(container.textContent).not.toMatch(/Available\s*tab/);
   });
 });
 
