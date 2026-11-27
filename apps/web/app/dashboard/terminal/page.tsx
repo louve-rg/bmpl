@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select, StatusBadge } from '../../../components/ui';
 import type { MeView } from '../../../lib/types';
 import { legStatusLabel } from '../../../lib/shipping';
+import { CodeLookupPanel, isValidLookupCode, type CodeLookupCandidate, type CodeLookupState } from './code-lookup-panel';
 
 /**
  * TERM-11: the terminal operator workspace. Contract read from Pam's own
@@ -514,6 +515,65 @@ export default function TerminalWorkspacePage() {
     handoffNoticeTimer.current = setTimeout(() => setHandoffNotice(null), 6000);
   }
 
+  // EDW-P2 requirements 1/2: "lead with the code" -- identify the leg from
+  // a handoff code ALONE, before staff have found its row. Wired against the
+  // real `POST /terminal/legs/lookup-by-code` (see code-lookup-panel.tsx's
+  // own header comment for the conformance check). This IDENTIFIES only --
+  // selecting a candidate below carries its legId/code into the EXISTING
+  // handoff confirm/submit flow (requestHandoffConfirm/handoff above), never
+  // a second submit path of its own.
+  const [codeLookupInput, setCodeLookupInput] = useState('');
+  const [codeLookupState, setCodeLookupState] = useState<CodeLookupState>({ kind: 'idle' });
+
+  async function lookupByCode() {
+    const code = codeLookupInput.trim();
+    if (!isValidLookupCode(code)) {
+      setCodeLookupState({ kind: 'invalid' });
+      return;
+    }
+    setCodeLookupState({ kind: 'loading' });
+    try {
+      const res = await api.post<{ candidates: CodeLookupCandidate[] }>('/terminal/legs/lookup-by-code', { code });
+      setCodeLookupState(res.candidates.length === 0 ? { kind: 'notFound' } : { kind: 'found', candidates: res.candidates });
+    } catch (e) {
+      const status = (e as ApiError)?.status;
+      // The endpoint's own two distinct real refusals (both literal server
+      // text, not invented here): 400 is the 6+ ambiguous case this panel
+      // calls `tooMany`; 429 is its own per-caller rate limit, independent
+      // of any leg's handoffPinAttempts. Anything else is a generic error.
+      if (status === 400) {
+        setCodeLookupState({ kind: 'tooMany', message: errMessage(e, 'Too many parcels match that code.') });
+      } else if (status === 429) {
+        // NEVER use the server's own message here (Stanley, live browser run):
+        // the route's per-IP throttle fires below our own per-user rate limit
+        // today, so the ONLY 429 a clerk can actually see right now is the
+        // raw library string "ThrottlerException: Too Many Requests", not our
+        // friendly checkLookupRate() text. Deliberately not filtering on that
+        // string, or any other library exception name -- matching a name is
+        // exactly what silently breaks on a library upgrade. Our own copy is
+        // true for either 429 source, so always use it instead of the server's.
+        setCodeLookupState({ kind: 'limitReached' });
+      } else {
+        setCodeLookupState({ kind: 'error', message: errMessage(e, 'Could not look up that code.') });
+      }
+    }
+  }
+
+  /**
+   * The lookup identifies, it never authorises: this only pre-fills the
+   * EXISTING handoff form's pin with the code already typed (the candidate
+   * IS that code's match, so there is nothing new to ask for) and scrolls
+   * the matching row into view. Staff still type who is receiving it and
+   * still go through the existing two-click inline confirm
+   * (requestHandoffConfirm/handoff) -- nothing here completes a handoff.
+   */
+  function selectLookupCandidate(c: CodeLookupCandidate) {
+    const code = codeLookupInput.trim();
+    setHandoffForms((prev) => ({ ...prev, [c.legId]: { pin: code, receivedByName: prev[c.legId]?.receivedByName ?? '' } }));
+    clearRowState(c.legId);
+    document.getElementById(`handoff-row-${c.legId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   const loadWorkspace = useCallback(async () => {
     setWorkspaceErr(null);
     setNoMembership(false);
@@ -903,6 +963,24 @@ export default function TerminalWorkspacePage() {
         <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">
           {title} ({section.length})
         </h2>
+        {/* EDW-P2 requirement 1/2: lead with the code, above the list staff
+            would otherwise have to scan -- only on HANDOFF, the one action
+            lookup-by-code's own eligibility mirrors (LINE_HAUL, arrived,
+            the caller's own hubs). Only rendered once a HANDOFF row already
+            exists, same as every other section here -- lookup-by-code's
+            eligibility is a strict subset of this section's own query, so
+            an empty section can never have a match to find anyway. */}
+        {action === 'HANDOFF' && (
+          <div className="mb-3">
+            <CodeLookupPanel
+              code={codeLookupInput}
+              onCodeChange={setCodeLookupInput}
+              onLookup={() => void lookupByCode()}
+              state={codeLookupState}
+              onSelectCandidate={selectLookupCandidate}
+            />
+          </div>
+        )}
         <div className="space-y-3">
           {section.map((row) => (
             <QueueRowCard
@@ -1268,7 +1346,10 @@ function QueueRowCard({
   const isBusy = busy === id;
 
   return (
-    <Card className="p-4">
+    // EDW-P2: the scroll target `selectLookupCandidate` (page.tsx) jumps to
+    // after a code-lookup match -- HANDOFF only, the one action lookup-by-
+    // code identifies a leg for.
+    <Card className="p-4" id={row.action === 'HANDOFF' ? `handoff-row-${row.legId}` : undefined}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-mono text-sm font-semibold text-[color:var(--bmpl-text)]">{row.reference}</p>
