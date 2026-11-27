@@ -2318,7 +2318,10 @@ export class ShipmentService {
     // Fetched unconditionally (TERM-10 needs `arrivedAt` below regardless of
     // whether a presented identity was supplied) rather than only inside the
     // branch that used to hold this same read.
-    const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { kind: true, assignedDriverProfileId: true, arrivedAt: true } });
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { kind: true, assignedDriverProfileId: true, arrivedAt: true, destinationHubId: true },
+    });
     if (!leg) throw new NotFoundException('Leg not found.');
 
     // TERM-10, cheap pre-check — NOT the authoritative one (that stays inside
@@ -2411,6 +2414,42 @@ export class ShipmentService {
         'Say who presented this code before submitting a handoff for this leg: supply presentedCourierUserId or presentedByAssignedCourier.',
       );
     }
+    // EDW-P4 (owner requirement, mirroring the pickup side's existing
+    // `if (leg.originHub != null) throw` in ShipmentDriverService — "This
+    // parcel is held at a terminal. A staff member there must release it to
+    // you"): a parcel arriving AT A TERMINAL must be received by terminal
+    // staff, never confirmed by the courier themselves. Checked on the
+    // physical fact (`destinationHubId != null`), not `leg.kind`, for the
+    // same reason the pickup guard does — the hub is what makes the parcel
+    // terminal-received, not the route-shape label. A DIRECT or LAST_MILE
+    // leg genuinely ending at a customer door has no destinationHubId and is
+    // untouched.
+    //
+    // The signal is "is the person making THIS call the leg's own assigned
+    // courier", not "does the presented identity equal the actor" — a staff
+    // member can genuinely (if mistakenly) name the WRONG courier, including
+    // themselves, and that must still fall through to the ordinary
+    // wrong-courier/pin check below (same "not right" message, same counter
+    // — BMPL-174) rather than be swallowed by this guard. STAFF legitimately
+    // assert a COURIER's identity on that courier's behalf (TERM-5), and
+    // that stays allowed since actor (staff) is never the assigned courier.
+    // What this refuses is the ONE shape that is never legitimate: the
+    // leg's own assigned courier submitting for themselves — exactly what
+    // `ShipmentDriverService.completeHandoff` produces (`presentedCourierUserId:
+    // dto.presentedCourierUserId ?? actor.userId`) when a courier calls it
+    // directly for a leg that ends at a terminal, bypassing staff entirely.
+    // `assignedDriverProfileId` is null for every LINE_HAUL leg (no courier
+    // exists to bypass), so this is a no-op there regardless of destination.
+    if (leg.destinationHubId != null && leg.assignedDriverProfileId != null) {
+      const assignedCourier = await this.prisma.driverProfile.findUnique({
+        where: { id: leg.assignedDriverProfileId },
+        select: { userId: true },
+      });
+      if (assignedCourier?.userId === actor.userId) {
+        throw new BadRequestException('A parcel arriving at a terminal must be received by terminal staff, not confirmed by the courier themselves.');
+      }
+    }
+
     // The code is checked BEFORE the transition transaction, in its own write.
     // A failed attempt recorded inside the transaction is rolled back when that
     // transaction throws, so the counter would never climb and the lockout below

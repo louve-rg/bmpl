@@ -151,14 +151,16 @@ const adminHandoff = (legId: string, pin: string) => post(admin, `admin/logistic
 /** Matches shipment-eta-notification.integration.spec.ts's own `schedule()`. */
 const schedule = (legId: string, body: object) => post(admin, `admin/logistics/legs/${legId}/schedule`, body);
 
-async function driveCourierLeg(courier: { cookies: string[] }, legId: string) {
+async function driveCourierLeg(courier: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   const pin = (await legRow(legId)).pickupPin!;
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin })).status).toBe(201);
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+  // self-complete its handoff — staff submit on their behalf instead.
   const handoffPin = (await legRow(legId)).handoffPin!;
-  expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: handoffPin, receivedByName: 'Terminal agent' })).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: handoffPin, receivedByName: 'Terminal agent', presentedCourierUserId: courier.userId })).status).toBe(201);
 }
 
 beforeAll(async () => {

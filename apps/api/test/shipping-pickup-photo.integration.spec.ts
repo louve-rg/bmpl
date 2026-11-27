@@ -349,7 +349,9 @@ describe('shipment pickup photo (BMPL-178)', () => {
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const pin = (await legRow(firstMile.id)).handoffPin!;
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: this FIRST_MILE leg ends at a hub — the courier cannot
+    // self-complete the handoff; staff submit on their behalf instead.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Terminal desk', presentedCourierUserId: courier.userId })).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
 
     const key = await uploadPickupPhoto(courier, firstMile.id);

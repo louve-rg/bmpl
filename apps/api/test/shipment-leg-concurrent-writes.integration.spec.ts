@@ -290,9 +290,11 @@ describe('departLeg: concurrent departures on one READY line-haul leg (Stanley\'
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) })).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, {
+    // EDW-P4: the final handoff into a terminal must come from staff, not
+    // the courier's own direct call.
+    expect((await post(admin, `admin/logistics/legs/${first.id}/handoff`, {
       pin: (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id }, select: { handoffPin: true } })).handoffPin!,
-      receivedByName: 'Counter staff',
+      receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
     })).status).toBe(201);
     const haul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL' && l.status === 'READY')!;
     // Nothing has been recorded against THIS leg's own id yet — the
@@ -332,9 +334,11 @@ describe('arriveLeg: concurrent arrivals on one IN_PROGRESS line-haul leg (the o
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) })).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, {
+    // EDW-P4: the final handoff into a terminal must come from staff, not
+    // the courier's own direct call.
+    expect((await post(admin, `admin/logistics/legs/${first.id}/handoff`, {
       pin: (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id }, select: { handoffPin: true } })).handoffPin!,
-      receivedByName: 'Counter staff',
+      receivedByName: 'Counter staff', presentedCourierUserId: driver.userId,
     })).status).toBe(201);
     const haul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL' && l.status === 'READY')!;
     expect((await post(admin, `admin/logistics/legs/${haul.id}/depart`, {})).status).toBe(201);

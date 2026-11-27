@@ -134,13 +134,15 @@ async function pickupPinFor(legId: string) {
 }
 
 /** A driver takes a courier leg from offer through to a verified handoff. Verbatim from shipping-driver.integration.spec.ts. */
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+  // self-complete its handoff — staff submit on their behalf instead.
   expect(
-    (await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' })).status,
+    (await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver', presentedCourierUserId: driver.userId })).status,
   ).toBe(201);
 }
 

@@ -252,7 +252,9 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const pin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id }, select: { handoffPin: true } })).handoffPin!;
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Terminal desk', presentedCourierUserId: courier.userId })).status).toBe(201);
     expect((await legRow(lineHaul.id)).status).toBe('READY');
 
     // BMPL-196: an ops account with logistics.operate and NO driver profile
@@ -419,8 +421,10 @@ describe('MDF-926 item 3: a release-to-courier refused for the wrong courier lea
     expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const firstMileHandoffPin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id }, select: { handoffPin: true } })).handoffPin!;
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
     expect(
-      (await post(courierFirstMile.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMileHandoffPin, receivedByName: 'Terminal desk' })).status,
+      (await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: firstMileHandoffPin, receivedByName: 'Terminal desk', presentedCourierUserId: courierFirstMile.userId })).status,
     ).toBe(201);
     for (const haul of lineHauls) {
       await flyLineHaul(haul.id);

@@ -172,10 +172,10 @@ async function flyLineHaul(legId: string) {
 }
 
 /** A driver takes a courier leg from offer through to a verified handoff. */
-async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+async function driveCourierLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  const kind = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true } })).kind;
-  if (kind === 'LAST_MILE') {
+  const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true, destinationHubId: true } });
+  if (leg.kind === 'LAST_MILE') {
     // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
     // leg is terminal-held, so self-submit pickup is refused outright — only
     // staff release (admin/logistics/legs/:id/release-to-courier) may move
@@ -186,9 +186,14 @@ async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   }
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Receiver',
-  });
+  // EDW-P4: a leg ending at a hub (FIRST_MILE here) must be received by
+  // staff, not confirmed by the courier themselves. LAST_MILE/DIRECT end at
+  // a customer door (no destinationHubId) and keep the courier's own
+  // self-submit.
+  const r =
+    leg.destinationHubId != null
+      ? await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver', presentedCourierUserId: driver.userId })
+      : await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' });
   expect(r.status).toBe(201);
   return r.body;
 }
@@ -352,7 +357,7 @@ describe('the full door-to-door journey', () => {
 
 describe('every service type, end to end', () => {
   /** Walk whatever legs a shipment has, in order, by whoever operates them. */
-  async function runWholeJourney(driver: { cookies: string[] }, shipmentId: string) {
+  async function runWholeJourney(driver: { cookies: string[]; userId: string }, shipmentId: string) {
     // Re-read between legs: a last-mile leg has no driver until the line-haul
     // before it completes, so a list captured up front would be stale.
     for (let guard = 0; guard < 8; guard++) {
@@ -397,7 +402,7 @@ describe('every service type, end to end', () => {
     // No courier legs means nothing was offered to anybody.
     expect(await ctx.prisma.shipmentLegOffer.count({ where: { shipmentLeg: { shipmentId: s.id } } })).toBe(0);
 
-    const done = await runWholeJourney({ cookies: [] }, s.id);
+    const done = await runWholeJourney({ cookies: [], userId: '' }, s.id);
     expect(done.status).toBe('AWAITING_COLLECTION');
   });
 

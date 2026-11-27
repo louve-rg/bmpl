@@ -211,7 +211,11 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const { firstMile } = await journey(shipment.id);
     await driveToInProgress(courier, firstMile.id);
 
-    const r = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: '000000', receivedByName: 'Someone' });
+    // EDW-P4: the courier's own direct call at a hub-destined leg is refused
+    // before the pin is even checked, so this must go through staff (naming
+    // the real assigned courier) to actually exercise the wrong-code/counter
+    // path this test is about.
+    const r = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: '000000', receivedByName: 'Someone', presentedCourierUserId: courier.userId });
     expect(r.status).toBe(400);
 
     const after = await legRow(firstMile.id);
@@ -248,8 +252,10 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect(after.status).toBe('IN_PROGRESS');
     expect(after.handoffPinAttempts).toBe(1);
 
-    // No side effect on the real code: the assigned courier still completes it.
-    const ok = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver' });
+    // No side effect on the real code: the assigned courier still completes
+    // it — EDW-P4: through staff, since the courier's own direct call at a
+    // hub-destined leg is refused.
+    const ok = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver', presentedCourierUserId: courier.userId });
     expect(ok.status).toBe(201);
   });
 
@@ -287,7 +293,9 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     await driveToInProgress(courier, firstMile.id);
     const pin = await pinOf(firstMile.id);
 
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver', presentedCourierUserId: courier.userId })).status).toBe(201);
     const done = await legRow(firstMile.id);
     expect(done.status).toBe('COMPLETED');
 
@@ -317,7 +325,11 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const foreignPin = await pinOf(legB.id);
     expect(foreignPin).not.toBe(await pinOf(legA.id));
 
-    const r = await post(courierA.cookies, `driver/shipping-jobs/${legA.id}/handoff`, { pin: foreignPin, receivedByName: 'Receiver' });
+    // EDW-P4: through staff, naming courierA (the real assignee) — the
+    // courier's own direct call at a hub-destined leg would be refused
+    // before the pin is even looked at, which would prove nothing about the
+    // foreign-pin check this test is about.
+    const r = await post(admin, `admin/logistics/legs/${legA.id}/handoff`, { pin: foreignPin, receivedByName: 'Receiver', presentedCourierUserId: courierA.userId });
     expect(r.status).toBe(400);
 
     const after = await legRow(legA.id);
@@ -336,7 +348,9 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
 
     // Get the parcel to the terminal legitimately, then move the transport leg.
     await driveToInProgress(courier, firstMile.id);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: await pinOf(firstMile.id), receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: await pinOf(firstMile.id), receivedByName: 'Terminal desk', presentedCourierUserId: courier.userId })).status).toBe(201);
     expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
     expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`, {})).status).toBe(201);
     expect((await legRow(lineHaul.id)).status).toBe('IN_PROGRESS');
@@ -359,7 +373,9 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const lineHaul = lineHauls[0]!;
 
     await driveToInProgress(courier, firstMile.id);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: await pinOf(firstMile.id), receivedByName: 'Terminal desk' })).status).toBe(201);
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin: await pinOf(firstMile.id), receivedByName: 'Terminal desk', presentedCourierUserId: courier.userId })).status).toBe(201);
     expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
     expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`, {})).status).toBe(201);
 
@@ -395,7 +411,9 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
 
     const pin = await pinOf(firstMile.id);
-    const r = await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver' });
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    const r = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver', presentedCourierUserId: courierB.userId });
     expect(r.status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
   });
@@ -501,7 +519,9 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
 
     // And B, the courier the leg actually belongs to now, still succeeds —
     // the ousted attempts above changed nothing about B's own path.
-    const r = await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver' });
+    // EDW-P4: through staff — the courier's own direct call at a
+    // hub-destined leg is refused.
+    const r = await post(admin, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver', presentedCourierUserId: courierB.userId });
     expect(r.status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
   });

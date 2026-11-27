@@ -147,10 +147,10 @@ async function flyLineHaul(legId: string) {
   expect(r.status).toBe(201);
 }
 
-async function driveLeg(driver: { cookies: string[] }, legId: string) {
+async function driveLeg(driver: { cookies: string[]; userId: string }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  const kind = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true } })).kind;
-  if (kind === 'LAST_MILE') {
+  const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true, destinationHubId: true } });
+  if (leg.kind === 'LAST_MILE') {
     // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
     // leg is terminal-held, so self-submit pickup is refused outright — only
     // staff release (admin/logistics/legs/:id/release-to-courier) may move
@@ -161,9 +161,14 @@ async function driveLeg(driver: { cookies: string[] }, legId: string) {
   }
   await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`);
   await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`);
-  const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
-    pin: await pinOf(legId), receivedByName: 'Receiver',
-  });
+  // EDW-P4: a leg ending at a hub (FIRST_MILE here) must be received by
+  // staff, not confirmed by the courier themselves. LAST_MILE/DIRECT end at
+  // a customer door (no destinationHubId) and keep the courier's own
+  // self-submit.
+  const r =
+    leg.destinationHubId != null
+      ? await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver', presentedCourierUserId: driver.userId })
+      : await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' });
   expect(r.status).toBe(201);
 }
 

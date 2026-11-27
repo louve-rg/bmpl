@@ -165,8 +165,8 @@ async function flyLineHaul(legId: string) {
   expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Counter staff' })).status).toBe(201);
 }
 
-async function driveLeg(cookies: string[], legId: string) {
-  expect((await post(cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+async function driveLeg(driver: { cookies: string[]; userId: string }, legId: string) {
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
   const kind = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { kind: true } })).kind;
   if (kind === 'LAST_MILE') {
     // TERM-LAST-MILE-PICKUP-BYPASSES-THE-TERMINAL-RELEASE-GATE: a LAST_MILE
@@ -175,11 +175,19 @@ async function driveLeg(cookies: string[], legId: string) {
     // it to PICKUP_CONFIRMED.
     expect((await post(admin, `admin/logistics/legs/${legId}/release-to-courier`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   } else {
-    expect((await post(cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   }
-  expect((await post(cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
-  expect((await post(cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
-  expect((await post(cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' })).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  if (kind === 'LAST_MILE') {
+    // A LAST_MILE leg ends at the recipient's door, not a hub — self-submit
+    // handoff is unaffected by EDW-P4's terminal-only-receipt guard.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' })).status).toBe(201);
+  } else {
+    // EDW-P4: this FIRST_MILE leg ends at a hub, so the courier cannot
+    // self-complete its handoff — staff submit on their behalf instead.
+    expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver', presentedCourierUserId: driver.userId })).status).toBe(201);
+  }
 }
 
 /** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
@@ -230,7 +238,7 @@ describe('shipping — the sender is never the courier', () => {
 
     // Get the parcel to the destination terminal legitimately.
     expect((await ensureOffered(firstMile.id)).assignedDriverProfileId).toBe(courier.driverProfileId);
-    await driveLeg(courier.cookies, firstMile.id);
+    await driveLeg(courier, firstMile.id);
     for (const lh of lineHauls) await flyLineHaul(lh.id);
 
     // The last mile is in BELIZE, where the only online driver is the sender.
@@ -274,7 +282,7 @@ describe('shipping — the sender is never the courier', () => {
     expect(leg.assignedDriverProfileId).toBe(courier.driverProfileId);
     expect(leg.assignedDriverProfileId).not.toBe(sender.ownDriverProfileId);
 
-    await driveLeg(courier.cookies, firstMile.id);
+    await driveLeg(courier, firstMile.id);
     const done = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id } });
     expect(done.courierStatus).toBe('DELIVERED');
   });
@@ -287,14 +295,14 @@ describe('shipping — the sender is never the courier', () => {
     const { firstMile, lineHauls, lastMile } = await journey(shipment.id);
 
     expect((await ensureOffered(firstMile.id)).assignedDriverProfileId).toBe(firstCourier.driverProfileId);
-    await driveLeg(firstCourier.cookies, firstMile.id);
+    await driveLeg(firstCourier, firstMile.id);
     for (const lh of lineHauls) await flyLineHaul(lh.id);
 
     const leg = await ensureOffered(lastMile.id);
     expect(leg.assignedDriverProfileId).toBe(lastCourier.driverProfileId);
     expect(leg.assignedDriverProfileId).not.toBe(sender.ownDriverProfileId);
 
-    await driveLeg(lastCourier.cookies, lastMile.id);
+    await driveLeg(lastCourier, lastMile.id);
     const done = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lastMile.id } });
     expect(done.courierStatus).toBe('DELIVERED');
   });
