@@ -74,6 +74,15 @@ const envSchema = z.object({
   // In test, throttling is skipped unless this is set (keeps the suite deterministic).
   THROTTLE_TEST_ENABLED: boolFromString(false),
 
+  // EDW-P2 (MDF-1173): the terminal lookup-by-code endpoint's OWN per-caller
+  // limit. Independent of THROTTLE_* above (per-IP, shared by every route)
+  // and of ShipmentLeg.handoffPinAttempts (per-leg, and no leg is identified
+  // yet when this limit matters) — a lookup that returns no match or an
+  // ambiguous match burns nothing on any leg, so this is the only thing that
+  // can slow down someone trying codes against a terminal's hub scope.
+  TERMINAL_LOOKUP_RATE_LIMIT: z.coerce.number().int().default(20),
+  TERMINAL_LOOKUP_RATE_WINDOW_SECONDS: z.coerce.number().int().default(60),
+
   NEXT_PUBLIC_SITE_URL: urlWithDefault('http://localhost:3000'),
   ADMIN_SITE_URL: urlWithDefault('http://localhost:3001'),
 

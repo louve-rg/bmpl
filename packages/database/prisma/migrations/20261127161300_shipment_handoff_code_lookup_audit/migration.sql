@@ -1,0 +1,24 @@
+-- EDW-P2 (MDF-1173): the "lead with the code" terminal lookup had no audit
+-- action of its own. Every other place staff learn or check a handoff/pickup
+-- code writes a record (SHIPMENT_HANDOFF_PIN_REVEALED, DELIVERY_PINS_REVEALED,
+-- SHIPMENT_LEG_HANDOFF_PIN_FAILED); this lookup is the one surface that
+-- identifies a parcel from a bare code with no leg known yet, and it is a
+-- pure read (no custody event, no state change on a hit or a miss) — so an
+-- audit row is the ONLY trace a lookup, successful or not, ever leaves.
+--
+-- NON-NEGOTIABLE: same discipline as every PIN-adjacent audit action already
+-- in this enum — the row this value backs must NEVER carry the submitted
+-- code, in newValue, previousValue, reason or anywhere else. Only the actor,
+-- the hubs searched and the outcome shape (miss / candidate count / refused
+-- as ambiguous).
+--
+-- ADD ONLY: nothing in this migration references the new value — Postgres
+-- refuses a transaction that both adds an enum member and uses it (see
+-- packages/database/CLAUDE.md §2). The code that writes this value ships in
+-- the same PR but runs only after this migration has committed.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_HANDOFF_CODE_LOOKUP';

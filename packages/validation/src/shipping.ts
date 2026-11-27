@@ -630,6 +630,22 @@ export const unlockShipmentCollectionSchema = z.object({
 });
 export type UnlockShipmentCollectionInput = z.infer<typeof unlockShipmentCollectionSchema>;
 
+/**
+ * EDW-P2 (MDF-1173): the "lead with the code" lookup — a terminal clerk has
+ * a courier standing at the counter holding a code and nothing else (no
+ * reference, no shipment id). Same shape check as `legHandoffSchema`'s own
+ * `pin` field — client and server both validate the code's shape, per the
+ * owner's ruling, so a malformed code is rejected before it ever reaches the
+ * lookup and burns no attempt against anything.
+ */
+export const legLookupByCodeSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Enter the handoff code.'),
+});
+export type LegLookupByCodeInput = z.infer<typeof legLookupByCodeSchema>;
+
 /* ------------------------------------------- carrier organizations (137) */
 
 /**

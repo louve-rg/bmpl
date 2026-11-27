@@ -364,6 +364,13 @@ export const AUDIT_ACTIONS = [
   // Mirrors the shipment side's SHIPMENT_HANDOFF_PIN_REVEALED — records the
   // actor, the delivery, and the fact of the reveal, never the PIN itself.
   'DELIVERY_PINS_REVEALED',
+  // ---- Terminal lookup-by-code (EDW-P2 / MDF-1173) ----
+  // The "lead with the code" lookup: identifying a parcel by its handoff
+  // code alone, before any leg is known. Zero state change on a hit or a
+  // miss, so this audit row is the only trace the attempt ever leaves.
+  // Never carries the submitted code itself — only the actor, the hubs
+  // searched and the outcome shape.
+  'SHIPMENT_HANDOFF_CODE_LOOKUP',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
