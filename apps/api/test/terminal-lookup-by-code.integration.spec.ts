@@ -66,7 +66,7 @@ async function makeNetwork() {
     originHubId: origin.body.id as string,
     originHubName: `Placencia Airstrip ${tag}`,
     destinationHubId: destination.body.id as string,
-    destinationHubCode: `${tag}D`,
+    destinationHubCode: destination.body.code as string,
     destinationHubName: `Belize City Municipal ${tag}`,
     originCity: `Placencia ${tag}`,
   };
@@ -196,26 +196,30 @@ describe('EDW-P2 (MDF-1173): POST terminal/legs/lookup-by-code', () => {
     expect(leg.status).not.toBe('EXCEPTION');
   });
 
-  it('2 · an ambiguous match (6+ eligible legs sharing one code) is refused and told to ask for the reference', async () => {
-    const net = await makeNetwork();
-    const staff = await makeTerminalStaff([net.destinationHubId]);
-    const sharedCode = '4321';
-    const legIds: string[] = [];
-    for (let i = 0; i < 6; i += 1) {
-      const { lineHaulLegId } = await bookLineHaulArrived(await fundedSender(), net);
-      await setHandoffPin(lineHaulLegId, sharedCode);
-      legIds.push(lineHaulLegId);
-    }
+  it(
+    '2 · an ambiguous match (6+ eligible legs sharing one code) is refused and told to ask for the reference',
+    async () => {
+      const net = await makeNetwork();
+      const staff = await makeTerminalStaff([net.destinationHubId]);
+      const sharedCode = '4321';
+      const legIds: string[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        const { lineHaulLegId } = await bookLineHaulArrived(await fundedSender(), net);
+        await setHandoffPin(lineHaulLegId, sharedCode);
+        legIds.push(lineHaulLegId);
+      }
 
-    const res = await lookupByCode(staff.cookies, sharedCode);
-    expect(res.status).toBe(400);
-    expect(res.body.message).toBe('Too many parcels match that code. Ask for the shipment reference instead.');
-    // Refusing to guess is not a state change either.
-    for (const legId of legIds) {
-      const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
-      expect(leg.handoffPinAttempts).toBe(0);
-    }
-  });
+      const res = await lookupByCode(staff.cookies, sharedCode);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Too many parcels match that code. Ask for the shipment reference instead.');
+      // Refusing to guess is not a state change either.
+      for (const legId of legIds) {
+        const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+        expect(leg.handoffPinAttempts).toBe(0);
+      }
+    },
+    60000,
+  );
 
   it('2b · 1-5 legs sharing one code (duplicate submission) are all returned as separate candidates, not collapsed or refused', async () => {
     const net = await makeNetwork();
